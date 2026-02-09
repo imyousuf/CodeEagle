@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% import "macros/forms.html" as forms %}
+
+{% block title %}User Dashboard{% endblock %}
+
+{% block head %}
+    {{ super() }}
+    <link rel="stylesheet" href="css/dashboard.css">
+{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <h1>Welcome, {{ user.name }}</h1>
+
+    {% include "partials/sidebar.html" %}
+
+    <main>
+        {% for item in items %}
+            <div class="item">
+                <span>{{ item.title }}</span>
+                {% if item.active %}
+                    <span class="badge">Active</span>
+                {% endif %}
+            </div>
+        {% endfor %}
+
+        {{ forms.render_form(form) }}
+
+        {% include "partials/footer.html" %}
+    </main>
+</div>
+{% endblock %}

@@ -1,0 +1,213 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/imyousuf/CodeEagle/internal/agents"
+	"github.com/imyousuf/CodeEagle/internal/config"
+	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
+	"github.com/imyousuf/CodeEagle/pkg/llm"
+
+	// Register LLM providers so their init() functions run.
+	_ "github.com/imyousuf/CodeEagle/internal/llm"
+)
+
+func newAgentCmd() *cobra.Command {
+	agentCmd := &cobra.Command{
+		Use:   "agent",
+		Short: "Interact with AI agents (plan, design, review)",
+		Long: `Interact with AI agents grounded in the codebase knowledge graph.
+
+Available agents:
+  plan     Planning agent for impact analysis, dependency mapping, and scope estimation
+  design   Design agent for architecture review and pattern recognition
+  review   Code review agent for diff review and convention checking`,
+	}
+
+	agentCmd.AddCommand(newAgentPlanCmd())
+	agentCmd.AddCommand(newAgentDesignCmd())
+	agentCmd.AddCommand(newAgentReviewCmd())
+
+	return agentCmd
+}
+
+// createLLMClient creates an LLM client from the config and environment.
+func createLLMClient(cfg *config.Config) (llm.Client, error) {
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+
+	provider := cfg.Agents.LLMProvider
+	if provider == "" {
+		provider = "anthropic"
+	}
+
+	model := cfg.Agents.Model
+
+	project := cfg.Agents.Project
+	if project == "" {
+		project = os.Getenv("GOOGLE_CLOUD_PROJECT")
+	}
+
+	location := cfg.Agents.Location
+
+	client, err := llm.NewClient(llm.Config{
+		Provider: provider,
+		Model:    model,
+		APIKey:   apiKey,
+		Project:  project,
+		Location: location,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create LLM client: %w", err)
+	}
+
+	return client, nil
+}
+
+func newAgentPlanCmd() *cobra.Command {
+	var dbPath string
+
+	cmd := &cobra.Command{
+		Use:   "plan [query]",
+		Short: "Ask the planning agent a question",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			client, err := createLLMClient(cfg)
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+
+			store, err := embedded.NewStore(dbPath)
+			if err != nil {
+				return fmt.Errorf("open graph store: %w", err)
+			}
+			defer store.Close()
+
+			ctxBuilder := agents.NewContextBuilder(store)
+			planner := agents.NewPlanner(client, ctxBuilder)
+
+			query := strings.Join(args, " ")
+			resp, err := planner.Ask(context.Background(), query)
+			if err != nil {
+				return fmt.Errorf("planner query failed: %w", err)
+			}
+
+			fmt.Fprintln(cmd.OutOrStdout(), resp)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&dbPath, "db-path", ".codeeagle/graph.db", "path for the graph database")
+	return cmd
+}
+
+func newAgentDesignCmd() *cobra.Command {
+	var dbPath string
+
+	cmd := &cobra.Command{
+		Use:   "design [query]",
+		Short: "Ask the design agent a question",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			client, err := createLLMClient(cfg)
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+
+			store, err := embedded.NewStore(dbPath)
+			if err != nil {
+				return fmt.Errorf("open graph store: %w", err)
+			}
+			defer store.Close()
+
+			ctxBuilder := agents.NewContextBuilder(store)
+			designer := agents.NewDesigner(client, ctxBuilder)
+
+			query := strings.Join(args, " ")
+			resp, err := designer.Ask(context.Background(), query)
+			if err != nil {
+				return fmt.Errorf("designer query failed: %w", err)
+			}
+
+			fmt.Fprintln(cmd.OutOrStdout(), resp)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&dbPath, "db-path", ".codeeagle/graph.db", "path for the graph database")
+	return cmd
+}
+
+func newAgentReviewCmd() *cobra.Command {
+	var dbPath string
+
+	cmd := &cobra.Command{
+		Use:   "review [query]",
+		Short: "Ask the code review agent a question",
+		Args:  cobra.MinimumNArgs(0),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			client, err := createLLMClient(cfg)
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+
+			store, err := embedded.NewStore(dbPath)
+			if err != nil {
+				return fmt.Errorf("open graph store: %w", err)
+			}
+			defer store.Close()
+
+			ctxBuilder := agents.NewContextBuilder(store)
+			reviewer := agents.NewReviewer(client, ctxBuilder)
+
+			diff, _ := cmd.Flags().GetString("diff")
+			if diff != "" {
+				resp, err := reviewer.ReviewDiff(context.Background(), diff)
+				if err != nil {
+					return fmt.Errorf("review diff failed: %w", err)
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), resp)
+				return nil
+			}
+
+			if len(args) == 0 {
+				return fmt.Errorf("provide a query or use --diff <ref>")
+			}
+
+			query := strings.Join(args, " ")
+			resp, err := reviewer.Ask(context.Background(), query)
+			if err != nil {
+				return fmt.Errorf("reviewer query failed: %w", err)
+			}
+
+			fmt.Fprintln(cmd.OutOrStdout(), resp)
+			return nil
+		},
+	}
+
+	cmd.Flags().String("diff", "", "review changes in a git diff/PR reference")
+	cmd.Flags().StringVar(&dbPath, "db-path", ".codeeagle/graph.db", "path for the graph database")
+	return cmd
+}
