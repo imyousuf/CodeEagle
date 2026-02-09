@@ -14,13 +14,21 @@ import (
 )
 
 func newStatusCmd() *cobra.Command {
-	var dbPath string
-
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show indexing status and graph stats",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := embedded.NewStore(dbPath)
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			resolvedDBPath := cfg.ResolveDBPath(dbPath)
+			if resolvedDBPath == "" {
+				return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
+			}
+
+			store, err := embedded.NewStore(resolvedDBPath)
 			if err != nil {
 				return fmt.Errorf("open graph store: %w", err)
 			}
@@ -57,8 +65,7 @@ func newStatusCmd() *cobra.Command {
 			}
 
 			// Show git branch info for configured repositories.
-			cfg, cfgErr := config.Load()
-			if cfgErr == nil && len(cfg.Repositories) > 0 {
+			if len(cfg.Repositories) > 0 {
 				fmt.Fprintf(out, "  Git Status:\n")
 				for _, repo := range cfg.Repositories {
 					info, err := gitutil.GetBranchInfo(repo.Path)
@@ -88,8 +95,6 @@ func newStatusCmd() *cobra.Command {
 			return nil
 		},
 	}
-
-	cmd.Flags().StringVar(&dbPath, "db-path", ".codeeagle/graph.db", "path for the graph database")
 
 	return cmd
 }

@@ -30,7 +30,6 @@ import (
 )
 
 func newWatchCmd() *cobra.Command {
-	var dbPath string
 	var pidFile string
 	var logFile string
 
@@ -44,6 +43,11 @@ func newWatchCmd() *cobra.Command {
 			}
 			if err := cfg.Validate(); err != nil {
 				return fmt.Errorf("invalid config: %w", err)
+			}
+
+			resolvedDBPath := cfg.ResolveDBPath(dbPath)
+			if resolvedDBPath == "" {
+				return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
 			}
 
 			// Set up log file output if requested.
@@ -73,7 +77,7 @@ func newWatchCmd() *cobra.Command {
 			}
 
 			// Open graph store.
-			store, err := embedded.NewStore(dbPath)
+			store, err := embedded.NewStore(resolvedDBPath)
 			if err != nil {
 				return fmt.Errorf("open graph store: %w", err)
 			}
@@ -168,7 +172,7 @@ func newWatchCmd() *cobra.Command {
 					}
 				}
 			}
-			fmt.Fprintf(output, "Graph database: %s\n", dbPath)
+			fmt.Fprintf(output, "Graph database: %s\n", resolvedDBPath)
 
 			if err := idx.Start(ctx); err != nil {
 				return fmt.Errorf("indexer: %w", err)
@@ -187,7 +191,6 @@ func newWatchCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&dbPath, "db-path", ".codeeagle/graph.db", "path for the graph database")
 	cmd.Flags().StringVar(&pidFile, "pid-file", "", "write process PID to this file")
 	cmd.Flags().StringVar(&logFile, "log-file", "", "redirect all output to this file")
 

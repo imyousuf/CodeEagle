@@ -34,7 +34,7 @@ and whether the connection was successful.`,
 			if err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "\nFailed to create LLM client: %v\n", err)
 				fmt.Fprintln(cmd.ErrOrStderr(), "\nDebugging tips:")
-				fmt.Fprintln(cmd.ErrOrStderr(), "  - Check that your LLM provider is correctly configured in .codeeagle.yaml")
+				fmt.Fprintln(cmd.ErrOrStderr(), "  - Check that your LLM provider is correctly configured in .CodeEagle/config.yaml")
 				fmt.Fprintln(cmd.ErrOrStderr(), "  - For Anthropic: ensure ANTHROPIC_API_KEY environment variable is set")
 				fmt.Fprintln(cmd.ErrOrStderr(), "  - For Vertex AI: ensure GOOGLE_APPLICATION_CREDENTIALS is set or credentials_file is configured")
 				fmt.Fprintln(cmd.ErrOrStderr(), "  - For Vertex AI: ensure project and location are set in the config")

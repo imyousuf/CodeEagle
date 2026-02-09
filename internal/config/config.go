@@ -5,16 +5,19 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/viper"
 )
 
 const (
-	// DefaultConfigFile is the default configuration file name (without extension).
-	DefaultConfigFile = ".codeeagle"
-	// DefaultConfigType is the default configuration file type.
-	DefaultConfigType = "yaml"
+	// ProjectDirName is the per-project configuration directory name.
+	ProjectDirName = ".CodeEagle"
+	// ProjectConfigFile is the config filename inside the project dir.
+	ProjectConfigFile = "config.yaml"
+	// DefaultDBDir is the default database directory name inside the project dir.
+	DefaultDBDir = "graph.db"
 )
 
 // Config holds all configuration for CodeEagle.
@@ -31,6 +34,8 @@ type Config struct {
 	Graph GraphConfig `mapstructure:"graph"`
 	// Agents contains AI agent configuration.
 	Agents AgentsConfig `mapstructure:"agents"`
+	// ConfigDir is the resolved .CodeEagle directory path (not persisted in YAML).
+	ConfigDir string `mapstructure:"-"`
 }
 
 // ProjectConfig holds project metadata.
@@ -59,6 +64,8 @@ type GraphConfig struct {
 	Storage string `mapstructure:"storage"`
 	// Neo4jURI is the Neo4j connection URI (used when Storage is "neo4j").
 	Neo4jURI string `mapstructure:"neo4j_uri"`
+	// DBPath is the path to the graph database directory.
+	DBPath string `mapstructure:"db_path"`
 }
 
 // AgentsConfig holds AI agent configuration.
@@ -77,46 +84,134 @@ type AgentsConfig struct {
 	CredentialsFile string `mapstructure:"credentials_file"`
 }
 
+// DiscoverProjectDir walks up from startDir looking for a .CodeEagle/ directory.
+// Returns the full path to the .CodeEagle/ directory if found, or empty string if not.
+func DiscoverProjectDir(startDir string) string {
+	dir := startDir
+	for {
+		candidate := filepath.Join(dir, ProjectDirName)
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break // reached filesystem root
+		}
+		dir = parent
+	}
+	return ""
+}
+
+// ResolveDBPath determines the graph database path using this priority:
+//  1. flagValue (CLI --db-path flag) if non-empty
+//  2. graph.db_path from config YAML if non-empty
+//  3. <ConfigDir>/graph.db if ConfigDir is set
+//  4. empty string (caller should handle)
+func (c *Config) ResolveDBPath(flagValue string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if c.Graph.DBPath != "" {
+		return c.Graph.DBPath
+	}
+	if c.ConfigDir != "" {
+		return filepath.Join(c.ConfigDir, DefaultDBDir)
+	}
+	return ""
+}
+
 // Load loads configuration from file, environment variables, and defaults.
+// Search order:
+//  1. --config flag (explicit path via global viper)
+//  2. --project-name flag -> registry lookup
+//  3. Walk up from CWD for .CodeEagle/config.yaml
+//  4. Registry lookup by CWD path
 func Load() (*Config, error) {
 	v := viper.New()
-
-	// Set defaults
 	setDefaults(v)
-
-	// Check if a specific config file was set via CLI flag (stored in global viper)
-	globalViper := viper.GetViper()
-	if configFile := globalViper.GetString("config_file"); configFile != "" {
-		v.SetConfigFile(configFile)
-	} else {
-		// Config file settings for default paths
-		v.SetConfigName(DefaultConfigFile)
-		v.SetConfigType(DefaultConfigType)
-
-		// Look for config in current directory
-		v.AddConfigPath(".")
-	}
 
 	// Environment variables
 	v.SetEnvPrefix("CODEEAGLE")
 	v.AutomaticEnv()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	// Read config file (ignore if not found)
+	var configDir string
+
+	// 1. Check --config flag
+	globalViper := viper.GetViper()
+	if configFile := globalViper.GetString("config_file"); configFile != "" {
+		v.SetConfigFile(configFile)
+		// Derive configDir from the config file's directory if it's inside a .CodeEagle dir.
+		cfgParent := filepath.Dir(configFile)
+		if filepath.Base(cfgParent) == ProjectDirName {
+			configDir = cfgParent
+		}
+	} else {
+		// 2. Check --project-name flag -> registry lookup
+		if projectName := globalViper.GetString("project_name"); projectName != "" {
+			entries := ListProjects()
+			for _, entry := range entries {
+				if entry.Name == projectName {
+					configDir = entry.ConfigDir
+					configFile := filepath.Join(configDir, ProjectConfigFile)
+					if _, err := os.Stat(configFile); err == nil {
+						v.SetConfigFile(configFile)
+					}
+					break
+				}
+			}
+		}
+
+		// 3. Walk up from CWD for .CodeEagle/config.yaml
+		if v.ConfigFileUsed() == "" {
+			cwd, err := os.Getwd()
+			if err == nil {
+				if projDir := DiscoverProjectDir(cwd); projDir != "" {
+					configDir = projDir
+					configFile := filepath.Join(projDir, ProjectConfigFile)
+					if _, err := os.Stat(configFile); err == nil {
+						v.SetConfigFile(configFile)
+					}
+				}
+			}
+		}
+	}
+
+	// Read config file
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			return nil, fmt.Errorf("error reading config file: %w", err)
 		}
+		// 4. If still no config found, try registry lookup by CWD path
+		if configDir == "" {
+			cwd, err := os.Getwd()
+			if err == nil {
+				if entry, ok := LookupProject(cwd); ok {
+					configDir = entry.ConfigDir
+					configFile := filepath.Join(configDir, ProjectConfigFile)
+					if _, err := os.Stat(configFile); err == nil {
+						v.SetConfigFile(configFile)
+						if err := v.ReadInConfig(); err != nil {
+							return nil, fmt.Errorf("error reading config file: %w", err)
+						}
+					}
+				}
+			}
+		}
 	}
 
-	// Load .env file from the current working directory, if it exists.
-	loadEnvFile(".env")
+	// Load .env from the discovered .CodeEagle/ directory.
+	if configDir != "" {
+		loadEnvFile(filepath.Join(configDir, ".env"))
+	}
 
 	// Unmarshal into struct
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("error parsing config: %w", err)
 	}
+
+	cfg.ConfigDir = configDir
 
 	return &cfg, nil
 }

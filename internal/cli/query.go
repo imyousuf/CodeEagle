@@ -6,13 +6,13 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 )
 
 func newQueryCmd() *cobra.Command {
 	var (
-		dbPath      string
 		nodeType    string
 		namePattern string
 		pkg         string
@@ -24,7 +24,17 @@ func newQueryCmd() *cobra.Command {
 		Use:   "query",
 		Short: "Query the knowledge graph directly",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := embedded.NewStore(dbPath)
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			resolvedDBPath := cfg.ResolveDBPath(dbPath)
+			if resolvedDBPath == "" {
+				return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
+			}
+
+			store, err := embedded.NewStore(resolvedDBPath)
 			if err != nil {
 				return fmt.Errorf("open graph store: %w", err)
 			}
@@ -67,7 +77,6 @@ func newQueryCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&dbPath, "db-path", ".codeeagle/graph.db", "path for the graph database")
 	cmd.Flags().StringVar(&nodeType, "type", "", "filter by node type (e.g. Function, Struct, Interface)")
 	cmd.Flags().StringVar(&namePattern, "name", "", "filter by name pattern (glob)")
 	cmd.Flags().StringVar(&pkg, "package", "", "filter by package name")

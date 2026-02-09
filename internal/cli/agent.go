@@ -72,8 +72,6 @@ func createLLMClient(cfg *config.Config) (llm.Client, error) {
 }
 
 func newAgentPlanCmd() *cobra.Command {
-	var dbPath string
-
 	cmd := &cobra.Command{
 		Use:   "plan [query]",
 		Short: "Ask the planning agent a question",
@@ -84,13 +82,18 @@ func newAgentPlanCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
+			resolvedDBPath := cfg.ResolveDBPath(dbPath)
+			if resolvedDBPath == "" {
+				return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
+			}
+
 			client, err := createLLMClient(cfg)
 			if err != nil {
 				return err
 			}
 			defer client.Close()
 
-			store, err := embedded.NewStore(dbPath)
+			store, err := embedded.NewStore(resolvedDBPath)
 			if err != nil {
 				return fmt.Errorf("open graph store: %w", err)
 			}
@@ -115,13 +118,10 @@ func newAgentPlanCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&dbPath, "db-path", ".codeeagle/graph.db", "path for the graph database")
 	return cmd
 }
 
 func newAgentDesignCmd() *cobra.Command {
-	var dbPath string
-
 	cmd := &cobra.Command{
 		Use:   "design [query]",
 		Short: "Ask the design agent a question",
@@ -132,13 +132,18 @@ func newAgentDesignCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
+			resolvedDBPath := cfg.ResolveDBPath(dbPath)
+			if resolvedDBPath == "" {
+				return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
+			}
+
 			client, err := createLLMClient(cfg)
 			if err != nil {
 				return err
 			}
 			defer client.Close()
 
-			store, err := embedded.NewStore(dbPath)
+			store, err := embedded.NewStore(resolvedDBPath)
 			if err != nil {
 				return fmt.Errorf("open graph store: %w", err)
 			}
@@ -158,13 +163,10 @@ func newAgentDesignCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&dbPath, "db-path", ".codeeagle/graph.db", "path for the graph database")
 	return cmd
 }
 
 func newAgentReviewCmd() *cobra.Command {
-	var dbPath string
-
 	cmd := &cobra.Command{
 		Use:   "review [query]",
 		Short: "Ask the code review agent a question",
@@ -175,13 +177,18 @@ func newAgentReviewCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
+			resolvedDBPath := cfg.ResolveDBPath(dbPath)
+			if resolvedDBPath == "" {
+				return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
+			}
+
 			client, err := createLLMClient(cfg)
 			if err != nil {
 				return err
 			}
 			defer client.Close()
 
-			store, err := embedded.NewStore(dbPath)
+			store, err := embedded.NewStore(resolvedDBPath)
 			if err != nil {
 				return fmt.Errorf("open graph store: %w", err)
 			}
@@ -221,13 +228,10 @@ func newAgentReviewCmd() *cobra.Command {
 	}
 
 	cmd.Flags().String("diff", "", "review changes in a git diff/PR reference")
-	cmd.Flags().StringVar(&dbPath, "db-path", ".codeeagle/graph.db", "path for the graph database")
 	return cmd
 }
 
 func newAgentAskCmd() *cobra.Command {
-	var dbPath string
-
 	cmd := &cobra.Command{
 		Use:   "ask [query]",
 		Short: "Ask a question about the indexed codebase",
@@ -238,13 +242,18 @@ func newAgentAskCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
+			resolvedDBPath := cfg.ResolveDBPath(dbPath)
+			if resolvedDBPath == "" {
+				return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
+			}
+
 			client, err := createLLMClient(cfg)
 			if err != nil {
 				return err
 			}
 			defer client.Close()
 
-			store, err := embedded.NewStore(dbPath)
+			store, err := embedded.NewStore(resolvedDBPath)
 			if err != nil {
 				return fmt.Errorf("open graph store: %w", err)
 			}
@@ -269,6 +278,5 @@ func newAgentAskCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&dbPath, "db-path", ".codeeagle/graph.db", "path for the graph database")
 	return cmd
 }

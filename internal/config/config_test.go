@@ -7,8 +7,13 @@ import (
 )
 
 func TestLoadFromFile(t *testing.T) {
-	// Create a temp directory with a config file
+	// Create a temp directory with .CodeEagle/config.yaml
 	tmpDir := t.TempDir()
+	projectDir := filepath.Join(tmpDir, ProjectDirName)
+	if err := os.Mkdir(projectDir, 0755); err != nil {
+		t.Fatalf("failed to create .CodeEagle dir: %v", err)
+	}
+
 	configContent := `project:
   name: "test-project"
 
@@ -34,12 +39,12 @@ agents:
   llm_provider: anthropic
   model: claude-sonnet-4-5-20250929
 `
-	configPath := filepath.Join(tmpDir, ".codeeagle.yaml")
+	configPath := filepath.Join(projectDir, ProjectConfigFile)
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		t.Fatalf("failed to write test config: %v", err)
 	}
 
-	// Change to the temp directory so viper finds the config
+	// Change to the temp directory so Load() discovers .CodeEagle/config.yaml
 	origDir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("failed to get working directory: %v", err)
@@ -92,6 +97,9 @@ agents:
 	}
 	if cfg.Agents.Model != "claude-sonnet-4-5-20250929" {
 		t.Errorf("Agents.Model = %q, want %q", cfg.Agents.Model, "claude-sonnet-4-5-20250929")
+	}
+	if cfg.ConfigDir != projectDir {
+		t.Errorf("ConfigDir = %q, want %q", cfg.ConfigDir, projectDir)
 	}
 }
 
@@ -217,6 +225,142 @@ func TestValidate(t *testing.T) {
 				if err != nil {
 					t.Errorf("Validate() unexpected error: %v", err)
 				}
+			}
+		})
+	}
+}
+
+func TestDiscoverProjectDir(t *testing.T) {
+	// Create a hierarchy: tmpDir/sub1/sub2 with .CodeEagle/ at tmpDir level.
+	tmpDir := t.TempDir()
+	sub1 := filepath.Join(tmpDir, "sub1")
+	sub2 := filepath.Join(sub1, "sub2")
+	if err := os.MkdirAll(sub2, 0755); err != nil {
+		t.Fatalf("create subdirs: %v", err)
+	}
+	projectDir := filepath.Join(tmpDir, ProjectDirName)
+	if err := os.Mkdir(projectDir, 0755); err != nil {
+		t.Fatalf("create .CodeEagle: %v", err)
+	}
+
+	// Discover from sub2 should find the .CodeEagle at tmpDir.
+	got := DiscoverProjectDir(sub2)
+	if got != projectDir {
+		t.Errorf("DiscoverProjectDir(%q) = %q, want %q", sub2, got, projectDir)
+	}
+
+	// Discover from sub1 should also find it.
+	got = DiscoverProjectDir(sub1)
+	if got != projectDir {
+		t.Errorf("DiscoverProjectDir(%q) = %q, want %q", sub1, got, projectDir)
+	}
+
+	// Discover from the root itself should find it.
+	got = DiscoverProjectDir(tmpDir)
+	if got != projectDir {
+		t.Errorf("DiscoverProjectDir(%q) = %q, want %q", tmpDir, got, projectDir)
+	}
+
+	// Discover from a directory without .CodeEagle should return empty.
+	isolatedDir := t.TempDir()
+	got = DiscoverProjectDir(isolatedDir)
+	if got != "" {
+		t.Errorf("DiscoverProjectDir(%q) = %q, want empty", isolatedDir, got)
+	}
+}
+
+func TestLoadFromProjectDir(t *testing.T) {
+	// Create a project dir hierarchy with .CodeEagle/config.yaml.
+	tmpDir := t.TempDir()
+	projectDir := filepath.Join(tmpDir, ProjectDirName)
+	if err := os.Mkdir(projectDir, 0755); err != nil {
+		t.Fatalf("create .CodeEagle: %v", err)
+	}
+
+	configContent := `project:
+  name: "proj-dir-test"
+
+repositories:
+  - path: /tmp/repo1
+    type: single
+
+graph:
+  storage: embedded
+  db_path: /custom/db/path
+`
+	if err := os.WriteFile(filepath.Join(projectDir, ProjectConfigFile), []byte(configContent), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	// cd into a subdirectory
+	subDir := filepath.Join(tmpDir, "deep", "sub")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatalf("create subdirs: %v", err)
+	}
+
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	if err := os.Chdir(subDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Project.Name != "proj-dir-test" {
+		t.Errorf("Project.Name = %q, want %q", cfg.Project.Name, "proj-dir-test")
+	}
+	if cfg.ConfigDir != projectDir {
+		t.Errorf("ConfigDir = %q, want %q", cfg.ConfigDir, projectDir)
+	}
+	if cfg.Graph.DBPath != "/custom/db/path" {
+		t.Errorf("Graph.DBPath = %q, want %q", cfg.Graph.DBPath, "/custom/db/path")
+	}
+}
+
+func TestResolveDBPath(t *testing.T) {
+	tests := []struct {
+		name      string
+		cfg       Config
+		flagValue string
+		want      string
+	}{
+		{
+			name:      "flag takes priority",
+			cfg:       Config{Graph: GraphConfig{DBPath: "/yaml/path"}, ConfigDir: "/proj/.CodeEagle"},
+			flagValue: "/flag/path",
+			want:      "/flag/path",
+		},
+		{
+			name:      "yaml db_path second",
+			cfg:       Config{Graph: GraphConfig{DBPath: "/yaml/path"}, ConfigDir: "/proj/.CodeEagle"},
+			flagValue: "",
+			want:      "/yaml/path",
+		},
+		{
+			name:      "config dir default",
+			cfg:       Config{ConfigDir: "/proj/.CodeEagle"},
+			flagValue: "",
+			want:      "/proj/.CodeEagle/graph.db",
+		},
+		{
+			name:      "all empty",
+			cfg:       Config{},
+			flagValue: "",
+			want:      "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.cfg.ResolveDBPath(tt.flagValue)
+			if got != tt.want {
+				t.Errorf("ResolveDBPath(%q) = %q, want %q", tt.flagValue, got, tt.want)
 			}
 		})
 	}

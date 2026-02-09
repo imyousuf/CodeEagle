@@ -22,7 +22,7 @@ type ignoreRule struct {
 }
 
 // NewGitIgnoreMatcher creates a new matcher for the given repo roots.
-// excludePatterns are additional patterns from .codeeagle.yaml config.
+// excludePatterns are additional patterns from .CodeEagle/config.yaml.
 func NewGitIgnoreMatcher(repoRoots []string, excludePatterns []string) *GitIgnoreMatcher {
 	return &GitIgnoreMatcher{
 		repoRoots:       repoRoots,

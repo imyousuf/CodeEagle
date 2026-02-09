@@ -9,8 +9,10 @@ import (
 )
 
 var (
-	cfgFile string
-	verbose bool
+	cfgFile     string
+	verbose     bool
+	dbPath      string
+	projectName string
 )
 
 // rootCmd is the base command.
@@ -23,7 +25,7 @@ non-coding AI agents for planning, designing, and code review — all grounded
 in deep codebase understanding.
 
 Commands:
-  init       Initialize a .codeeagle.yaml config file
+  init       Initialize a .CodeEagle/ project directory
   watch      Start watching and building/updating the knowledge graph
   status     Show indexing status and graph stats
   agent      Interact with AI agents (plan, design, review)
@@ -42,8 +44,10 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	// Persistent flags (available to all subcommands)
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: .codeeagle.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: .CodeEagle/config.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+	rootCmd.PersistentFlags().StringVar(&dbPath, "db-path", "", "path for the graph database")
+	rootCmd.PersistentFlags().StringVarP(&projectName, "project-name", "p", "", "project name (looks up in ~/.codeeagle.conf registry)")
 
 	// Bind flags to viper
 	bindFlag := func(key, flag string) {
@@ -52,6 +56,7 @@ func init() {
 		}
 	}
 	bindFlag("config_file", "config")
+	bindFlag("project_name", "project-name")
 
 	// Add subcommands
 	rootCmd.AddCommand(newInitCmd())
