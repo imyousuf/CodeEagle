@@ -66,6 +66,7 @@ func init() {
 	rootCmd.AddCommand(newQueryCmd())
 	rootCmd.AddCommand(newMetricsCmd())
 	rootCmd.AddCommand(newLLMTestCmd())
+	rootCmd.AddCommand(newCompletionCmd())
 }
 
 // initConfig reads in config file and ENV variables if set.
