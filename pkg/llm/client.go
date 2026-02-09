@@ -35,6 +35,8 @@ type Config struct {
 	Project string
 	// Location is the GCP region (for Vertex AI, e.g. "us-central1").
 	Location string
+	// CredentialsFile is the path to a GCP service account credentials JSON file (for Vertex AI).
+	CredentialsFile string
 }
 
 // ProviderFactory is a function type for creating LLM clients.

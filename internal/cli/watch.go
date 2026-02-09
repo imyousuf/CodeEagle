@@ -113,11 +113,12 @@ func newWatchCmd() *cobra.Command {
 						project = os.Getenv("GOOGLE_CLOUD_PROJECT")
 					}
 					c, err := llm.NewClient(llm.Config{
-						Provider: provider,
-						Model:    cfg.Agents.Model,
-						APIKey:   apiKey,
-						Project:  project,
-						Location: cfg.Agents.Location,
+						Provider:        provider,
+						Model:           cfg.Agents.Model,
+						APIKey:          apiKey,
+						Project:         project,
+						Location:        cfg.Agents.Location,
+						CredentialsFile: cfg.Agents.CredentialsFile,
 					})
 					if err != nil {
 						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: auto-summarize enabled but LLM client creation failed: %v\n", err)

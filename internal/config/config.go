@@ -2,7 +2,9 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -71,6 +73,8 @@ type AgentsConfig struct {
 	Location string `mapstructure:"location"`
 	// AutoSummarize enables LLM-based summarization after indexing.
 	AutoSummarize bool `mapstructure:"auto_summarize"`
+	// CredentialsFile is the path to a GCP service account credentials JSON file (for Vertex AI).
+	CredentialsFile string `mapstructure:"credentials_file"`
 }
 
 // Load loads configuration from file, environment variables, and defaults.
@@ -104,6 +108,9 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("error reading config file: %w", err)
 		}
 	}
+
+	// Load .env file from the current working directory, if it exists.
+	loadEnvFile(".env")
 
 	// Unmarshal into struct
 	var cfg Config
@@ -168,4 +175,36 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("agents.llm_provider", "anthropic")
 	v.SetDefault("agents.model", "claude-sonnet-4-5-20250929")
 	v.SetDefault("agents.auto_summarize", false)
+}
+
+// loadEnvFile reads a .env file and sets environment variables from it.
+// Each line should be in KEY=VALUE format. Lines starting with # and blank lines are skipped.
+// Values are not overridden if the environment variable is already set.
+func loadEnvFile(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return // file doesn't exist or can't be read; silently skip
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		if key == "" {
+			continue
+		}
+		// Only set if not already present in the environment.
+		if os.Getenv(key) == "" {
+			os.Setenv(key, value)
+		}
+	}
 }

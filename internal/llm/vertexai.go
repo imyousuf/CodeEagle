@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"google.golang.org/genai"
 
@@ -39,6 +40,13 @@ func newVertexAIClient(cfg llm.Config) (llm.Client, error) {
 	location := cfg.Location
 	if location == "" {
 		location = defaultVertexAILocation
+	}
+
+	// Set credentials file if provided via config.
+	if cfg.CredentialsFile != "" {
+		if err := os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", cfg.CredentialsFile); err != nil {
+			return nil, fmt.Errorf("failed to set credentials: %w", err)
+		}
 	}
 
 	client, err := genai.NewClient(context.Background(), &genai.ClientConfig{

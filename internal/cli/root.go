@@ -60,6 +60,7 @@ func init() {
 	rootCmd.AddCommand(newAgentCmd())
 	rootCmd.AddCommand(newQueryCmd())
 	rootCmd.AddCommand(newMetricsCmd())
+	rootCmd.AddCommand(newLLMTestCmd())
 }
 
 // initConfig reads in config file and ENV variables if set.

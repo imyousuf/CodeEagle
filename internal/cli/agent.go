@@ -57,11 +57,12 @@ func createLLMClient(cfg *config.Config) (llm.Client, error) {
 	location := cfg.Agents.Location
 
 	client, err := llm.NewClient(llm.Config{
-		Provider: provider,
-		Model:    model,
-		APIKey:   apiKey,
-		Project:  project,
-		Location: location,
+		Provider:        provider,
+		Model:           model,
+		APIKey:          apiKey,
+		Project:         project,
+		Location:        location,
+		CredentialsFile: cfg.Agents.CredentialsFile,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create LLM client: %w", err)
