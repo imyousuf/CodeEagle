@@ -21,6 +21,20 @@ type Client interface {
 	Close() error
 }
 
+// ToolCapableClient extends Client with tool-use support.
+// Providers that support tool calling should implement this interface.
+type ToolCapableClient interface {
+	Client
+	// ChatWithTools sends messages to the LLM with tool definitions available.
+	ChatWithTools(ctx context.Context, systemPrompt string, messages []Message, tools []Tool) (*Response, error)
+}
+
+// SupportsTools returns true if the given client implements ToolCapableClient.
+func SupportsTools(c Client) bool {
+	_, ok := c.(ToolCapableClient)
+	return ok
+}
+
 // Config holds configuration for creating an LLM client.
 type Config struct {
 	// Provider specifies which LLM provider to use.

@@ -27,6 +27,7 @@ type claudeCLIClient struct {
 	model      string // normalized: "opus", "sonnet", "haiku", or "" (CLI default)
 	timeout    time.Duration
 	verbose    bool
+	configFile string // forwarded to MCP serve subprocess
 }
 
 // newClaudeCLIClient creates a new Claude CLI client.
@@ -103,6 +104,113 @@ func (c *claudeCLIClient) Model() string {
 // Provider returns the provider name.
 func (c *claudeCLIClient) Provider() string {
 	return "claude-cli"
+}
+
+// ChatWithTools invokes the Claude CLI with MCP configuration so that
+// Claude can autonomously call tools via an MCP server subprocess.
+// The full agentic loop happens inside the CLI; the returned response
+// contains only the final text (no pending tool calls).
+func (c *claudeCLIClient) ChatWithTools(ctx context.Context, systemPrompt string, messages []llm.Message, tools []llm.Tool) (*llm.Response, error) {
+	prompt := buildPrompt(systemPrompt, messages)
+
+	mcpConfig, cleanupFn, err := c.buildMCPConfig()
+	if err != nil {
+		return nil, fmt.Errorf("build MCP config: %w", err)
+	}
+	defer cleanupFn()
+
+	allowedTools := c.getAllowedTools(tools)
+
+	args := []string{"-p", prompt, "--output-format", "json"}
+	if c.model != "" {
+		args = append(args, "--model", c.model)
+	}
+	args = append(args, "--mcp-config", mcpConfig)
+	for _, tool := range allowedTools {
+		args = append(args, "--allowedTools", tool)
+	}
+	args = append(args, "--dangerously-skip-permissions")
+
+	if c.verbose {
+		args = append(args, "--verbose")
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(timeoutCtx, c.executable, args...)
+	output, err := cmd.Output()
+	if err != nil {
+		if timeoutCtx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("claude CLI timed out after %v", c.timeout)
+		}
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("claude CLI exited with error: %w\nstderr: %s", err, exitErr.Stderr)
+		}
+		return nil, fmt.Errorf("claude CLI execution failed: %w", err)
+	}
+
+	return parseClaudeResponse(output)
+}
+
+// buildMCPConfig creates a temporary MCP config file pointing to this binary's
+// `mcp serve` command. Returns the config file path and a cleanup function.
+func (c *claudeCLIClient) buildMCPConfig() (string, func(), error) {
+	selfExe, err := os.Executable()
+	if err != nil {
+		return "", func() {}, fmt.Errorf("determine executable path: %w", err)
+	}
+
+	// Build args for the MCP server subprocess.
+	mcpArgs := []string{"mcp", "serve"}
+	if c.configFile != "" {
+		mcpArgs = append(mcpArgs, "--config", c.configFile)
+	}
+
+	mcpConfig := map[string]any{
+		"mcpServers": map[string]any{
+			"codeeagle": map[string]any{
+				"command": selfExe,
+				"args":    mcpArgs,
+			},
+		},
+	}
+
+	configJSON, err := json.Marshal(mcpConfig)
+	if err != nil {
+		return "", func() {}, fmt.Errorf("marshal MCP config: %w", err)
+	}
+
+	tmpFile, err := os.CreateTemp("", "codeeagle-mcp-*.json")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create temp MCP config: %w", err)
+	}
+
+	if _, err := tmpFile.Write(configJSON); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		return "", func() {}, fmt.Errorf("write MCP config: %w", err)
+	}
+	tmpFile.Close()
+
+	cleanup := func() {
+		os.Remove(tmpFile.Name())
+	}
+	return tmpFile.Name(), cleanup, nil
+}
+
+// getAllowedTools maps tool names to MCP-prefixed names for the Claude CLI.
+func (c *claudeCLIClient) getAllowedTools(tools []llm.Tool) []string {
+	result := make([]string, len(tools))
+	for i, t := range tools {
+		result[i] = "mcp__codeeagle__" + t.Name
+	}
+	return result
+}
+
+// SetConfigFile sets the config file path to be forwarded to MCP serve subprocess.
+func (c *claudeCLIClient) SetConfigFile(path string) {
+	c.configFile = path
 }
 
 // Close is a no-op for the CLI client.

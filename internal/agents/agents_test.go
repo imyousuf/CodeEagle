@@ -11,7 +11,7 @@ import (
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 
-// mockClient implements llm.Client for testing.
+// mockClient implements llm.Client for testing (no tool support).
 type mockClient struct {
 	lastSystemPrompt string
 	lastMessages     []llm.Message
@@ -34,6 +34,27 @@ func (m *mockClient) Chat(_ context.Context, systemPrompt string, messages []llm
 func (m *mockClient) Model() string    { return "test-model" }
 func (m *mockClient) Provider() string  { return "test" }
 func (m *mockClient) Close() error      { return nil }
+
+// mockToolClient implements llm.ToolCapableClient for testing.
+type mockToolClient struct {
+	mockClient
+	responses []llm.Response // sequence of responses (consumed in order)
+	callIdx   int
+}
+
+func (m *mockToolClient) ChatWithTools(_ context.Context, systemPrompt string, messages []llm.Message, tools []llm.Tool) (*llm.Response, error) {
+	m.lastSystemPrompt = systemPrompt
+	m.lastMessages = messages
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.callIdx < len(m.responses) {
+		resp := m.responses[m.callIdx]
+		m.callIdx++
+		return &resp, nil
+	}
+	return &llm.Response{Content: m.response}, nil
+}
 
 // setupTestStore creates a temporary graph store populated with test data.
 func setupTestStore(t *testing.T) (graph.Store, func()) {
@@ -513,5 +534,190 @@ func TestIsStopWord(t *testing.T) {
 	}
 	if isStopWord("HandleRequest") {
 		t.Error("expected 'HandleRequest' to not be a stop word")
+	}
+}
+
+// --- Agentic planner tests ---
+
+func TestPlannerFallbackToSingleTurn(t *testing.T) {
+	// When using a non-tool-capable client, should fallback to single-turn.
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	mock := &mockClient{response: "single turn response"}
+	ctxBuilder := NewContextBuilder(store)
+	planner := NewPlanner(mock, ctxBuilder)
+
+	// Verify it doesn't implement ToolCapableClient.
+	if llm.SupportsTools(mock) {
+		t.Fatal("mockClient should not support tools")
+	}
+
+	resp, err := planner.Ask(context.Background(), "tell me about this project")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp != "single turn response" {
+		t.Errorf("expected 'single turn response', got %q", resp)
+	}
+}
+
+func TestPlannerAgenticNoToolCalls(t *testing.T) {
+	// Tool-capable client that returns a response with no tool calls.
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	mock := &mockToolClient{
+		mockClient: mockClient{response: "direct answer"},
+	}
+	ctxBuilder := NewContextBuilder(store)
+	planner := NewPlanner(mock, ctxBuilder)
+
+	if !llm.SupportsTools(mock) {
+		t.Fatal("mockToolClient should support tools")
+	}
+
+	resp, err := planner.Ask(context.Background(), "What is this project?")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp != "direct answer" {
+		t.Errorf("expected 'direct answer', got %q", resp)
+	}
+}
+
+func TestPlannerAgenticOneRound(t *testing.T) {
+	// Tool-capable client: first call returns tool calls, second returns text.
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	mock := &mockToolClient{
+		responses: []llm.Response{
+			{
+				Content: "Let me search for that.",
+				ToolCalls: []llm.ToolCall{
+					{ID: "tc1", Name: "get_graph_overview", Arguments: map[string]any{}},
+				},
+			},
+			{
+				Content: "The project has 4 nodes.",
+			},
+		},
+	}
+	ctxBuilder := NewContextBuilder(store)
+	planner := NewPlanner(mock, ctxBuilder)
+
+	resp, err := planner.Ask(context.Background(), "What is the project overview?")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp != "The project has 4 nodes." {
+		t.Errorf("expected 'The project has 4 nodes.', got %q", resp)
+	}
+	// Should have called ChatWithTools twice.
+	if mock.callIdx != 2 {
+		t.Errorf("expected 2 calls, got %d", mock.callIdx)
+	}
+}
+
+func TestPlannerAgenticMaxIterations(t *testing.T) {
+	// Tool-capable client that always returns tool calls -> should hit max iterations.
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	mock := &mockToolClient{
+		responses: make([]llm.Response, 20), // more than maxIterations
+	}
+	// Fill all responses with tool calls.
+	for i := range mock.responses {
+		mock.responses[i] = llm.Response{
+			ToolCalls: []llm.ToolCall{
+				{ID: fmt.Sprintf("tc%d", i), Name: "get_graph_overview", Arguments: map[string]any{}},
+			},
+		}
+	}
+
+	ctxBuilder := NewContextBuilder(store)
+	planner := NewPlanner(mock, ctxBuilder)
+	planner.SetMaxIterations(3) // Low limit for test.
+
+	_, err := planner.Ask(context.Background(), "query")
+	if err == nil {
+		t.Fatal("expected error for max iterations")
+	}
+	if !strings.Contains(err.Error(), "maximum iterations (3)") {
+		t.Errorf("expected max iterations error, got %q", err.Error())
+	}
+}
+
+func TestPlannerAgenticLLMError(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	mock := &mockToolClient{
+		mockClient: mockClient{err: fmt.Errorf("API timeout")},
+	}
+	ctxBuilder := NewContextBuilder(store)
+	planner := NewPlanner(mock, ctxBuilder)
+
+	_, err := planner.Ask(context.Background(), "query")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "API timeout") {
+		t.Errorf("expected API timeout error, got %q", err.Error())
+	}
+}
+
+func TestPlannerSetMaxIterations(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	mock := &mockClient{response: "ok"}
+	ctxBuilder := NewContextBuilder(store)
+	planner := NewPlanner(mock, ctxBuilder)
+
+	if planner.maxIterations != defaultMaxIterations {
+		t.Errorf("expected default maxIterations=%d, got %d", defaultMaxIterations, planner.maxIterations)
+	}
+
+	planner.SetMaxIterations(10)
+	if planner.maxIterations != 10 {
+		t.Errorf("expected maxIterations=10, got %d", planner.maxIterations)
+	}
+
+	// Invalid value should be ignored.
+	planner.SetMaxIterations(0)
+	if planner.maxIterations != 10 {
+		t.Errorf("expected maxIterations still 10, got %d", planner.maxIterations)
+	}
+}
+
+func TestPlannerAgenticToolError(t *testing.T) {
+	// Tool-capable client that calls an unknown tool -> should include error in response.
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	mock := &mockToolClient{
+		responses: []llm.Response{
+			{
+				ToolCalls: []llm.ToolCall{
+					{ID: "tc1", Name: "nonexistent_tool", Arguments: map[string]any{}},
+				},
+			},
+			{
+				Content: "I got an error, but here is my answer.",
+			},
+		},
+	}
+	ctxBuilder := NewContextBuilder(store)
+	planner := NewPlanner(mock, ctxBuilder)
+
+	resp, err := planner.Ask(context.Background(), "query")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp != "I got an error, but here is my answer." {
+		t.Errorf("expected fallback answer, got %q", resp)
 	}
 }

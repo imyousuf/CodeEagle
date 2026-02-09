@@ -1,6 +1,9 @@
 package llm
 
 import (
+	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/pkg/llm"
@@ -198,5 +201,109 @@ func TestClaudeCLIClientClose(t *testing.T) {
 	client := &claudeCLIClient{executable: "/usr/bin/claude"}
 	if err := client.Close(); err != nil {
 		t.Errorf("Close() returned error: %v", err)
+	}
+}
+
+func TestClaudeCLISupportsTools(t *testing.T) {
+	client := &claudeCLIClient{executable: "/usr/bin/claude"}
+	if !llm.SupportsTools(client) {
+		t.Error("expected claudeCLIClient to support tools")
+	}
+}
+
+func TestGetAllowedTools(t *testing.T) {
+	client := &claudeCLIClient{}
+	tools := []llm.Tool{
+		{Name: "search_nodes"},
+		{Name: "get_graph_overview"},
+	}
+
+	result := client.getAllowedTools(tools)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 tools, got %d", len(result))
+	}
+	if result[0] != "mcp__codeeagle__search_nodes" {
+		t.Errorf("expected 'mcp__codeeagle__search_nodes', got %q", result[0])
+	}
+	if result[1] != "mcp__codeeagle__get_graph_overview" {
+		t.Errorf("expected 'mcp__codeeagle__get_graph_overview', got %q", result[1])
+	}
+}
+
+func TestBuildMCPConfig(t *testing.T) {
+	client := &claudeCLIClient{executable: "/usr/bin/claude"}
+
+	configPath, cleanup, err := client.buildMCPConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer cleanup()
+
+	// Verify the temp file was created.
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config file: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to parse config JSON: %v", err)
+	}
+
+	servers, ok := config["mcpServers"].(map[string]any)
+	if !ok {
+		t.Fatal("expected mcpServers key in config")
+	}
+	ce, ok := servers["codeeagle"].(map[string]any)
+	if !ok {
+		t.Fatal("expected codeeagle server in config")
+	}
+	args, ok := ce["args"].([]any)
+	if !ok {
+		t.Fatal("expected args in codeeagle server config")
+	}
+	if len(args) < 2 || args[0] != "mcp" || args[1] != "serve" {
+		t.Errorf("expected args to start with ['mcp', 'serve'], got %v", args)
+	}
+
+	// Cleanup should remove the file.
+	cleanup()
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		t.Errorf("expected config file to be deleted after cleanup")
+	}
+}
+
+func TestBuildMCPConfigWithConfigFile(t *testing.T) {
+	client := &claudeCLIClient{
+		executable: "/usr/bin/claude",
+		configFile: "/path/to/config.yaml",
+	}
+
+	configPath, cleanup, err := client.buildMCPConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer cleanup()
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config file: %v", err)
+	}
+
+	// Verify --config flag is included in args.
+	content := string(data)
+	if !strings.Contains(content, "--config") {
+		t.Errorf("expected --config in MCP config args, got %s", content)
+	}
+	if !strings.Contains(content, "/path/to/config.yaml") {
+		t.Errorf("expected config path in MCP config args, got %s", content)
+	}
+}
+
+func TestSetConfigFile(t *testing.T) {
+	client := &claudeCLIClient{executable: "/usr/bin/claude"}
+	client.SetConfigFile("/path/to/config.yaml")
+	if client.configFile != "/path/to/config.yaml" {
+		t.Errorf("expected configFile '/path/to/config.yaml', got %q", client.configFile)
 	}
 }

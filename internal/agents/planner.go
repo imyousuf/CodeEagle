@@ -11,15 +11,44 @@ import (
 
 const plannerSystemPrompt = `You are a codebase planning agent. You analyze codebases to provide impact analysis, dependency mapping, scope estimation, and change risk assessment. You have access to a knowledge graph of the codebase. Answer based on the provided context. Be specific about files, functions, and services affected.`
 
+const agenticPlannerSystemPrompt = `You are a codebase planning agent with access to a knowledge graph of source code entities and their relationships. You help with impact analysis, dependency mapping, scope estimation, and change risk assessment.
+
+You have tools to query the knowledge graph. Use them iteratively to gather the information you need before answering. Do NOT guess -- use the tools to verify.
+
+Strategy:
+1. Start with get_project_guidelines to understand project conventions
+2. Use get_graph_overview to understand the codebase scope
+3. Use search_nodes to find specific entities the user asks about
+4. Use get_impact_analysis to trace dependencies and affected code
+5. Use get_service_info or get_file_info for detailed context on specific areas
+
+Provide your final answer with:
+- Specific file paths, function names, and service names from the graph
+- Clear categorization of direct vs indirect vs transitive impact
+- Risk assessment based on the complexity and breadth of impact
+- Concrete recommendations grounded in the project's conventions`
+
+const defaultMaxIterations = 15
+
 // Planner is the planning agent for impact analysis, dependency mapping,
 // scope estimation, and change risk assessment.
 type Planner struct {
 	BaseAgent
-	repoPaths []string // optional repo paths for branch-aware context
+	repoPaths     []string  // optional repo paths for branch-aware context
+	registry      *Registry // tool registry for agentic mode
+	maxIterations int
 }
 
-// NewPlanner creates a new planning agent. Optional repoPaths enable branch-aware context.
+// NewPlanner creates a new planning agent with tool-use support.
+// If the LLM client supports tools, the planner uses an agentic loop.
+// Otherwise, it falls back to single-turn keyword-based context selection.
+// Optional repoPaths enable branch-aware context.
 func NewPlanner(client llm.Client, ctxBuilder *ContextBuilder, repoPaths ...string) *Planner {
+	registry := NewRegistry()
+	for _, tool := range NewPlannerTools(ctxBuilder) {
+		registry.Register(tool)
+	}
+
 	return &Planner{
 		BaseAgent: BaseAgent{
 			name:         "planner",
@@ -27,13 +56,90 @@ func NewPlanner(client llm.Client, ctxBuilder *ContextBuilder, repoPaths ...stri
 			ctxBuilder:   ctxBuilder,
 			systemPrompt: plannerSystemPrompt,
 		},
-		repoPaths: repoPaths,
+		repoPaths:     repoPaths,
+		registry:      registry,
+		maxIterations: defaultMaxIterations,
 	}
 }
 
-// Ask analyzes the query to determine what context to fetch from the knowledge
-// graph, then sends the enriched query to the LLM.
+// SetMaxIterations sets the maximum number of agentic loop iterations.
+func (p *Planner) SetMaxIterations(n int) {
+	if n > 0 {
+		p.maxIterations = n
+	}
+}
+
+// Ask sends a query to the planning agent. If the LLM client supports tool
+// calling, it uses an agentic loop where the LLM iteratively calls tools.
+// Otherwise, it falls back to single-turn keyword-based context selection.
 func (p *Planner) Ask(ctx context.Context, query string) (string, error) {
+	toolClient, ok := p.llmClient.(llm.ToolCapableClient)
+	if !ok {
+		return p.askSingleTurn(ctx, query)
+	}
+	return p.askAgentic(ctx, query, toolClient)
+}
+
+// askAgentic runs an agentic loop where the LLM iteratively calls tools.
+func (p *Planner) askAgentic(ctx context.Context, query string, toolClient llm.ToolCapableClient) (string, error) {
+	var messages []llm.Message
+
+	// Inject guidelines as initial context for API providers.
+	// Claude CLI gets them via get_project_guidelines tool instead.
+	if p.llmClient.Provider() != "claude-cli" {
+		if guidelines, err := p.ctxBuilder.BuildGuidelineContext(ctx); err == nil && guidelines != "" {
+			messages = append(messages,
+				llm.Message{Role: llm.RoleUser, Content: "Project guidelines:\n\n" + guidelines},
+				llm.Message{Role: llm.RoleAssistant, Content: "I've noted the project guidelines."},
+			)
+		}
+	}
+
+	messages = append(messages, llm.Message{Role: llm.RoleUser, Content: query})
+	tools := p.registry.Definitions()
+
+	for i := 0; i < p.maxIterations; i++ {
+		if err := ctx.Err(); err != nil {
+			return "", fmt.Errorf("planner timeout after %d iterations: %w", i, err)
+		}
+
+		resp, err := toolClient.ChatWithTools(ctx, agenticPlannerSystemPrompt, messages, tools)
+		if err != nil {
+			return "", fmt.Errorf("LLM chat failed at iteration %d: %w", i, err)
+		}
+
+		if !resp.HasToolCalls() {
+			return resp.Content, nil
+		}
+
+		// Add assistant message with tool calls.
+		messages = append(messages, llm.Message{
+			Role:      llm.RoleAssistant,
+			Content:   resp.Content,
+			ToolCalls: resp.ToolCalls,
+		})
+
+		// Execute each tool call and add the results.
+		for _, tc := range resp.ToolCalls {
+			result, _, err := p.registry.Execute(ctx, tc.Name, tc.Arguments)
+			if err != nil {
+				result = fmt.Sprintf("Error: %v", err)
+			}
+			messages = append(messages, llm.Message{
+				Role:       llm.RoleTool,
+				Content:    result,
+				ToolCallID: tc.ID,
+			})
+		}
+	}
+
+	return "", fmt.Errorf("planner reached maximum iterations (%d)", p.maxIterations)
+}
+
+// askSingleTurn is the original single-turn implementation that uses
+// keyword-based context selection. Used as fallback when the LLM client
+// does not support tool calling.
+func (p *Planner) askSingleTurn(ctx context.Context, query string) (string, error) {
 	lower := strings.ToLower(query)
 	var contextText string
 	var err error

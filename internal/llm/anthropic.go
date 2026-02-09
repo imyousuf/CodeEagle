@@ -96,6 +96,57 @@ type anthropicError struct {
 	} `json:"error"`
 }
 
+// --- Tool-use wire format types ---
+
+// anthropicToolRequest extends the request body with tool definitions.
+type anthropicToolRequest struct {
+	Model     string                    `json:"model"`
+	MaxTokens int                       `json:"max_tokens"`
+	System    string                    `json:"system,omitempty"`
+	Messages  []anthropicToolMessage    `json:"messages"`
+	Tools     []anthropicToolDefinition `json:"tools,omitempty"`
+}
+
+// anthropicToolDefinition describes a tool for the Anthropic API.
+type anthropicToolDefinition struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"input_schema"`
+}
+
+// anthropicToolMessage handles both simple text messages and content-block messages.
+type anthropicToolMessage struct {
+	Role    string `json:"role"`
+	Content any    `json:"content"` // string or []anthropicContentBlock
+}
+
+// anthropicContentBlock represents a content block in the Anthropic API.
+type anthropicContentBlock struct {
+	Type      string         `json:"type"`
+	Text      string         `json:"text,omitempty"`
+	ID        string         `json:"id,omitempty"`
+	Name      string         `json:"name,omitempty"`
+	Input     map[string]any `json:"input,omitempty"`
+	ToolUseID string         `json:"tool_use_id,omitempty"`
+	Content   any            `json:"content,omitempty"` // string for tool_result
+}
+
+// anthropicToolResponse is the response body from the Anthropic Messages API with tool support.
+type anthropicToolResponse struct {
+	Content    []anthropicToolResponseBlock `json:"content"`
+	StopReason string                       `json:"stop_reason"`
+	Usage      anthropicUsage               `json:"usage"`
+}
+
+// anthropicToolResponseBlock represents a content block in the tool response.
+type anthropicToolResponseBlock struct {
+	Type  string         `json:"type"`
+	Text  string         `json:"text,omitempty"`
+	ID    string         `json:"id,omitempty"`
+	Name  string         `json:"name,omitempty"`
+	Input map[string]any `json:"input,omitempty"`
+}
+
 // Chat sends a system prompt and messages to the Anthropic API and returns a response.
 func (c *anthropicClient) Chat(ctx context.Context, systemPrompt string, messages []llm.Message) (*llm.Response, error) {
 	apiMessages := make([]anthropicMessage, 0, len(messages))
@@ -167,6 +218,166 @@ func (c *anthropicClient) Chat(ctx context.Context, systemPrompt string, message
 			OutputTokens: apiResp.Usage.OutputTokens,
 		},
 	}, nil
+}
+
+// ChatWithTools sends messages with tool definitions to the Anthropic API.
+func (c *anthropicClient) ChatWithTools(ctx context.Context, systemPrompt string, messages []llm.Message, tools []llm.Tool) (*llm.Response, error) {
+	apiMessages := convertMessagesToToolFormat(messages)
+	apiTools := convertToolDefinitions(tools)
+
+	reqBody := anthropicToolRequest{
+		Model:     c.model,
+		MaxTokens: defaultMaxTokens,
+		System:    systemPrompt,
+		Messages:  apiMessages,
+		Tools:     apiTools,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	url := c.baseURL + "/v1/messages"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", c.apiKey)
+	req.Header.Set("anthropic-version", anthropicAPIVersion)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var apiErr anthropicError
+		if json.Unmarshal(respBody, &apiErr) == nil && apiErr.Error.Message != "" {
+			return nil, fmt.Errorf("Anthropic API error (HTTP %d): %s: %s", resp.StatusCode, apiErr.Error.Type, apiErr.Error.Message)
+		}
+		return nil, fmt.Errorf("Anthropic API error (HTTP %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var apiResp anthropicToolResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	return parseToolResponse(apiResp), nil
+}
+
+// convertMessagesToToolFormat converts llm.Message to the Anthropic tool message format.
+func convertMessagesToToolFormat(messages []llm.Message) []anthropicToolMessage {
+	var result []anthropicToolMessage
+	// Buffer for batching consecutive tool result messages into a single user message.
+	var toolResultBatch []anthropicContentBlock
+
+	flushToolResults := func() {
+		if len(toolResultBatch) > 0 {
+			result = append(result, anthropicToolMessage{
+				Role:    "user",
+				Content: toolResultBatch,
+			})
+			toolResultBatch = nil
+		}
+	}
+
+	for _, msg := range messages {
+		switch msg.Role {
+		case llm.RoleTool:
+			// Tool results are batched into a single user message.
+			toolResultBatch = append(toolResultBatch, anthropicContentBlock{
+				Type:      "tool_result",
+				ToolUseID: msg.ToolCallID,
+				Content:   msg.Content,
+			})
+		case llm.RoleAssistant:
+			flushToolResults()
+			if len(msg.ToolCalls) > 0 {
+				// Assistant message with tool calls becomes content blocks.
+				var blocks []anthropicContentBlock
+				if msg.Content != "" {
+					blocks = append(blocks, anthropicContentBlock{
+						Type: "text",
+						Text: msg.Content,
+					})
+				}
+				for _, tc := range msg.ToolCalls {
+					blocks = append(blocks, anthropicContentBlock{
+						Type:  "tool_use",
+						ID:    tc.ID,
+						Name:  tc.Name,
+						Input: tc.Arguments,
+					})
+				}
+				result = append(result, anthropicToolMessage{
+					Role:    "assistant",
+					Content: blocks,
+				})
+			} else {
+				result = append(result, anthropicToolMessage{
+					Role:    "assistant",
+					Content: msg.Content,
+				})
+			}
+		default:
+			flushToolResults()
+			result = append(result, anthropicToolMessage{
+				Role:    string(msg.Role),
+				Content: msg.Content,
+			})
+		}
+	}
+	flushToolResults()
+	return result
+}
+
+// convertToolDefinitions converts llm.Tool to Anthropic tool definitions.
+func convertToolDefinitions(tools []llm.Tool) []anthropicToolDefinition {
+	defs := make([]anthropicToolDefinition, len(tools))
+	for i, t := range tools {
+		defs[i] = anthropicToolDefinition{
+			Name:        t.Name,
+			Description: t.Description,
+			InputSchema: t.Parameters,
+		}
+	}
+	return defs
+}
+
+// parseToolResponse converts the Anthropic tool response into llm.Response.
+func parseToolResponse(apiResp anthropicToolResponse) *llm.Response {
+	resp := &llm.Response{
+		FinishReason: apiResp.StopReason,
+		Usage: llm.TokenUsage{
+			InputTokens:  apiResp.Usage.InputTokens,
+			OutputTokens: apiResp.Usage.OutputTokens,
+		},
+	}
+
+	for _, block := range apiResp.Content {
+		switch block.Type {
+		case "text":
+			resp.Content += block.Text
+		case "tool_use":
+			resp.ToolCalls = append(resp.ToolCalls, llm.ToolCall{
+				ID:        block.ID,
+				Name:      block.Name,
+				Arguments: block.Input,
+			})
+		}
+	}
+
+	return resp
 }
 
 // Model returns the model name being used.

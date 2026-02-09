@@ -78,10 +78,17 @@ func createLLMClient(cfg *config.Config) (llm.Client, error) {
 }
 
 func newAgentPlanCmd() *cobra.Command {
+	var maxIterations int
+
 	cmd := &cobra.Command{
 		Use:   "plan [query]",
 		Short: "Ask the planning agent a question",
-		Args:  cobra.MinimumNArgs(1),
+		Long: `Ask the planning agent a question about the codebase.
+
+When the LLM provider supports tool calling, the planner uses an agentic loop
+where it iteratively queries the knowledge graph using tools. Otherwise, it
+falls back to single-turn keyword-based context selection.`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load()
 			if err != nil {
@@ -93,6 +100,13 @@ func newAgentPlanCmd() *cobra.Command {
 				return err
 			}
 			defer client.Close()
+
+			// Forward config file path to Claude CLI for MCP subprocess.
+			if setter, ok := client.(interface{ SetConfigFile(string) }); ok {
+				if cfgFile != "" {
+					setter.SetConfigFile(cfgFile)
+				}
+			}
 
 			store, _, err := openBranchStore(cfg)
 			if err != nil {
@@ -107,6 +121,10 @@ func newAgentPlanCmd() *cobra.Command {
 			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
 			planner := agents.NewPlanner(client, ctxBuilder, repoPaths...)
 
+			if maxIterations > 0 {
+				planner.SetMaxIterations(maxIterations)
+			}
+
 			query := strings.Join(args, " ")
 			resp, err := planner.Ask(context.Background(), query)
 			if err != nil {
@@ -118,6 +136,7 @@ func newAgentPlanCmd() *cobra.Command {
 		},
 	}
 
+	cmd.Flags().IntVar(&maxIterations, "max-iterations", 0, "maximum number of agentic tool-use iterations (0 = use default)")
 	return cmd
 }
 
