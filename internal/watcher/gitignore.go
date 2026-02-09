@@ -141,6 +141,16 @@ func matchPattern(pattern string, basePath string, path string) bool {
 		return matchRelativePattern(pattern, basePath, path)
 	}
 
+	// When a basePath is set (pattern from a .gitignore file), the pattern
+	// only applies to files within that directory tree. Verify the path is
+	// under basePath before matching.
+	if basePath != "" {
+		relPath, err := filepath.Rel(basePath, path)
+		if err != nil || strings.HasPrefix(relPath, "..") {
+			return false
+		}
+	}
+
 	// Otherwise match against any component or the full path.
 	// First try matching against the basename.
 	base := filepath.Base(path)
