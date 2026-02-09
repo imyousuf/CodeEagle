@@ -20,18 +20,20 @@ import (
 func newAgentCmd() *cobra.Command {
 	agentCmd := &cobra.Command{
 		Use:   "agent",
-		Short: "Interact with AI agents (plan, design, review)",
+		Short: "Interact with AI agents (plan, design, review, ask)",
 		Long: `Interact with AI agents grounded in the codebase knowledge graph.
 
 Available agents:
   plan     Planning agent for impact analysis, dependency mapping, and scope estimation
   design   Design agent for architecture review and pattern recognition
-  review   Code review agent for diff review and convention checking`,
+  review   Code review agent for diff review and convention checking
+  ask      General-purpose Q&A agent for freeform questions about the codebase`,
 	}
 
 	agentCmd.AddCommand(newAgentPlanCmd())
 	agentCmd.AddCommand(newAgentDesignCmd())
 	agentCmd.AddCommand(newAgentReviewCmd())
+	agentCmd.AddCommand(newAgentAskCmd())
 
 	return agentCmd
 }
@@ -218,6 +220,54 @@ func newAgentReviewCmd() *cobra.Command {
 	}
 
 	cmd.Flags().String("diff", "", "review changes in a git diff/PR reference")
+	cmd.Flags().StringVar(&dbPath, "db-path", ".codeeagle/graph.db", "path for the graph database")
+	return cmd
+}
+
+func newAgentAskCmd() *cobra.Command {
+	var dbPath string
+
+	cmd := &cobra.Command{
+		Use:   "ask [query]",
+		Short: "Ask a question about the indexed codebase",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			client, err := createLLMClient(cfg)
+			if err != nil {
+				return err
+			}
+			defer client.Close()
+
+			store, err := embedded.NewStore(dbPath)
+			if err != nil {
+				return fmt.Errorf("open graph store: %w", err)
+			}
+			defer store.Close()
+
+			ctxBuilder := agents.NewContextBuilder(store)
+
+			var repoPaths []string
+			for _, repo := range cfg.Repositories {
+				repoPaths = append(repoPaths, repo.Path)
+			}
+			asker := agents.NewAsker(client, ctxBuilder, repoPaths...)
+
+			query := strings.Join(args, " ")
+			resp, err := asker.Ask(context.Background(), query)
+			if err != nil {
+				return fmt.Errorf("ask query failed: %w", err)
+			}
+
+			fmt.Fprintln(cmd.OutOrStdout(), resp)
+			return nil
+		},
+	}
+
 	cmd.Flags().StringVar(&dbPath, "db-path", ".codeeagle/graph.db", "path for the graph database")
 	return cmd
 }
