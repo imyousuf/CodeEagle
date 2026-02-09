@@ -103,11 +103,209 @@ func (s *Summarizer) SummarizePatterns(ctx context.Context, allNodes []*graph.No
 	return nil
 }
 
+// SummarizeArchitecture builds a rich prompt including architectural roles,
+// design patterns, layer tags, and interface-implementation pairs, sends it
+// to the LLM to identify deeper architectural patterns, and stores the result
+// as a Document node with kind=architecture_analysis.
+func (s *Summarizer) SummarizeArchitecture(ctx context.Context, serviceName string, nodes []*graph.Node) error {
+	if len(nodes) == 0 {
+		return nil
+	}
+
+	prompt := buildArchitecturePrompt(serviceName, nodes)
+
+	resp, err := s.client.Chat(ctx,
+		"You are a software architecture analyst. Identify architectural and design patterns in codebases.",
+		[]llm.Message{
+			{Role: llm.RoleUser, Content: prompt},
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("LLM chat for architecture %s: %w", serviceName, err)
+	}
+
+	nodeID := graph.NewNodeID("Document", "generated", "architecture:"+serviceName)
+	node := &graph.Node{
+		ID:         nodeID,
+		Type:       graph.NodeDocument,
+		Name:       fmt.Sprintf("Architecture Analysis: %s", serviceName),
+		DocComment: resp.Content,
+		Properties: map[string]string{
+			"generated": "true",
+			"kind":      "architecture_analysis",
+			"service":   serviceName,
+		},
+	}
+
+	_ = s.store.DeleteNode(ctx, nodeID)
+	if err := s.store.AddNode(ctx, node); err != nil {
+		return fmt.Errorf("store architecture analysis for %s: %w", serviceName, err)
+	}
+	return nil
+}
+
+// buildArchitecturePrompt creates the LLM prompt for architecture analysis of a service.
+func buildArchitecturePrompt(serviceName string, nodes []*graph.Node) string {
+	// Group nodes by architectural role.
+	byRole := make(map[string][]*graph.Node)
+	// Collect design patterns.
+	patternCounts := make(map[string]int)
+	// Collect layer distribution.
+	layerCounts := make(map[string]int)
+	// Collect interfaces and their implementations.
+	var interfaces []string
+	var implementations []string
+	// Collect DB models.
+	var dbModels []string
+
+	for _, n := range nodes {
+		if role, ok := n.Properties[graph.PropArchRole]; ok && role != "" {
+			byRole[role] = append(byRole[role], n)
+		}
+		if patterns, ok := n.Properties[graph.PropDesignPattern]; ok && patterns != "" {
+			for _, p := range strings.Split(patterns, ",") {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					patternCounts[p]++
+				}
+			}
+		}
+		if layer, ok := n.Properties[graph.PropLayerTag]; ok && layer != "" {
+			layerCounts[layer]++
+		}
+		if n.Type == graph.NodeInterface {
+			interfaces = append(interfaces, n.Name)
+		}
+		if n.Type == graph.NodeStruct || n.Type == graph.NodeClass {
+			implementations = append(implementations, fmt.Sprintf("%s (%s)", n.Name, n.Type))
+		}
+		if n.Type == graph.NodeDBModel {
+			dbModels = append(dbModels, n.Name)
+		}
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Service/directory: %s\n\n", serviceName)
+
+	// Architectural role distribution.
+	if len(byRole) > 0 {
+		b.WriteString("Architectural role distribution:\n")
+		sortedRoles := sortedMapKeys(byRole)
+		for _, role := range sortedRoles {
+			roleNodes := byRole[role]
+			fmt.Fprintf(&b, "- %s: %d nodes\n", role, len(roleNodes))
+			limit := 5
+			if len(roleNodes) < limit {
+				limit = len(roleNodes)
+			}
+			for _, rn := range roleNodes[:limit] {
+				fmt.Fprintf(&b, "    - %s (%s)\n", rn.Name, rn.Type)
+			}
+			if len(roleNodes) > 5 {
+				fmt.Fprintf(&b, "    - ... and %d more\n", len(roleNodes)-5)
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	// Design patterns detected by classifier.
+	if len(patternCounts) > 0 {
+		b.WriteString("Design patterns detected:\n")
+		sortedPatterns := sortedStringMapKeys(patternCounts)
+		for _, p := range sortedPatterns {
+			fmt.Fprintf(&b, "- %s: %d occurrences\n", p, patternCounts[p])
+		}
+		b.WriteString("\n")
+	}
+
+	// Layer distribution.
+	if len(layerCounts) > 0 {
+		b.WriteString("Layer distribution:\n")
+		sortedLayers := sortedStringMapKeys(layerCounts)
+		for _, layer := range sortedLayers {
+			fmt.Fprintf(&b, "- %s: %d nodes\n", layer, layerCounts[layer])
+		}
+		b.WriteString("\n")
+	}
+
+	// Interfaces and implementations.
+	if len(interfaces) > 0 {
+		sort.Strings(interfaces)
+		b.WriteString("Interfaces:\n")
+		for _, iface := range interfaces {
+			fmt.Fprintf(&b, "- %s\n", iface)
+		}
+		b.WriteString("\n")
+	}
+	if len(implementations) > 0 {
+		sort.Strings(implementations)
+		limit := 15
+		if len(implementations) < limit {
+			limit = len(implementations)
+		}
+		b.WriteString("Structs/Classes (potential implementations):\n")
+		for _, impl := range implementations[:limit] {
+			fmt.Fprintf(&b, "- %s\n", impl)
+		}
+		if len(implementations) > 15 {
+			fmt.Fprintf(&b, "- ... and %d more\n", len(implementations)-15)
+		}
+		b.WriteString("\n")
+	}
+
+	// DB models.
+	if len(dbModels) > 0 {
+		sort.Strings(dbModels)
+		fmt.Fprintf(&b, "Database models (%d):\n", len(dbModels))
+		for _, m := range dbModels {
+			fmt.Fprintf(&b, "- %s\n", m)
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("Based on the above, identify:\n")
+	b.WriteString("1. DDD patterns (bounded contexts, aggregates, value objects, domain events)\n")
+	b.WriteString("2. AOP patterns (cross-cutting concerns via decorators/annotations)\n")
+	b.WriteString("3. Observer/Event patterns (event buses, listeners, subscribers)\n")
+	b.WriteString("4. Repository pattern usage\n")
+	b.WriteString("5. Factory/Builder/Strategy patterns\n")
+	b.WriteString("6. CQRS (Command Query Responsibility Segregation)\n")
+	b.WriteString("7. Clean Architecture / Hexagonal Architecture layers\n")
+	b.WriteString("8. Microservice communication patterns (sync REST, async messaging)\n")
+	b.WriteString("9. Dependency injection patterns\n")
+	return b.String()
+}
+
+// sortedMapKeys returns sorted keys from a map[string][]*graph.Node.
+func sortedMapKeys(m map[string][]*graph.Node) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// sortedStringMapKeys returns sorted keys from a map[string]int.
+func sortedStringMapKeys(m map[string]int) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // buildServicePrompt creates the LLM prompt for summarizing a service.
 func buildServicePrompt(serviceName string, nodes []*graph.Node) string {
 	byType := make(map[graph.NodeType]int)
 	languages := make(map[string]int)
 	var exportedNames []string
+	roleCounts := make(map[string]int)
+	patternCounts := make(map[string]int)
+	layerCounts := make(map[string]int)
+	dbModelCount := 0
+
 	for _, n := range nodes {
 		byType[n.Type]++
 		if n.Language != "" {
@@ -115,6 +313,23 @@ func buildServicePrompt(serviceName string, nodes []*graph.Node) string {
 		}
 		if n.Exported && n.Type != graph.NodeFile && n.Type != graph.NodePackage {
 			exportedNames = append(exportedNames, fmt.Sprintf("%s (%s)", n.Name, n.Type))
+		}
+		if role, ok := n.Properties[graph.PropArchRole]; ok && role != "" {
+			roleCounts[role]++
+		}
+		if patterns, ok := n.Properties[graph.PropDesignPattern]; ok && patterns != "" {
+			for _, p := range strings.Split(patterns, ",") {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					patternCounts[p]++
+				}
+			}
+		}
+		if layer, ok := n.Properties[graph.PropLayerTag]; ok && layer != "" {
+			layerCounts[layer]++
+		}
+		if n.Type == graph.NodeDBModel {
+			dbModelCount++
 		}
 	}
 
@@ -129,6 +344,27 @@ func buildServicePrompt(serviceName string, nodes []*graph.Node) string {
 		for lang, count := range languages {
 			fmt.Fprintf(&b, "- %s: %d nodes\n", lang, count)
 		}
+	}
+	if len(roleCounts) > 0 {
+		b.WriteString("\nArchitectural roles:\n")
+		for role, count := range roleCounts {
+			fmt.Fprintf(&b, "- %s: %d\n", role, count)
+		}
+	}
+	if len(patternCounts) > 0 {
+		b.WriteString("\nDesign patterns:\n")
+		for p, count := range patternCounts {
+			fmt.Fprintf(&b, "- %s: %d\n", p, count)
+		}
+	}
+	if len(layerCounts) > 0 {
+		b.WriteString("\nLayers:\n")
+		for layer, count := range layerCounts {
+			fmt.Fprintf(&b, "- %s: %d\n", layer, count)
+		}
+	}
+	if dbModelCount > 0 {
+		fmt.Fprintf(&b, "\nDB models: %d\n", dbModelCount)
 	}
 	if len(exportedNames) > 0 {
 		sort.Strings(exportedNames)
@@ -152,6 +388,10 @@ func buildServicePrompt(serviceName string, nodes []*graph.Node) string {
 func buildPatternsPrompt(allNodes []*graph.Node) string {
 	byLang := make(map[string]map[graph.NodeType]int)
 	totalByType := make(map[graph.NodeType]int)
+	crossServicePatterns := make(map[string]int)
+	crossServiceRoles := make(map[string]int)
+	crossServiceLayers := make(map[string]int)
+
 	for _, n := range allNodes {
 		lang := n.Language
 		if lang == "" {
@@ -162,6 +402,21 @@ func buildPatternsPrompt(allNodes []*graph.Node) string {
 		}
 		byLang[lang][n.Type]++
 		totalByType[n.Type]++
+
+		if patterns, ok := n.Properties[graph.PropDesignPattern]; ok && patterns != "" {
+			for _, p := range strings.Split(patterns, ",") {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					crossServicePatterns[p]++
+				}
+			}
+		}
+		if role, ok := n.Properties[graph.PropArchRole]; ok && role != "" {
+			crossServiceRoles[role]++
+		}
+		if layer, ok := n.Properties[graph.PropLayerTag]; ok && layer != "" {
+			crossServiceLayers[layer]++
+		}
 	}
 
 	// Collect unique packages/directories.
@@ -209,7 +464,33 @@ func buildPatternsPrompt(allNodes []*graph.Node) string {
 		}
 	}
 
+	// Cross-service architectural patterns.
+	if len(crossServicePatterns) > 0 {
+		b.WriteString("\nCross-service design patterns:\n")
+		sortedPatterns := sortedStringMapKeys(crossServicePatterns)
+		for _, p := range sortedPatterns {
+			fmt.Fprintf(&b, "- %s: %d occurrences\n", p, crossServicePatterns[p])
+		}
+	}
+
+	if len(crossServiceRoles) > 0 {
+		b.WriteString("\nArchitectural role distribution across codebase:\n")
+		sortedRoles := sortedStringMapKeys(crossServiceRoles)
+		for _, role := range sortedRoles {
+			fmt.Fprintf(&b, "- %s: %d\n", role, crossServiceRoles[role])
+		}
+	}
+
+	if len(crossServiceLayers) > 0 {
+		b.WriteString("\nLayer consistency across codebase:\n")
+		sortedLayers := sortedStringMapKeys(crossServiceLayers)
+		for _, layer := range sortedLayers {
+			fmt.Fprintf(&b, "- %s: %d nodes\n", layer, crossServiceLayers[layer])
+		}
+	}
+
 	b.WriteString("\nBased on these code entities, describe the architectural patterns, tech stack, and conventions used.")
+	b.WriteString(" Also analyze cross-service pattern consistency and layer adherence.")
 	return b.String()
 }
 

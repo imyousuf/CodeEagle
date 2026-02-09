@@ -29,8 +29,10 @@ func NewDesigner(client llm.Client, ctxBuilder *ContextBuilder) *Designer {
 
 // Ask builds relevant context from the knowledge graph and sends the query
 // to the LLM. It always includes the graph overview and adds service or file
-// context when a specific entity is mentioned.
+// context when a specific entity is mentioned. For model and architecture
+// queries, it adds specialized context.
 func (d *Designer) Ask(ctx context.Context, query string) (string, error) {
+	lower := strings.ToLower(query)
 	var parts []string
 
 	// Always include overview context for architectural questions.
@@ -39,6 +41,23 @@ func (d *Designer) Ask(ctx context.Context, query string) (string, error) {
 		return "", fmt.Errorf("build overview context: %w", err)
 	}
 	parts = append(parts, overview)
+
+	// Add model context when query mentions data/model/schema.
+	if containsAny(lower, "model", "data", "schema") {
+		entityName := extractEntityName(query)
+		modelCtx, err := d.ctxBuilder.BuildModelContext(ctx, entityName)
+		if err == nil && !strings.Contains(modelCtx, "No data models found") {
+			parts = append(parts, modelCtx)
+		}
+	}
+
+	// Add architecture context when query mentions patterns/architecture.
+	if containsAny(lower, "pattern", "architecture", "layer", "structure") {
+		archCtx, err := d.ctxBuilder.BuildArchitectureContext(ctx)
+		if err == nil && !strings.Contains(archCtx, "No architectural metadata") {
+			parts = append(parts, archCtx)
+		}
+	}
 
 	// Try to add more specific context based on entities mentioned in the query.
 	entityName := extractEntityName(query)

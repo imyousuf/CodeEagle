@@ -41,6 +41,10 @@ func (p *Planner) Ask(ctx context.Context, query string) (string, error) {
 	switch {
 	case containsAny(lower, "branch", "changes", "current", "working"):
 		contextText, err = p.buildBranchContextFromQuery(ctx)
+	case containsAny(lower, "model", "schema", "database", "entity", "domain"):
+		contextText, err = p.buildModelContextFromQuery(ctx, query)
+	case containsAny(lower, "architecture", "pattern", "layer", "structure"):
+		contextText, err = p.ctxBuilder.BuildArchitectureContext(ctx)
 	case containsAny(lower, "change", "affect", "impact", "modify"):
 		contextText, err = p.buildImpactContextFromQuery(ctx, query)
 	case containsAny(lower, "depend", "relies", "uses"):
@@ -55,6 +59,24 @@ func (p *Planner) Ask(ctx context.Context, query string) (string, error) {
 	}
 
 	return p.ask(ctx, contextText, query)
+}
+
+// buildModelContextFromQuery extracts a service name from the query and builds
+// model context for it. Falls back to overview context.
+func (p *Planner) buildModelContextFromQuery(ctx context.Context, query string) (string, error) {
+	serviceName := extractEntityName(query)
+	if serviceName != "" {
+		modelCtx, err := p.ctxBuilder.BuildModelContext(ctx, serviceName)
+		if err == nil && !strings.Contains(modelCtx, "No data models found") {
+			return modelCtx, nil
+		}
+	}
+	// Fallback: try with empty service name to get all models.
+	modelCtx, err := p.ctxBuilder.BuildModelContext(ctx, "")
+	if err == nil && !strings.Contains(modelCtx, "No data models found") {
+		return modelCtx, nil
+	}
+	return p.ctxBuilder.BuildOverviewContext(ctx)
 }
 
 // buildImpactContextFromQuery extracts a likely node name from the query

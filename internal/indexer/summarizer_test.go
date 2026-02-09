@@ -211,6 +211,206 @@ func TestSummarizeServiceIdempotent(t *testing.T) {
 	}
 }
 
+func TestSummarizeArchitecture(t *testing.T) {
+	store, mock := setupSummarizerTest(t)
+	mock.responses = []string{"This service uses Repository pattern for data access with a clean separation between controllers, services, and data layers. Factory pattern is used for creating service instances."}
+
+	ctx := context.Background()
+
+	nodes := []*graph.Node{
+		{
+			ID: "n1", Type: graph.NodeInterface, Name: "UserRepository",
+			FilePath: "svc/repo.go", Language: "go", Exported: true,
+			Properties: map[string]string{
+				graph.PropArchRole:      "repository",
+				graph.PropDesignPattern: "repository",
+				graph.PropLayerTag:      "data_access",
+			},
+		},
+		{
+			ID: "n2", Type: graph.NodeStruct, Name: "UserService",
+			FilePath: "svc/service.go", Language: "go", Exported: true,
+			Properties: map[string]string{
+				graph.PropArchRole: "service",
+				graph.PropLayerTag: "business",
+			},
+		},
+		{
+			ID: "n3", Type: graph.NodeStruct, Name: "UserController",
+			FilePath: "svc/controller.go", Language: "go", Exported: true,
+			Properties: map[string]string{
+				graph.PropArchRole:      "controller",
+				graph.PropDesignPattern: "factory",
+				graph.PropLayerTag:      "presentation",
+			},
+		},
+		{
+			ID: "n4", Type: graph.NodeDBModel, Name: "User",
+			FilePath: "svc/models.go", Language: "go", Exported: true,
+			Properties: map[string]string{
+				graph.PropLayerTag: "data_access",
+			},
+		},
+		{
+			ID: "n5", Type: graph.NodeClass, Name: "UserHandler",
+			FilePath: "svc/handler.py", Language: "python", Exported: true,
+			Properties: map[string]string{
+				graph.PropArchRole:      "controller",
+				graph.PropDesignPattern: "observer",
+				graph.PropLayerTag:      "presentation",
+			},
+		},
+	}
+
+	summarizer := NewSummarizer(mock, store)
+	if err := summarizer.SummarizeArchitecture(ctx, "user-service", nodes); err != nil {
+		t.Fatalf("SummarizeArchitecture failed: %v", err)
+	}
+
+	// Verify LLM was called.
+	if len(mock.calls) != 1 {
+		t.Fatalf("expected 1 LLM call, got %d", len(mock.calls))
+	}
+
+	// Verify prompt includes architectural information.
+	prompt := mock.calls[0].Messages[0].Content
+	for _, expected := range []string{
+		"user-service",
+		"Architectural role distribution",
+		"repository",
+		"service",
+		"controller",
+		"Design patterns detected",
+		"factory",
+		"observer",
+		"Layer distribution",
+		"data_access",
+		"business",
+		"presentation",
+		"Interfaces",
+		"UserRepository",
+		"Database models",
+		"User",
+		"DDD patterns",
+		"Clean Architecture",
+	} {
+		if !contains(prompt, expected) {
+			t.Errorf("prompt missing %q", expected)
+		}
+	}
+
+	// Verify system prompt is architecture-focused.
+	if !contains(mock.calls[0].SystemPrompt, "architecture") {
+		t.Error("system prompt should mention architecture")
+	}
+
+	// Verify the Document node was stored with kind=architecture_analysis.
+	expectedID := graph.NewNodeID("Document", "generated", "architecture:user-service")
+	node, err := store.GetNode(ctx, expectedID)
+	if err != nil {
+		t.Fatalf("get architecture node: %v", err)
+	}
+	if node.Type != graph.NodeDocument {
+		t.Errorf("expected Document node, got %s", node.Type)
+	}
+	if node.Properties["generated"] != "true" {
+		t.Error("expected generated=true property")
+	}
+	if node.Properties["kind"] != "architecture_analysis" {
+		t.Errorf("expected kind=architecture_analysis, got %s", node.Properties["kind"])
+	}
+	if node.Properties["service"] != "user-service" {
+		t.Errorf("expected service=user-service, got %s", node.Properties["service"])
+	}
+	if node.DocComment == "" {
+		t.Error("expected non-empty DocComment containing architecture analysis")
+	}
+}
+
+func TestSummarizeArchitectureEmpty(t *testing.T) {
+	store, mock := setupSummarizerTest(t)
+	summarizer := NewSummarizer(mock, store)
+
+	if err := summarizer.SummarizeArchitecture(context.Background(), "empty", nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(mock.calls) != 0 {
+		t.Error("expected no LLM calls for empty node list")
+	}
+}
+
+func TestBuildServicePromptIncludesArchInfo(t *testing.T) {
+	nodes := []*graph.Node{
+		{
+			ID: "n1", Type: graph.NodeFunction, Name: "Handle", Language: "go", Exported: true,
+			Properties: map[string]string{
+				graph.PropArchRole:      "controller",
+				graph.PropDesignPattern: "factory",
+				graph.PropLayerTag:      "presentation",
+			},
+		},
+		{
+			ID: "n2", Type: graph.NodeDBModel, Name: "Order", Language: "go", Exported: true,
+			Properties: map[string]string{
+				graph.PropLayerTag: "data_access",
+			},
+		},
+	}
+
+	prompt := buildServicePrompt("order-svc", nodes)
+	for _, expected := range []string{
+		"Architectural roles",
+		"controller",
+		"Design patterns",
+		"factory",
+		"Layers",
+		"presentation",
+		"data_access",
+		"DB models",
+	} {
+		if !contains(prompt, expected) {
+			t.Errorf("buildServicePrompt missing %q", expected)
+		}
+	}
+}
+
+func TestBuildPatternsPromptIncludesCrossServiceInfo(t *testing.T) {
+	nodes := []*graph.Node{
+		{
+			ID: "n1", Type: graph.NodeStruct, Name: "Svc1", Package: "a", Language: "go",
+			Properties: map[string]string{
+				graph.PropArchRole:      "service",
+				graph.PropDesignPattern: "repository",
+				graph.PropLayerTag:      "business",
+			},
+		},
+		{
+			ID: "n2", Type: graph.NodeStruct, Name: "Svc2", Package: "b", Language: "go",
+			Properties: map[string]string{
+				graph.PropArchRole:      "service",
+				graph.PropDesignPattern: "repository,factory",
+				graph.PropLayerTag:      "business",
+			},
+		},
+	}
+
+	prompt := buildPatternsPrompt(nodes)
+	for _, expected := range []string{
+		"Cross-service design patterns",
+		"repository",
+		"factory",
+		"Architectural role distribution across codebase",
+		"service",
+		"Layer consistency across codebase",
+		"business",
+		"cross-service pattern consistency",
+	} {
+		if !contains(prompt, expected) {
+			t.Errorf("buildPatternsPrompt missing %q", expected)
+		}
+	}
+}
+
 func TestGroupNodesByTopDir(t *testing.T) {
 	base := "/project"
 	nodes := []*graph.Node{

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
+	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 
@@ -106,11 +107,29 @@ func (r *Reviewer) ReviewDiff(ctx context.Context, diffRef string, repoPaths ...
 		parts = append(parts, diffCtx)
 	}
 
-	// Add metrics for each changed file.
+	// Add architecture context so reviewer can flag pattern violations.
+	archCtx, err := r.ctxBuilder.BuildArchitectureContext(ctx)
+	if err == nil && !strings.Contains(archCtx, "No architectural metadata") {
+		parts = append(parts, archCtx)
+	}
+
+	// Add metrics for each changed file. Also include model impact for model files.
 	for _, fp := range changedFiles {
 		metricsCtx, err := r.ctxBuilder.BuildMetricsContext(ctx, fp)
 		if err == nil && !strings.Contains(metricsCtx, "No indexed symbols found") {
 			parts = append(parts, metricsCtx)
+		}
+		// Check if changed file contains model nodes and add model impact context.
+		fileNodes, err := r.ctxBuilder.store.QueryNodes(ctx, graph.NodeFilter{FilePath: fp})
+		if err == nil {
+			for _, n := range fileNodes {
+				if n.Type == graph.NodeDBModel || n.Type == graph.NodeDomainModel {
+					impactCtx, err := r.ctxBuilder.BuildModelImpactContext(ctx, n.ID)
+					if err == nil {
+						parts = append(parts, impactCtx)
+					}
+				}
+			}
 		}
 	}
 

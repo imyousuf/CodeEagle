@@ -322,13 +322,33 @@ func (cb *ContextBuilder) BuildDiffContext(ctx context.Context, changedFiles []s
 
 		fmt.Fprintf(&b, "### %s\n", fp)
 
-		// List symbols in this file.
+		// List symbols in this file, highlighting architectural nodes.
 		b.WriteString("**Symbols:**\n")
+		var archNotes []string
 		for _, n := range nodes {
 			if n.Type == graph.NodeFile {
 				continue
 			}
 			fmt.Fprintf(&b, "- [%s] %s\n", n.Type, n.Name)
+			// Flag model/architectural changes.
+			switch n.Type {
+			case graph.NodeDBModel, graph.NodeDomainModel:
+				archNotes = append(archNotes, fmt.Sprintf("WARNING: %s %s is a data model - changes may have wide impact", n.Type, n.Name))
+			}
+			if n.Properties != nil {
+				if role := n.Properties[graph.PropArchRole]; role != "" {
+					archNotes = append(archNotes, fmt.Sprintf("Architectural role affected: %s (%s)", role, n.Name))
+				}
+				if layer := n.Properties[graph.PropLayerTag]; layer != "" {
+					archNotes = append(archNotes, fmt.Sprintf("Layer affected: %s (%s)", layer, n.Name))
+				}
+			}
+		}
+		if len(archNotes) > 0 {
+			b.WriteString("**Architectural impact:**\n")
+			for _, note := range archNotes {
+				fmt.Fprintf(&b, "- %s\n", note)
+			}
 		}
 
 		// Find what depends on these symbols.
@@ -442,6 +462,48 @@ func (cb *ContextBuilder) BuildOverviewContext(ctx context.Context) (string, err
 				fmt.Fprintf(&b, "- %s: %d nodes\n", p.name, p.count)
 			}
 		}
+
+		// Architectural patterns and layer distribution from node properties.
+		patternCounts := make(map[string]int)
+		layerCounts := make(map[string]int)
+		for _, n := range allNodes {
+			if n.Properties == nil {
+				continue
+			}
+			if patterns := n.Properties[graph.PropDesignPattern]; patterns != "" {
+				for _, p := range strings.Split(patterns, ",") {
+					p = strings.TrimSpace(p)
+					if p != "" {
+						patternCounts[p]++
+					}
+				}
+			}
+			if layer := n.Properties[graph.PropLayerTag]; layer != "" {
+				layerCounts[layer]++
+			}
+		}
+		if len(patternCounts) > 0 {
+			b.WriteString("\n### Architectural Patterns\n")
+			pNames := make([]string, 0, len(patternCounts))
+			for p := range patternCounts {
+				pNames = append(pNames, p)
+			}
+			sort.Strings(pNames)
+			for _, p := range pNames {
+				fmt.Fprintf(&b, "- %s: %d instances\n", p, patternCounts[p])
+			}
+		}
+		if len(layerCounts) > 0 {
+			b.WriteString("\n### Layer Distribution\n")
+			layers := make([]string, 0, len(layerCounts))
+			for l := range layerCounts {
+				layers = append(layers, l)
+			}
+			sort.Strings(layers)
+			for _, l := range layers {
+				fmt.Fprintf(&b, "- %s: %d nodes\n", l, layerCounts[l])
+			}
+		}
 	}
 
 	return b.String(), nil
@@ -528,6 +590,277 @@ func (cb *ContextBuilder) BuildMetricsContext(ctx context.Context, filePath stri
 	if !hasMetrics {
 		b.WriteString("No metrics data available for symbols in this file.\n")
 	}
+
+	return b.String(), nil
+}
+
+// BuildModelContext returns all DB models, domain models, view models, and DTOs
+// for a service, grouped by type. Includes field information from Properties["fields"].
+func (cb *ContextBuilder) BuildModelContext(ctx context.Context, serviceName string) (string, error) {
+	modelTypes := []graph.NodeType{
+		graph.NodeDBModel,
+		graph.NodeDomainModel,
+		graph.NodeViewModel,
+		graph.NodeDTO,
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "## Data Models: %s\n", serviceName)
+
+	found := false
+	groupLabels := map[graph.NodeType]string{
+		graph.NodeDBModel:      "DB Models",
+		graph.NodeDomainModel:  "Domain Models",
+		graph.NodeViewModel:    "View Models / DTOs",
+		graph.NodeDTO:          "View Models / DTOs",
+	}
+
+	// Group ViewModel and DTO together.
+	type group struct {
+		label string
+		nodes []*graph.Node
+	}
+	groups := []group{
+		{label: "DB Models"},
+		{label: "Domain Models"},
+		{label: "View Models / DTOs"},
+	}
+	groupIndex := map[graph.NodeType]int{
+		graph.NodeDBModel:     0,
+		graph.NodeDomainModel: 1,
+		graph.NodeViewModel:   2,
+		graph.NodeDTO:         2,
+	}
+	_ = groupLabels // used implicitly via groupIndex
+
+	for _, mt := range modelTypes {
+		filter := graph.NodeFilter{Type: mt}
+		if serviceName != "" {
+			filter.Package = serviceName
+		}
+		nodes, err := cb.store.QueryNodes(ctx, filter)
+		if err != nil {
+			continue
+		}
+		for _, n := range nodes {
+			idx := groupIndex[mt]
+			groups[idx].nodes = append(groups[idx].nodes, n)
+			found = true
+		}
+	}
+
+	if !found {
+		fmt.Fprintf(&b, "\nNo data models found for service %s.\n", serviceName)
+		return b.String(), nil
+	}
+
+	for _, g := range groups {
+		if len(g.nodes) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "\n### %s\n", g.label)
+		for _, n := range g.nodes {
+			fields := ""
+			if n.Properties != nil && n.Properties["fields"] != "" {
+				fields = fmt.Sprintf(" (fields: %s)", n.Properties["fields"])
+			}
+			fmt.Fprintf(&b, "- %s%s\n", n.Name, fields)
+		}
+	}
+
+	return b.String(), nil
+}
+
+// BuildArchitectureContext returns a high-level architecture overview showing
+// detected design patterns, layer distribution, and architectural role summary.
+func (cb *ContextBuilder) BuildArchitectureContext(ctx context.Context) (string, error) {
+	// Query all nodes to gather architectural metadata.
+	allNodes, err := cb.store.QueryNodes(ctx, graph.NodeFilter{})
+	if err != nil {
+		return "", fmt.Errorf("query all nodes: %w", err)
+	}
+
+	var b strings.Builder
+	b.WriteString("## Architecture Overview\n")
+
+	// Collect design patterns with example nodes.
+	patternExamples := make(map[string][]string) // pattern -> list of node names
+	// Collect layer distribution.
+	layerCounts := make(map[string]int)
+	// Collect architectural roles.
+	roleCounts := make(map[string]int)
+
+	for _, n := range allNodes {
+		if n.Properties == nil {
+			continue
+		}
+		if patterns := n.Properties[graph.PropDesignPattern]; patterns != "" {
+			for _, p := range strings.Split(patterns, ",") {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					patternExamples[p] = append(patternExamples[p], n.Name)
+				}
+			}
+		}
+		if layer := n.Properties[graph.PropLayerTag]; layer != "" {
+			layerCounts[layer]++
+		}
+		if role := n.Properties[graph.PropArchRole]; role != "" {
+			roleCounts[role]++
+		}
+	}
+
+	if len(patternExamples) > 0 {
+		b.WriteString("\n### Detected Design Patterns\n")
+		patternNames := make([]string, 0, len(patternExamples))
+		for p := range patternExamples {
+			patternNames = append(patternNames, p)
+		}
+		sort.Strings(patternNames)
+		for _, p := range patternNames {
+			examples := patternExamples[p]
+			limit := 3
+			if len(examples) < limit {
+				limit = len(examples)
+			}
+			fmt.Fprintf(&b, "- **%s** (%d instances): %s\n", p, len(examples), strings.Join(examples[:limit], ", "))
+		}
+	}
+
+	if len(layerCounts) > 0 {
+		b.WriteString("\n### Layer Distribution\n")
+		layers := make([]string, 0, len(layerCounts))
+		for l := range layerCounts {
+			layers = append(layers, l)
+		}
+		sort.Strings(layers)
+		for _, l := range layers {
+			fmt.Fprintf(&b, "- %s: %d nodes\n", l, layerCounts[l])
+		}
+	}
+
+	if len(roleCounts) > 0 {
+		b.WriteString("\n### Architectural Roles\n")
+		roles := make([]string, 0, len(roleCounts))
+		for r := range roleCounts {
+			roles = append(roles, r)
+		}
+		sort.Strings(roles)
+		for _, r := range roles {
+			fmt.Fprintf(&b, "- %s: %d nodes\n", r, roleCounts[r])
+		}
+	}
+
+	if len(patternExamples) == 0 && len(layerCounts) == 0 && len(roleCounts) == 0 {
+		b.WriteString("\nNo architectural metadata detected.\n")
+	}
+
+	return b.String(), nil
+}
+
+// BuildModelImpactContext traces all consumers of a DB model or domain model
+// using BFS, showing which services, controllers, DTOs/ViewModels, and
+// migrations reference it.
+func (cb *ContextBuilder) BuildModelImpactContext(ctx context.Context, modelNodeID string) (string, error) {
+	root, err := cb.store.GetNode(ctx, modelNodeID)
+	if err != nil {
+		return "", fmt.Errorf("get model node %s: %w", modelNodeID, err)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "## Model Impact Analysis: %s (%s)\n\n", root.Name, root.Type)
+
+	// BFS up to 3 levels following incoming edges (who depends on this model).
+	impactEdges := []graph.EdgeType{
+		graph.EdgeImports,
+		graph.EdgeDependsOn,
+		graph.EdgeCalls,
+		graph.EdgeContains,
+		graph.EdgeExposes,
+		graph.EdgeMigrates,
+	}
+
+	type levelEntry struct {
+		node  *graph.Node
+		level int
+	}
+
+	visited := map[string]struct{}{modelNodeID: {}}
+	queue := []levelEntry{{node: root, level: 0}}
+
+	// Categorize consumers.
+	var services []*graph.Node
+	var controllers []*graph.Node
+	var dtoViewModels []*graph.Node
+	var migrations []*graph.Node
+	var others []*graph.Node
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		if current.level >= 3 {
+			continue
+		}
+
+		for _, et := range impactEdges {
+			neighbors, err := cb.store.GetNeighbors(ctx, current.node.ID, et, graph.Incoming)
+			if err != nil {
+				continue
+			}
+			for _, n := range neighbors {
+				if _, seen := visited[n.ID]; seen {
+					continue
+				}
+				visited[n.ID] = struct{}{}
+				queue = append(queue, levelEntry{node: n, level: current.level + 1})
+
+				// Categorize by type or architectural role.
+				role := ""
+				if n.Properties != nil {
+					role = n.Properties[graph.PropArchRole]
+				}
+				switch {
+				case n.Type == graph.NodeService || role == "service":
+					services = append(services, n)
+				case role == "controller":
+					controllers = append(controllers, n)
+				case n.Type == graph.NodeDTO || n.Type == graph.NodeViewModel:
+					dtoViewModels = append(dtoViewModels, n)
+				case n.Type == graph.NodeMigration:
+					migrations = append(migrations, n)
+				default:
+					others = append(others, n)
+				}
+			}
+		}
+	}
+
+	writeSection := func(title string, nodes []*graph.Node) {
+		if len(nodes) == 0 {
+			return
+		}
+		fmt.Fprintf(&b, "### %s\n", title)
+		for _, n := range nodes {
+			loc := ""
+			if n.FilePath != "" {
+				loc = fmt.Sprintf(" in %s", n.FilePath)
+			}
+			fmt.Fprintf(&b, "- [%s] %s%s\n", n.Type, n.Name, loc)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(services) == 0 && len(controllers) == 0 && len(dtoViewModels) == 0 && len(migrations) == 0 && len(others) == 0 {
+		b.WriteString("No consumers found for this model.\n")
+		return b.String(), nil
+	}
+
+	writeSection("Services", services)
+	writeSection("Controllers", controllers)
+	writeSection("DTOs / View Models", dtoViewModels)
+	writeSection("Migrations", migrations)
+	writeSection("Other Consumers", others)
 
 	return b.String(), nil
 }
