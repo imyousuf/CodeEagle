@@ -25,12 +25,30 @@ const (
 	NodeVariable     NodeType = "Variable"
 	NodeAPIEndpoint  NodeType = "APIEndpoint"
 	NodeDBModel      NodeType = "DBModel"
+	NodeDomainModel  NodeType = "DomainModel"
+	NodeViewModel    NodeType = "ViewModel"
+	NodeDTO          NodeType = "DTO"
 	NodeMigration    NodeType = "Migration"
 	NodeDependency   NodeType = "Dependency"
 	NodeDocument     NodeType = "Document"
 	NodeAIGuideline  NodeType = "AIGuideline"
 	NodeTestFunction NodeType = "TestFunction"
 	NodeTestFile     NodeType = "TestFile"
+)
+
+// Well-known property keys used for architectural classification.
+const (
+	// PropArchRole is the architectural role of a node (e.g., "controller", "service",
+	// "repository", "middleware", "factory", "observer", "gateway").
+	PropArchRole = "architectural_role"
+
+	// PropDesignPattern is a comma-separated list of design patterns detected
+	// (e.g., "repository,singleton", "factory", "observer").
+	PropDesignPattern = "design_pattern"
+
+	// PropLayerTag classifies nodes into architectural layers
+	// (e.g., "presentation", "business", "data_access", "infrastructure").
+	PropLayerTag = "layer"
 )
 
 // EdgeType represents a relationship between two nodes.

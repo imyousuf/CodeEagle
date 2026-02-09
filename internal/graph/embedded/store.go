@@ -13,13 +13,14 @@ import (
 
 // Key prefixes for the BadgerDB key scheme.
 const (
-	prefixNode         = "n:"
-	prefixEdge         = "e:"
-	prefixIdxType      = "idx:type:"
-	prefixIdxFile      = "idx:file:"
-	prefixIdxPkg       = "idx:pkg:"
-	prefixIdxEdge      = "idx:edge:"
+	prefixNode           = "n:"
+	prefixEdge           = "e:"
+	prefixIdxType        = "idx:type:"
+	prefixIdxFile        = "idx:file:"
+	prefixIdxPkg         = "idx:pkg:"
+	prefixIdxEdge        = "idx:edge:"
 	prefixIdxReverseEdge = "idx:redge:"
+	prefixIdxRole        = "idx:role:"
 )
 
 // Store implements graph.Store using BadgerDB.
@@ -69,6 +70,19 @@ func indexReverseEdgeKey(targetID string, edgeType graph.EdgeType, edgeID string
 	return []byte(fmt.Sprintf("%s%s:%s:%s", prefixIdxReverseEdge, targetID, edgeType, edgeID))
 }
 
+// indexRoleKey returns a secondary index key for architectural role lookup.
+func indexRoleKey(role, id string) []byte {
+	return []byte(fmt.Sprintf("%s%s:%s", prefixIdxRole, role, id))
+}
+
+// nodeArchRole extracts the architectural role from a node's properties.
+func nodeArchRole(n *graph.Node) string {
+	if n.Properties == nil {
+		return ""
+	}
+	return n.Properties[graph.PropArchRole]
+}
+
 func (s *Store) AddNode(_ context.Context, node *graph.Node) error {
 	data, err := json.Marshal(node)
 	if err != nil {
@@ -88,6 +102,11 @@ func (s *Store) AddNode(_ context.Context, node *graph.Node) error {
 		}
 		if node.Package != "" {
 			if err := txn.Set(indexPkgKey(node.Package, node.ID), nil); err != nil {
+				return err
+			}
+		}
+		if role := nodeArchRole(node); role != "" {
+			if err := txn.Set(indexRoleKey(role, node.ID), nil); err != nil {
 				return err
 			}
 		}
@@ -116,6 +135,9 @@ func (s *Store) UpdateNode(_ context.Context, node *graph.Node) error {
 		if old.Package != node.Package && old.Package != "" {
 			_ = txn.Delete(indexPkgKey(old.Package, old.ID))
 		}
+		if oldRole := nodeArchRole(old); oldRole != "" && oldRole != nodeArchRole(node) {
+			_ = txn.Delete(indexRoleKey(oldRole, old.ID))
+		}
 		// Write new data and indexes.
 		if err := txn.Set(nodeKey(node.ID), data); err != nil {
 			return err
@@ -130,6 +152,11 @@ func (s *Store) UpdateNode(_ context.Context, node *graph.Node) error {
 		}
 		if node.Package != "" {
 			if err := txn.Set(indexPkgKey(node.Package, node.ID), nil); err != nil {
+				return err
+			}
+		}
+		if role := nodeArchRole(node); role != "" {
+			if err := txn.Set(indexRoleKey(role, node.ID), nil); err != nil {
 				return err
 			}
 		}
@@ -176,6 +203,9 @@ func deleteNodeInTxn(txn *badger.Txn, id string) error {
 	}
 	if node.Package != "" {
 		_ = txn.Delete(indexPkgKey(node.Package, id))
+	}
+	if role := nodeArchRole(node); role != "" {
+		_ = txn.Delete(indexRoleKey(role, id))
 	}
 	// Delete the node itself.
 	return txn.Delete(nodeKey(id))
@@ -551,6 +581,20 @@ func matchesFilter(node *graph.Node, filter graph.NodeFilter) bool {
 	}
 	if filter.Exported != nil && node.Exported != *filter.Exported {
 		return false
+	}
+	// Property-based filtering: all specified key-value pairs must match.
+	for key, val := range filter.Properties {
+		if node.Properties == nil {
+			return false
+		}
+		nodeVal, ok := node.Properties[key]
+		if !ok {
+			return false
+		}
+		// Support substring matching for comma-separated values (e.g., "repository" matches "repository,singleton").
+		if nodeVal != val && !strings.Contains(nodeVal, val) {
+			return false
+		}
 	}
 	return true
 }

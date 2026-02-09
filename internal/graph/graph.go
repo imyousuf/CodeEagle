@@ -19,6 +19,9 @@ type NodeFilter struct {
 	Language    string
 	NamePattern string // glob pattern matched against Name
 	Exported    *bool
+	// Properties filters nodes by property key-value pairs.
+	// All specified entries must match (AND logic).
+	Properties map[string]string
 }
 
 // Store is the interface for knowledge graph persistence.
