@@ -100,32 +100,12 @@ func newWatchCmd() *cobra.Command {
 			// Create LLM client if auto-summarize is enabled.
 			var llmClient llm.Client
 			if cfg.Agents.AutoSummarize {
-				apiKey := os.Getenv("ANTHROPIC_API_KEY")
-				if apiKey != "" || cfg.Agents.LLMProvider == "vertex-ai" {
-					provider := cfg.Agents.LLMProvider
-					if provider == "" {
-						provider = "anthropic"
-					}
-					project := cfg.Agents.Project
-					if project == "" {
-						project = os.Getenv("GOOGLE_CLOUD_PROJECT")
-					}
-					c, err := llm.NewClient(llm.Config{
-						Provider:        provider,
-						Model:           cfg.Agents.Model,
-						APIKey:          apiKey,
-						Project:         project,
-						Location:        cfg.Agents.Location,
-						CredentialsFile: cfg.Agents.CredentialsFile,
-					})
-					if err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: auto-summarize enabled but LLM client creation failed: %v\n", err)
-					} else {
-						llmClient = c
-						defer llmClient.Close()
-					}
-				} else if verbose {
-					fmt.Fprintln(cmd.ErrOrStderr(), "Warning: auto-summarize enabled but no API key found (set ANTHROPIC_API_KEY)")
+				c, err := createLLMClient(cfg)
+				if err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: auto-summarize enabled but LLM client creation failed: %v\n", err)
+				} else {
+					llmClient = c
+					defer llmClient.Close()
 				}
 			}
 

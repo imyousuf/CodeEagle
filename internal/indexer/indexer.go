@@ -303,6 +303,14 @@ func (idx *Indexer) Stats() IndexStats {
 	return stats
 }
 
+// RunSummarization runs LLM-assisted summarization if auto-summarize is enabled
+// and an LLM client is available. Safe to call externally after sync operations.
+func (idx *Indexer) RunSummarization(ctx context.Context) {
+	if idx.autoSummarize && idx.llmClient != nil {
+		idx.runSummarization(ctx)
+	}
+}
+
 // runSummarization queries all nodes, groups them by top-level directory,
 // and uses the LLM to generate per-service and codebase-wide summaries.
 func (idx *Indexer) runSummarization(ctx context.Context) {

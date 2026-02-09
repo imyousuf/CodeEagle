@@ -11,6 +11,10 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/indexer"
+	"github.com/imyousuf/CodeEagle/pkg/llm"
+
+	// Register LLM providers so their init() functions run.
+	_ "github.com/imyousuf/CodeEagle/internal/llm"
 	"github.com/imyousuf/CodeEagle/internal/parser"
 	"github.com/imyousuf/CodeEagle/internal/parser/golang"
 	htmlparser "github.com/imyousuf/CodeEagle/internal/parser/html"
@@ -105,6 +109,18 @@ target branch for import.`,
 				ExcludePatterns: cfg.Watch.Exclude,
 			}
 
+			// Create LLM client if auto-summarize is enabled.
+			var llmClient llm.Client
+			if cfg.Agents.AutoSummarize {
+				c, err := createLLMClient(cfg)
+				if err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: auto-summarize enabled but LLM client creation failed: %v\n", err)
+				} else {
+					llmClient = c
+					defer llmClient.Close()
+				}
+			}
+
 			// Create indexer.
 			idx := indexer.NewIndexer(indexer.IndexerConfig{
 				GraphStore:     store,
@@ -112,6 +128,8 @@ target branch for import.`,
 				WatcherConfig:  wcfg,
 				Verbose:        verbose,
 				Logger:         logFn,
+				LLMClient:      llmClient,
+				AutoSummarize:  cfg.Agents.AutoSummarize,
 			})
 
 			mode := "incremental"
@@ -123,6 +141,9 @@ target branch for import.`,
 			if err := indexer.SyncFiles(ctx(cmd), idx, paths, cfg.ConfigDir, full, currentBranch); err != nil {
 				return fmt.Errorf("sync: %w", err)
 			}
+
+			// Run LLM summarization if enabled.
+			idx.RunSummarization(ctx(cmd))
 
 			// Cleanup stale branches.
 			if len(cfg.Repositories) > 0 {

@@ -29,6 +29,7 @@ bin/
 
 # Graph database
 .codeeagle/
+.CodeEagle/
 
 # env file
 .env
