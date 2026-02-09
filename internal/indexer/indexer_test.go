@@ -412,3 +412,88 @@ func NewFunc() {}
 		t.Error("expected KeepFunc to persist after re-index")
 	}
 }
+
+func TestHasChangesAfterIndexFile(t *testing.T) {
+	idx, _ := setupTestIndexer(t)
+	ctx := context.Background()
+
+	if idx.HasChanges() {
+		t.Error("expected HasChanges=false for fresh indexer")
+	}
+
+	tmpDir := t.TempDir()
+	goFile := filepath.Join(tmpDir, "main.go")
+	if err := os.WriteFile(goFile, []byte("package main\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.IndexFile(ctx, goFile); err != nil {
+		t.Fatal(err)
+	}
+
+	if !idx.HasChanges() {
+		t.Error("expected HasChanges=true after indexing a file")
+	}
+}
+
+func TestHasChangesNoFiles(t *testing.T) {
+	idx, _ := setupTestIndexer(t)
+
+	if idx.HasChanges() {
+		t.Error("expected HasChanges=false for fresh indexer with no files indexed")
+	}
+
+	files := idx.ChangedFiles()
+	if len(files) != 0 {
+		t.Errorf("expected 0 changed files, got %d", len(files))
+	}
+}
+
+func TestChangedFilesReturnsCopy(t *testing.T) {
+	idx, _ := setupTestIndexer(t)
+	ctx := context.Background()
+
+	tmpDir := t.TempDir()
+	goFile := filepath.Join(tmpDir, "main.go")
+	if err := os.WriteFile(goFile, []byte("package main\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.IndexFile(ctx, goFile); err != nil {
+		t.Fatal(err)
+	}
+
+	files1 := idx.ChangedFiles()
+	files2 := idx.ChangedFiles()
+
+	if len(files1) != len(files2) {
+		t.Fatalf("expected same length, got %d vs %d", len(files1), len(files2))
+	}
+
+	// Mutate the first slice — should not affect the second call.
+	if len(files1) > 0 {
+		files1[0] = "mutated"
+		files3 := idx.ChangedFiles()
+		if files3[0] == "mutated" {
+			t.Error("ChangedFiles returned a reference, not a copy")
+		}
+	}
+}
+
+func TestChangedFilesUnsupportedExtensionNotTracked(t *testing.T) {
+	idx, _ := setupTestIndexer(t)
+	ctx := context.Background()
+
+	tmpDir := t.TempDir()
+	txtFile := filepath.Join(tmpDir, "readme.txt")
+	if err := os.WriteFile(txtFile, []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Unsupported extension should not be tracked.
+	if err := idx.IndexFile(ctx, txtFile); err != nil {
+		t.Fatal(err)
+	}
+
+	if idx.HasChanges() {
+		t.Error("expected HasChanges=false after indexing unsupported file type")
+	}
+}

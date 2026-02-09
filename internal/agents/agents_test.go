@@ -693,6 +693,105 @@ func TestPlannerSetMaxIterations(t *testing.T) {
 	}
 }
 
+func TestPlannerVerboseToolLogging(t *testing.T) {
+	// Verify that verbose mode logs iteration numbers and tool names.
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	mock := &mockToolClient{
+		responses: []llm.Response{
+			{
+				Content: "Let me check.",
+				ToolCalls: []llm.ToolCall{
+					{ID: "tc1", Name: "get_graph_overview", Arguments: map[string]any{}},
+				},
+			},
+			{
+				Content: "Here is the answer.",
+			},
+		},
+	}
+	ctxBuilder := NewContextBuilder(store)
+	planner := NewPlanner(mock, ctxBuilder)
+
+	var logs []string
+	planner.SetVerbose(true, func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	})
+
+	resp, err := planner.Ask(context.Background(), "What is the project overview?")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp != "Here is the answer." {
+		t.Errorf("expected 'Here is the answer.', got %q", resp)
+	}
+
+	// Verify log entries contain expected messages.
+	foundStartup := false
+	foundIteration1 := false
+	foundToolStart := false
+	foundToolEnd := false
+	for _, log := range logs {
+		if strings.Contains(log, "Starting planner query") {
+			foundStartup = true
+		}
+		if strings.Contains(log, "Planner iteration 1/") {
+			foundIteration1 = true
+		}
+		if strings.Contains(log, "-> tool: get_graph_overview") {
+			foundToolStart = true
+		}
+		if strings.Contains(log, "<- tool get_graph_overview (ok)") {
+			foundToolEnd = true
+		}
+	}
+	if !foundStartup {
+		t.Error("expected startup log message")
+	}
+	if !foundIteration1 {
+		t.Error("expected iteration 1 log message")
+	}
+	if !foundToolStart {
+		t.Error("expected tool start log message")
+	}
+	if !foundToolEnd {
+		t.Error("expected tool completion log message")
+	}
+}
+
+func TestBaseAgentSetVerbose(t *testing.T) {
+	mock := &mockClient{response: "ok"}
+	ba := &BaseAgent{
+		name:         "test",
+		llmClient:    mock,
+		systemPrompt: "test",
+	}
+
+	var logs []string
+	ba.SetVerbose(true, func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	})
+
+	_, err := ba.ask(context.Background(), "", "query")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(logs) == 0 {
+		t.Error("expected verbose log from ask()")
+	}
+	foundProvider := false
+	for _, log := range logs {
+		if strings.Contains(log, "Sending query to LLM") {
+			foundProvider = true
+		}
+	}
+	if !foundProvider {
+		t.Error("expected provider log message in verbose mode")
+	}
+}
+
 func TestPlannerAgenticToolError(t *testing.T) {
 	// Tool-capable client that calls an unknown tool -> should include error in response.
 	store, cleanup := setupTestStore(t)

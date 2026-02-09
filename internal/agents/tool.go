@@ -23,15 +23,28 @@ type Tool interface {
 
 // Registry manages a collection of tools.
 type Registry struct {
-	mu    sync.RWMutex
-	tools map[string]Tool
-	order []string
+	mu      sync.RWMutex
+	tools   map[string]Tool
+	order   []string
+	verbose bool
+	log     func(format string, args ...any)
 }
 
 // NewRegistry creates an empty tool registry.
 func NewRegistry() *Registry {
 	return &Registry{
 		tools: make(map[string]Tool),
+	}
+}
+
+// SetVerbose enables or disables verbose logging on the registry.
+// If logger is nil, a no-op logger is used.
+func (r *Registry) SetVerbose(verbose bool, logger func(format string, args ...any)) {
+	r.verbose = verbose
+	if logger != nil {
+		r.log = logger
+	} else {
+		r.log = func(format string, args ...any) {}
 	}
 }
 
@@ -76,7 +89,17 @@ func (r *Registry) Execute(ctx context.Context, name string, args map[string]any
 	if !ok {
 		return "", false, fmt.Errorf("unknown tool: %s", name)
 	}
+	if r.verbose && r.log != nil {
+		r.log("  -> tool: %s", name)
+	}
 	result, success := t.Execute(ctx, args)
+	if r.verbose && r.log != nil {
+		if success {
+			r.log("  <- tool %s (ok)", name)
+		} else {
+			r.log("  <- tool %s (failed)", name)
+		}
+	}
 	return result, success, nil
 }
 

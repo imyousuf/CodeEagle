@@ -37,6 +37,9 @@ func NewAsker(client llm.Client, ctxBuilder *ContextBuilder, repoPaths ...string
 // the LLM. Unlike other agents that use a switch/case, the asker accumulates
 // context from all matching categories.
 func (a *Asker) Ask(ctx context.Context, query string) (string, error) {
+	if a.verbose && a.log != nil {
+		a.log("Starting asker query...")
+	}
 	lower := strings.ToLower(query)
 	var parts []string
 

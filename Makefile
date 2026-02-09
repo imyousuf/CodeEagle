@@ -1,4 +1,4 @@
-.PHONY: build clean test test-fast test-smoke lint fmt tidy help
+.PHONY: build install clean test test-fast test-smoke lint fmt tidy help
 
 # Binary name
 BINARY_NAME=codeeagle
@@ -23,6 +23,10 @@ all: build
 build:
 	@mkdir -p $(BUILD_DIR)
 	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/codeeagle
+
+## install: Build and install to $GOPATH/bin
+install:
+	$(GOCMD) install $(LDFLAGS) ./cmd/codeeagle
 
 ## clean: Clean build artifacts
 clean:

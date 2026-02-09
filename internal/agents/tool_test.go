@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -147,5 +148,75 @@ func TestToLLMTools(t *testing.T) {
 	}
 	if lts[0].Name != "a" || lts[1].Name != "b" {
 		t.Errorf("unexpected tool names: %q, %q", lts[0].Name, lts[1].Name)
+	}
+}
+
+func TestRegistryVerboseLogging(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&mockTool{name: "search_nodes", result: "found 3", success: true})
+
+	var logs []string
+	r.SetVerbose(true, func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	})
+
+	_, _, err := r.Execute(context.Background(), "search_nodes", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have logged tool start and completion.
+	if len(logs) != 2 {
+		t.Fatalf("expected 2 log entries, got %d: %v", len(logs), logs)
+	}
+	if logs[0] != "  -> tool: search_nodes" {
+		t.Errorf("expected start log, got %q", logs[0])
+	}
+	if logs[1] != "  <- tool search_nodes (ok)" {
+		t.Errorf("expected completion log, got %q", logs[1])
+	}
+}
+
+func TestRegistryVerboseLoggingFailedTool(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&mockTool{name: "failing_tool", result: "error", success: false})
+
+	var logs []string
+	r.SetVerbose(true, func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	})
+
+	_, success, err := r.Execute(context.Background(), "failing_tool", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if success {
+		t.Error("expected success=false")
+	}
+
+	if len(logs) != 2 {
+		t.Fatalf("expected 2 log entries, got %d: %v", len(logs), logs)
+	}
+	if logs[1] != "  <- tool failing_tool (failed)" {
+		t.Errorf("expected failure log, got %q", logs[1])
+	}
+}
+
+func TestRegistryVerboseDisabled(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&mockTool{name: "quiet_tool", result: "ok", success: true})
+
+	var logs []string
+	r.SetVerbose(false, func(format string, args ...any) {
+		logs = append(logs, fmt.Sprintf(format, args...))
+	})
+
+	_, _, err := r.Execute(context.Background(), "quiet_tool", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(logs) != 0 {
+		t.Errorf("expected no logs when verbose=false, got %d: %v", len(logs), logs)
 	}
 }

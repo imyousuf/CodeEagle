@@ -62,6 +62,12 @@ func NewPlanner(client llm.Client, ctxBuilder *ContextBuilder, repoPaths ...stri
 	}
 }
 
+// SetVerbose enables or disables verbose logging on the planner and its tool registry.
+func (p *Planner) SetVerbose(verbose bool, logger func(format string, args ...any)) {
+	p.BaseAgent.SetVerbose(verbose, logger)
+	p.registry.SetVerbose(verbose, logger)
+}
+
 // SetMaxIterations sets the maximum number of agentic loop iterations.
 func (p *Planner) SetMaxIterations(n int) {
 	if n > 0 {
@@ -73,6 +79,9 @@ func (p *Planner) SetMaxIterations(n int) {
 // calling, it uses an agentic loop where the LLM iteratively calls tools.
 // Otherwise, it falls back to single-turn keyword-based context selection.
 func (p *Planner) Ask(ctx context.Context, query string) (string, error) {
+	if p.verbose && p.log != nil {
+		p.log("Starting planner query...")
+	}
 	toolClient, ok := p.llmClient.(llm.ToolCapableClient)
 	if !ok {
 		return p.askSingleTurn(ctx, query)
@@ -101,6 +110,10 @@ func (p *Planner) askAgentic(ctx context.Context, query string, toolClient llm.T
 	for i := 0; i < p.maxIterations; i++ {
 		if err := ctx.Err(); err != nil {
 			return "", fmt.Errorf("planner timeout after %d iterations: %w", i, err)
+		}
+
+		if p.verbose && p.log != nil {
+			p.log("Planner iteration %d/%d", i+1, p.maxIterations)
 		}
 
 		resp, err := toolClient.ChatWithTools(ctx, agenticPlannerSystemPrompt, messages, tools)

@@ -60,6 +60,11 @@ This command is typically invoked automatically by the Claude CLI via
 			for _, tool := range agents.NewPlannerTools(ctxBuilder) {
 				registry.Register(tool)
 			}
+			if verbose {
+				registry.SetVerbose(true, func(format string, args ...any) {
+					fmt.Fprintf(os.Stderr, format+"\n", args...)
+				})
+			}
 
 			server := mcp.NewServer(registry)
 

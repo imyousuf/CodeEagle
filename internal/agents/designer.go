@@ -32,6 +32,9 @@ func NewDesigner(client llm.Client, ctxBuilder *ContextBuilder) *Designer {
 // context when a specific entity is mentioned. For model and architecture
 // queries, it adds specialized context.
 func (d *Designer) Ask(ctx context.Context, query string) (string, error) {
+	if d.verbose && d.log != nil {
+		d.log("Starting designer query...")
+	}
 	lower := strings.ToLower(query)
 	var parts []string
 

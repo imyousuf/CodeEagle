@@ -52,6 +52,7 @@ type Indexer struct {
 	filesIndexed int
 	errors       []string
 	lastIndex    time.Time
+	changedFiles map[string]struct{} // tracks relative paths of files changed since last reset
 }
 
 // NewIndexer creates a new Indexer with the given configuration.
@@ -87,12 +88,31 @@ func NewIndexer(cfg IndexerConfig) *Indexer {
 		log:           logFn,
 		llmClient:     cfg.LLMClient,
 		autoSummarize: cfg.AutoSummarize,
+		changedFiles:  make(map[string]struct{}),
 	}
 }
 
 // Store returns the underlying graph store used by this Indexer.
 func (idx *Indexer) Store() graph.Store {
 	return idx.store
+}
+
+// HasChanges returns true if any files have been indexed since the Indexer was created.
+func (idx *Indexer) HasChanges() bool {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	return len(idx.changedFiles) > 0
+}
+
+// ChangedFiles returns a copy of the relative paths of files that were indexed.
+func (idx *Indexer) ChangedFiles() []string {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	files := make([]string, 0, len(idx.changedFiles))
+	for f := range idx.changedFiles {
+		files = append(files, f)
+	}
+	return files
 }
 
 // toRelativePath converts an absolute file path to a path relative to the
@@ -161,6 +181,7 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
 	idx.mu.Lock()
 	idx.filesIndexed++
 	idx.lastIndex = time.Now()
+	idx.changedFiles[relPath] = struct{}{}
 	idx.mu.Unlock()
 
 	if idx.verbose {
@@ -255,9 +276,9 @@ func (idx *Indexer) Start(ctx context.Context) error {
 			stats.FilesIndexed, stats.NodesTotal, stats.EdgesTotal, elapsed)
 	}
 
-	// Run auto-summarization if configured.
+	// Run auto-summarization if configured (full index: all groups).
 	if idx.autoSummarize && idx.llmClient != nil {
-		idx.runSummarization(ctx)
+		idx.runSummarization(ctx, nil)
 	}
 
 	// Start file watcher.
@@ -327,15 +348,18 @@ func (idx *Indexer) Stats() IndexStats {
 
 // RunSummarization runs LLM-assisted summarization if auto-summarize is enabled
 // and an LLM client is available. Safe to call externally after sync operations.
+// It scopes summarization to groups affected by changed files.
 func (idx *Indexer) RunSummarization(ctx context.Context) {
 	if idx.autoSummarize && idx.llmClient != nil {
-		idx.runSummarization(ctx)
+		idx.runSummarization(ctx, idx.ChangedFiles())
 	}
 }
 
 // runSummarization queries all nodes, groups them by top-level directory,
 // and uses the LLM to generate per-service and codebase-wide summaries.
-func (idx *Indexer) runSummarization(ctx context.Context) {
+// If changedFiles is non-nil, only groups containing changed files are summarized.
+// Pass nil to summarize all groups (e.g., after a full index).
+func (idx *Indexer) runSummarization(ctx context.Context, changedFiles []string) {
 	if idx.verbose {
 		idx.log("Running LLM-assisted summarization...")
 	}
@@ -354,11 +378,34 @@ func (idx *Indexer) runSummarization(ctx context.Context) {
 		basePaths = idx.wcfg.Paths
 	}
 
+	// Compute affected groups from changed files.
+	var affectedGroups map[string]struct{}
+	if changedFiles != nil {
+		affectedGroups = make(map[string]struct{})
+		for _, fp := range changedFiles {
+			parts := strings.SplitN(fp, string(filepath.Separator), 2)
+			if len(parts) > 0 && parts[0] != "" {
+				affectedGroups[parts[0]] = struct{}{}
+			} else {
+				affectedGroups["(root)"] = struct{}{}
+			}
+		}
+	}
+
 	summarizer := NewSummarizer(idx.llmClient, idx.store, idx.log, idx.verbose)
 
 	// Summarize each top-level directory group as a "service".
 	groups := GroupNodesByTopDir(allNodes, basePaths)
 	for groupName, nodes := range groups {
+		// Skip groups unaffected by changes (when scoping is active).
+		if affectedGroups != nil {
+			if _, ok := affectedGroups[groupName]; !ok {
+				if idx.verbose {
+					idx.log("  Skipping unchanged group: %s", groupName)
+				}
+				continue
+			}
+		}
 		if idx.verbose {
 			idx.log("  Summarizing group: %s (%d nodes)", groupName, len(nodes))
 		}

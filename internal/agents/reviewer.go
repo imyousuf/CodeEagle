@@ -33,6 +33,9 @@ func NewReviewer(client llm.Client, ctxBuilder *ContextBuilder) *Reviewer {
 // Ask sends a review query about specific files or general code conventions
 // to the LLM, enriched with file and metrics context.
 func (r *Reviewer) Ask(ctx context.Context, query string) (string, error) {
+	if r.verbose && r.log != nil {
+		r.log("Starting reviewer query...")
+	}
 	var parts []string
 
 	// Extract file paths or entity names from the query.

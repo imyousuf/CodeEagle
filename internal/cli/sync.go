@@ -143,8 +143,12 @@ target branch for import.`,
 				return fmt.Errorf("sync: %w", err)
 			}
 
-			// Run LLM summarization if enabled.
-			idx.RunSummarization(ctx(cmd))
+			// Run LLM summarization if enabled, but only when files actually changed.
+			if idx.HasChanges() {
+				idx.RunSummarization(ctx(cmd))
+			} else if verbose {
+				fmt.Fprintf(out, "No files changed, skipping LLM summarization.\n")
+			}
 
 			// Cleanup stale branches.
 			if len(cfg.Repositories) > 0 {

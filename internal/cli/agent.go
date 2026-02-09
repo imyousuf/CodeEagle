@@ -16,6 +16,13 @@ import (
 	internalllm "github.com/imyousuf/CodeEagle/internal/llm"
 )
 
+// agentLogger returns a logger function that writes to stderr, suitable for agent verbose output.
+func agentLogger() func(format string, args ...any) {
+	return func(format string, args ...any) {
+		fmt.Fprintf(os.Stderr, format+"\n", args...)
+	}
+}
+
 func newAgentCmd() *cobra.Command {
 	agentCmd := &cobra.Command{
 		Use:   "agent",
@@ -120,6 +127,9 @@ falls back to single-turn keyword-based context selection.`,
 			}
 			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
 			planner := agents.NewPlanner(client, ctxBuilder, repoPaths...)
+			if verbose {
+				planner.SetVerbose(true, agentLogger())
+			}
 
 			if maxIterations > 0 {
 				planner.SetMaxIterations(maxIterations)
@@ -169,6 +179,9 @@ func newAgentDesignCmd() *cobra.Command {
 			}
 			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
 			designer := agents.NewDesigner(client, ctxBuilder)
+			if verbose {
+				designer.SetVerbose(true, agentLogger())
+			}
 
 			query := strings.Join(args, " ")
 			resp, err := designer.Ask(context.Background(), query)
@@ -213,6 +226,9 @@ func newAgentReviewCmd() *cobra.Command {
 			}
 			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
 			reviewer := agents.NewReviewer(client, ctxBuilder)
+			if verbose {
+				reviewer.SetVerbose(true, agentLogger())
+			}
 
 			diff, _ := cmd.Flags().GetString("diff")
 			if diff != "" {
@@ -272,6 +288,9 @@ func newAgentAskCmd() *cobra.Command {
 			}
 			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
 			asker := agents.NewAsker(client, ctxBuilder, repoPaths...)
+			if verbose {
+				asker.SetVerbose(true, agentLogger())
+			}
 
 			query := strings.Join(args, " ")
 			resp, err := asker.Ask(context.Background(), query)

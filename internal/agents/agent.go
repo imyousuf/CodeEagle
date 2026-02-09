@@ -21,16 +21,32 @@ type BaseAgent struct {
 	llmClient    llm.Client
 	ctxBuilder   *ContextBuilder
 	systemPrompt string
+	verbose      bool
+	log          func(format string, args ...any)
 }
 
 // Name returns the agent's name.
 func (a *BaseAgent) Name() string { return a.name }
+
+// SetVerbose enables or disables verbose logging on the agent.
+// If logger is nil, a no-op logger is used.
+func (a *BaseAgent) SetVerbose(verbose bool, logger func(format string, args ...any)) {
+	a.verbose = verbose
+	if logger != nil {
+		a.log = logger
+	} else {
+		a.log = func(format string, args ...any) {}
+	}
+}
 
 // ask builds messages from the system prompt, AI guidelines, context text,
 // and user query, sends them to the LLM, and returns the response content.
 // AI guideline files (CLAUDE.md, AGENTS.md, etc.) are automatically injected
 // as context before the codebase context.
 func (a *BaseAgent) ask(ctx context.Context, contextText, query string) (string, error) {
+	if a.verbose && a.log != nil {
+		a.log("Sending query to LLM (provider: %s)...", a.llmClient.Provider())
+	}
 	var messages []llm.Message
 
 	// Auto-inject AI guidelines if available.
