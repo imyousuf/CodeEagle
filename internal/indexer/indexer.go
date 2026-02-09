@@ -109,6 +109,10 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
 		return fmt.Errorf("parse file %s: %w", filePath, err)
 	}
 
+	// Classify nodes with architectural roles, design patterns, and layer tags.
+	classifier := parser.NewClassifier()
+	result = classifier.Classify(result)
+
 	// Delete old nodes for this file to support incremental updates.
 	if err := idx.store.DeleteByFile(ctx, filePath); err != nil {
 		return fmt.Errorf("delete old nodes for %s: %w", filePath, err)
@@ -298,6 +302,10 @@ func (idx *Indexer) runSummarization(ctx context.Context) {
 		}
 		if err := summarizer.SummarizeService(ctx, groupName, nodes); err != nil {
 			idx.log("Summarization of %s failed: %v", groupName, err)
+		}
+		// Architecture analysis per service group.
+		if err := summarizer.SummarizeArchitecture(ctx, groupName, nodes); err != nil {
+			idx.log("Architecture analysis of %s failed: %v", groupName, err)
 		}
 	}
 
