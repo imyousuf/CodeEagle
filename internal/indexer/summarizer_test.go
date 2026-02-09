@@ -61,7 +61,7 @@ func TestSummarizeService(t *testing.T) {
 		{ID: "n4", Type: graph.NodeMethod, Name: "Validate", FilePath: "svc/auth.go", Language: "go", Exported: true},
 	}
 
-	summarizer := NewSummarizer(mock, store)
+	summarizer := NewSummarizer(mock, store, nil, false)
 	if err := summarizer.SummarizeService(ctx, "auth-service", nodes); err != nil {
 		t.Fatalf("SummarizeService failed: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestSummarizeService(t *testing.T) {
 
 func TestSummarizeServiceEmpty(t *testing.T) {
 	store, mock := setupSummarizerTest(t)
-	summarizer := NewSummarizer(mock, store)
+	summarizer := NewSummarizer(mock, store, nil, false)
 
 	// Empty nodes should be a no-op.
 	if err := summarizer.SummarizeService(context.Background(), "empty", nil); err != nil {
@@ -132,7 +132,7 @@ func TestSummarizePatterns(t *testing.T) {
 		{ID: "n5", Type: graph.NodeFunction, Name: "process", Package: "pipeline", Language: "python"},
 	}
 
-	summarizer := NewSummarizer(mock, store)
+	summarizer := NewSummarizer(mock, store, nil, false)
 	if err := summarizer.SummarizePatterns(ctx, nodes); err != nil {
 		t.Fatalf("SummarizePatterns failed: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestSummarizePatterns(t *testing.T) {
 
 func TestSummarizePatternsEmpty(t *testing.T) {
 	store, mock := setupSummarizerTest(t)
-	summarizer := NewSummarizer(mock, store)
+	summarizer := NewSummarizer(mock, store, nil, false)
 
 	if err := summarizer.SummarizePatterns(context.Background(), nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -190,7 +190,7 @@ func TestSummarizeServiceIdempotent(t *testing.T) {
 		{ID: "n1", Type: graph.NodeFunction, Name: "Foo", Language: "go", Exported: true},
 	}
 
-	summarizer := NewSummarizer(mock, store)
+	summarizer := NewSummarizer(mock, store, nil, false)
 
 	// First call.
 	if err := summarizer.SummarizeService(ctx, "svc", nodes); err != nil {
@@ -262,7 +262,7 @@ func TestSummarizeArchitecture(t *testing.T) {
 		},
 	}
 
-	summarizer := NewSummarizer(mock, store)
+	summarizer := NewSummarizer(mock, store, nil, false)
 	if err := summarizer.SummarizeArchitecture(ctx, "user-service", nodes); err != nil {
 		t.Fatalf("SummarizeArchitecture failed: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestSummarizeArchitecture(t *testing.T) {
 
 func TestSummarizeArchitectureEmpty(t *testing.T) {
 	store, mock := setupSummarizerTest(t)
-	summarizer := NewSummarizer(mock, store)
+	summarizer := NewSummarizer(mock, store, nil, false)
 
 	if err := summarizer.SummarizeArchitecture(context.Background(), "empty", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)

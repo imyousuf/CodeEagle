@@ -149,7 +149,12 @@ func (idx *Indexer) IndexDirectory(ctx context.Context, dirPath string) error {
 	if idx.verbose {
 		idx.log("Scanning directory: %s", dirPath)
 	}
-	return filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+
+	dirStart := time.Now()
+	startFiles := idx.filesIndexed
+	fileCount := 0
+
+	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // skip inaccessible entries
 		}
@@ -183,8 +188,22 @@ func (idx *Indexer) IndexDirectory(ctx context.Context, dirPath string) error {
 			idx.mu.Unlock()
 			// Continue indexing other files.
 		}
+
+		fileCount++
+		if idx.verbose && fileCount%100 == 0 {
+			idx.log("  Progress: %d files indexed...", fileCount)
+		}
+
 		return nil
 	})
+
+	if idx.verbose {
+		elapsed := time.Since(dirStart)
+		newFiles := idx.filesIndexed - startFiles
+		idx.log("  Directory complete: %s (%d files indexed in %s)", dirPath, newFiles, elapsed)
+	}
+
+	return err
 }
 
 // Start performs an initial full index of all configured paths, then starts
@@ -196,10 +215,18 @@ func (idx *Indexer) Start(ctx context.Context) error {
 	}
 
 	// Initial full index.
+	indexStart := time.Now()
 	for _, path := range idx.wcfg.Paths {
 		if err := idx.IndexDirectory(ctx, path); err != nil {
 			return fmt.Errorf("initial index of %s: %w", path, err)
 		}
+	}
+
+	if idx.verbose {
+		elapsed := time.Since(indexStart)
+		stats := idx.Stats()
+		idx.log("Initial indexing complete: %d files, %d nodes, %d edges in %s",
+			stats.FilesIndexed, stats.NodesTotal, stats.EdgesTotal, elapsed)
 	}
 
 	// Run auto-summarization if configured.
@@ -292,7 +319,7 @@ func (idx *Indexer) runSummarization(ctx context.Context) {
 		basePaths = idx.wcfg.Paths
 	}
 
-	summarizer := NewSummarizer(idx.llmClient, idx.store)
+	summarizer := NewSummarizer(idx.llmClient, idx.store, idx.log, idx.verbose)
 
 	// Summarize each top-level directory group as a "service".
 	groups := GroupNodesByTopDir(allNodes, basePaths)

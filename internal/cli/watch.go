@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -30,6 +31,8 @@ import (
 
 func newWatchCmd() *cobra.Command {
 	var dbPath string
+	var pidFile string
+	var logFile string
 
 	cmd := &cobra.Command{
 		Use:   "watch",
@@ -41,6 +44,32 @@ func newWatchCmd() *cobra.Command {
 			}
 			if err := cfg.Validate(); err != nil {
 				return fmt.Errorf("invalid config: %w", err)
+			}
+
+			// Set up log file output if requested.
+			var output io.Writer = cmd.OutOrStdout()
+			if logFile != "" {
+				f, err := os.Create(logFile)
+				if err != nil {
+					return fmt.Errorf("create log file: %w", err)
+				}
+				defer f.Close()
+				output = f
+				cmd.SetOut(f)
+				cmd.SetErr(f)
+			}
+
+			// Write PID file if requested.
+			if pidFile != "" {
+				if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
+					return fmt.Errorf("write pid file: %w", err)
+				}
+				defer os.Remove(pidFile)
+			}
+
+			// Build a logger function that writes to the chosen output.
+			logFn := func(format string, args ...any) {
+				fmt.Fprintf(output, format+"\n", args...)
 			}
 
 			// Open graph store.
@@ -107,6 +136,7 @@ func newWatchCmd() *cobra.Command {
 				ParserRegistry: registry,
 				WatcherConfig:  wcfg,
 				Verbose:        verbose,
+				Logger:         logFn,
 				LLMClient:      llmClient,
 				AutoSummarize:  cfg.Agents.AutoSummarize,
 			})
@@ -119,25 +149,25 @@ func newWatchCmd() *cobra.Command {
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 			go func() {
 				<-sigCh
-				fmt.Fprintln(cmd.OutOrStdout(), "\nShutting down...")
+				fmt.Fprintln(output, "\nShutting down...")
 				cancel()
 			}()
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Watching %d repositories...\n", len(cfg.Repositories))
+			fmt.Fprintf(output, "Watching %d repositories...\n", len(cfg.Repositories))
 			for _, repo := range cfg.Repositories {
-				fmt.Fprintf(cmd.OutOrStdout(), "  %s (%s)\n", repo.Path, repo.Type)
+				fmt.Fprintf(output, "  %s (%s)\n", repo.Path, repo.Type)
 				if verbose {
 					info, err := gitutil.GetBranchInfo(repo.Path)
 					if err == nil {
-						fmt.Fprintf(cmd.OutOrStdout(), "    Branch: %s", info.CurrentBranch)
+						fmt.Fprintf(output, "    Branch: %s", info.CurrentBranch)
 						if info.IsFeatureBranch {
-							fmt.Fprintf(cmd.OutOrStdout(), " (%d ahead, %d behind %s)", info.Ahead, info.Behind, info.DefaultBranch)
+							fmt.Fprintf(output, " (%d ahead, %d behind %s)", info.Ahead, info.Behind, info.DefaultBranch)
 						}
-						fmt.Fprintln(cmd.OutOrStdout())
+						fmt.Fprintln(output)
 					}
 				}
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Graph database: %s\n", dbPath)
+			fmt.Fprintf(output, "Graph database: %s\n", dbPath)
 
 			if err := idx.Start(ctx); err != nil {
 				return fmt.Errorf("indexer: %w", err)
@@ -145,18 +175,20 @@ func newWatchCmd() *cobra.Command {
 
 			// Print final stats.
 			stats := idx.Stats()
-			fmt.Fprintf(cmd.OutOrStdout(), "\nFinal stats:\n")
-			fmt.Fprintf(cmd.OutOrStdout(), "  Files indexed: %d\n", stats.FilesIndexed)
-			fmt.Fprintf(cmd.OutOrStdout(), "  Nodes:         %d\n", stats.NodesTotal)
-			fmt.Fprintf(cmd.OutOrStdout(), "  Edges:         %d\n", stats.EdgesTotal)
+			fmt.Fprintf(output, "\nFinal stats:\n")
+			fmt.Fprintf(output, "  Files indexed: %d\n", stats.FilesIndexed)
+			fmt.Fprintf(output, "  Nodes:         %d\n", stats.NodesTotal)
+			fmt.Fprintf(output, "  Edges:         %d\n", stats.EdgesTotal)
 			if len(stats.Errors) > 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "  Errors:        %d\n", len(stats.Errors))
+				fmt.Fprintf(output, "  Errors:        %d\n", len(stats.Errors))
 			}
 			return nil
 		},
 	}
 
 	cmd.Flags().StringVar(&dbPath, "db-path", ".codeeagle/graph.db", "path for the graph database")
+	cmd.Flags().StringVar(&pidFile, "pid-file", "", "write process PID to this file")
+	cmd.Flags().StringVar(&logFile, "log-file", "", "redirect all output to this file")
 
 	return cmd
 }

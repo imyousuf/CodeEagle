@@ -14,13 +14,20 @@ import (
 // Summarizer uses an LLM to generate high-level summaries of indexed code
 // and stores the results as Document nodes in the knowledge graph.
 type Summarizer struct {
-	client llm.Client
-	store  graph.Store
+	client  llm.Client
+	store   graph.Store
+	log     func(format string, args ...any)
+	verbose bool
 }
 
 // NewSummarizer creates a Summarizer backed by the given LLM client and graph store.
-func NewSummarizer(client llm.Client, store graph.Store) *Summarizer {
-	return &Summarizer{client: client, store: store}
+// If logger is nil, a no-op logger is used. When verbose is true, the summarizer
+// logs details about each LLM call.
+func NewSummarizer(client llm.Client, store graph.Store, logger func(format string, args ...any), verbose bool) *Summarizer {
+	if logger == nil {
+		logger = func(format string, args ...any) {}
+	}
+	return &Summarizer{client: client, store: store, log: logger, verbose: verbose}
 }
 
 // SummarizeService builds a prompt from the given nodes for a service/directory,
@@ -33,6 +40,10 @@ func (s *Summarizer) SummarizeService(ctx context.Context, serviceName string, n
 
 	prompt := buildServicePrompt(serviceName, nodes)
 
+	if s.verbose {
+		s.log("  LLM call: summarizing service %s...", serviceName)
+	}
+
 	resp, err := s.client.Chat(ctx,
 		"You are a code analysis assistant. Summarize codebases concisely.",
 		[]llm.Message{
@@ -41,6 +52,14 @@ func (s *Summarizer) SummarizeService(ctx context.Context, serviceName string, n
 	)
 	if err != nil {
 		return fmt.Errorf("LLM chat for service %s: %w", serviceName, err)
+	}
+
+	if s.verbose {
+		preview := resp.Content
+		if len(preview) > 100 {
+			preview = preview[:100]
+		}
+		s.log("  LLM response: %s... (%d chars total)", preview, len(resp.Content))
 	}
 
 	nodeID := graph.NewNodeID("Document", "generated", "summary:"+serviceName)
@@ -74,6 +93,10 @@ func (s *Summarizer) SummarizePatterns(ctx context.Context, allNodes []*graph.No
 
 	prompt := buildPatternsPrompt(allNodes)
 
+	if s.verbose {
+		s.log("  LLM call: summarizing codebase patterns...")
+	}
+
 	resp, err := s.client.Chat(ctx,
 		"You are a code analysis assistant. Identify architectural patterns and conventions.",
 		[]llm.Message{
@@ -82,6 +105,14 @@ func (s *Summarizer) SummarizePatterns(ctx context.Context, allNodes []*graph.No
 	)
 	if err != nil {
 		return fmt.Errorf("LLM chat for patterns: %w", err)
+	}
+
+	if s.verbose {
+		preview := resp.Content
+		if len(preview) > 100 {
+			preview = preview[:100]
+		}
+		s.log("  LLM response: %s... (%d chars total)", preview, len(resp.Content))
 	}
 
 	nodeID := graph.NewNodeID("Document", "generated", "patterns")
@@ -114,6 +145,10 @@ func (s *Summarizer) SummarizeArchitecture(ctx context.Context, serviceName stri
 
 	prompt := buildArchitecturePrompt(serviceName, nodes)
 
+	if s.verbose {
+		s.log("  LLM call: summarizing architecture for %s...", serviceName)
+	}
+
 	resp, err := s.client.Chat(ctx,
 		"You are a software architecture analyst. Identify architectural and design patterns in codebases.",
 		[]llm.Message{
@@ -122,6 +157,14 @@ func (s *Summarizer) SummarizeArchitecture(ctx context.Context, serviceName stri
 	)
 	if err != nil {
 		return fmt.Errorf("LLM chat for architecture %s: %w", serviceName, err)
+	}
+
+	if s.verbose {
+		preview := resp.Content
+		if len(preview) > 100 {
+			preview = preview[:100]
+		}
+		s.log("  LLM response: %s... (%d chars total)", preview, len(resp.Content))
 	}
 
 	nodeID := graph.NewNodeID("Document", "generated", "architecture:"+serviceName)
