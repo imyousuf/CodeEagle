@@ -70,6 +70,7 @@ func newWatchCmd() *cobra.Command {
 				GraphStore:     store,
 				ParserRegistry: registry,
 				WatcherConfig:  wcfg,
+				Verbose:        verbose,
 			})
 
 			// Set up signal handling.

@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -19,6 +20,31 @@ type ContextBuilder struct {
 // NewContextBuilder creates a ContextBuilder backed by the given graph store.
 func NewContextBuilder(store graph.Store) *ContextBuilder {
 	return &ContextBuilder{store: store}
+}
+
+// BuildGuidelineContext queries the graph for all AIGuideline nodes (e.g.,
+// CLAUDE.md, AGENTS.md, GEMINI.md) and returns their full content read from disk.
+// This is used for automatic context injection into agent system prompts.
+func (cb *ContextBuilder) BuildGuidelineContext(ctx context.Context) (string, error) {
+	nodes, err := cb.store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeAIGuideline})
+	if err != nil {
+		return "", fmt.Errorf("query AI guideline nodes: %w", err)
+	}
+	if len(nodes) == 0 {
+		return "", nil
+	}
+
+	var b strings.Builder
+	b.WriteString("## Project AI Guidelines\n\n")
+	for _, n := range nodes {
+		content, err := os.ReadFile(n.FilePath)
+		if err != nil {
+			fmt.Fprintf(&b, "### %s\n\n(Could not read file: %v)\n\n", n.Name, err)
+			continue
+		}
+		fmt.Fprintf(&b, "### %s\n\n%s\n\n", n.FilePath, strings.TrimSpace(string(content)))
+	}
+	return b.String(), nil
 }
 
 // BuildFileContext returns a formatted summary of a single file: its symbols,

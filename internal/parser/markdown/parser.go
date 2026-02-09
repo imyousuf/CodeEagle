@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -47,6 +48,21 @@ type extractor struct {
 	docNodeID string
 }
 
+// aiGuidelineFiles lists filenames that are treated as AI guideline documents.
+var aiGuidelineFiles = map[string]bool{
+	"CLAUDE.md":  true,
+	"AGENTS.md":  true,
+	"GEMINI.md":  true,
+	"COPILOT.md": true,
+	"AI.md":      true,
+}
+
+// isAIGuidelineFile checks if the file should be treated as an AI guideline.
+func isAIGuidelineFile(filePath string) bool {
+	base := filepath.Base(filePath)
+	return aiGuidelineFiles[base]
+}
+
 // Regex patterns for Markdown elements.
 var (
 	headingRe    = regexp.MustCompile(`^(#{1,6})\s+(.+)$`)
@@ -64,10 +80,14 @@ func (e *extractor) extract() {
 }
 
 func (e *extractor) extractDocumentNode() {
-	e.docNodeID = graph.NewNodeID(string(graph.NodeDocument), e.filePath, e.filePath)
+	nodeType := graph.NodeDocument
+	if isAIGuidelineFile(e.filePath) {
+		nodeType = graph.NodeAIGuideline
+	}
+	e.docNodeID = graph.NewNodeID(string(nodeType), e.filePath, e.filePath)
 	e.nodes = append(e.nodes, &graph.Node{
 		ID:       e.docNodeID,
-		Type:     graph.NodeDocument,
+		Type:     nodeType,
 		Name:     e.filePath,
 		FilePath: e.filePath,
 		Language: string(parser.LangMarkdown),

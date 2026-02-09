@@ -18,6 +18,8 @@ type IndexerConfig struct {
 	GraphStore     graph.Store
 	ParserRegistry *parser.Registry
 	WatcherConfig  *watcher.WatcherConfig
+	Verbose        bool
+	Logger         func(format string, args ...any) // optional logger, defaults to fmt.Fprintf(os.Stderr, ...)
 }
 
 // IndexStats holds statistics about the indexing state.
@@ -35,6 +37,8 @@ type Indexer struct {
 	registry *parser.Registry
 	wcfg     *watcher.WatcherConfig
 	matcher  *watcher.GitIgnoreMatcher
+	verbose  bool
+	log      func(format string, args ...any)
 
 	mu           sync.Mutex
 	filesIndexed int
@@ -58,11 +62,20 @@ func NewIndexer(cfg IndexerConfig) *Indexer {
 	matcher := watcher.NewGitIgnoreMatcher(paths, allPatterns)
 	_ = matcher.LoadPatterns()
 
+	logFn := cfg.Logger
+	if logFn == nil {
+		logFn = func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, format+"\n", args...)
+		}
+	}
+
 	return &Indexer{
 		store:    cfg.GraphStore,
 		registry: cfg.ParserRegistry,
 		wcfg:     cfg.WatcherConfig,
 		matcher:  matcher,
+		verbose:  cfg.Verbose,
+		log:      logFn,
 	}
 }
 
@@ -78,6 +91,10 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("read file %s: %w", filePath, err)
+	}
+
+	if idx.verbose {
+		idx.log("Parsing %s (%s)...", filePath, p.Language())
 	}
 
 	result, err := p.ParseFile(filePath, content)
@@ -109,11 +126,18 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
 	idx.lastIndex = time.Now()
 	idx.mu.Unlock()
 
+	if idx.verbose {
+		idx.log("  -> %d nodes, %d edges", len(result.Nodes), len(result.Edges))
+	}
+
 	return nil
 }
 
 // IndexDirectory walks a directory tree and indexes all supported files.
 func (idx *Indexer) IndexDirectory(ctx context.Context, dirPath string) error {
+	if idx.verbose {
+		idx.log("Scanning directory: %s", dirPath)
+	}
 	return filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // skip inaccessible entries
@@ -129,6 +153,9 @@ func (idx *Indexer) IndexDirectory(ctx context.Context, dirPath string) error {
 		// Skip ignored directories.
 		if info.IsDir() {
 			if idx.matcher.Match(path) {
+				if idx.verbose {
+					idx.log("  Skipping directory: %s (excluded)", path)
+				}
 				return filepath.SkipDir
 			}
 			return nil

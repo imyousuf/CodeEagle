@@ -26,10 +26,27 @@ type BaseAgent struct {
 // Name returns the agent's name.
 func (a *BaseAgent) Name() string { return a.name }
 
-// ask builds messages from the system prompt, context text, and user query,
-// sends them to the LLM, and returns the response content.
+// ask builds messages from the system prompt, AI guidelines, context text,
+// and user query, sends them to the LLM, and returns the response content.
+// AI guideline files (CLAUDE.md, AGENTS.md, etc.) are automatically injected
+// as context before the codebase context.
 func (a *BaseAgent) ask(ctx context.Context, contextText, query string) (string, error) {
 	var messages []llm.Message
+
+	// Auto-inject AI guidelines if available.
+	if a.ctxBuilder != nil {
+		guidelines, err := a.ctxBuilder.BuildGuidelineContext(ctx)
+		if err == nil && guidelines != "" {
+			messages = append(messages, llm.Message{
+				Role:    llm.RoleUser,
+				Content: "Here are the project's AI guidelines and conventions:\n\n" + guidelines,
+			})
+			messages = append(messages, llm.Message{
+				Role:    llm.RoleAssistant,
+				Content: "I've noted the project guidelines and will follow them in my analysis.",
+			})
+		}
+	}
 
 	if contextText != "" {
 		messages = append(messages, llm.Message{

@@ -28,6 +28,7 @@ const (
 	NodeMigration    NodeType = "Migration"
 	NodeDependency   NodeType = "Dependency"
 	NodeDocument     NodeType = "Document"
+	NodeAIGuideline  NodeType = "AIGuideline"
 	NodeTestFunction NodeType = "TestFunction"
 	NodeTestFile     NodeType = "TestFile"
 )
