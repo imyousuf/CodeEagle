@@ -1,0 +1,46 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "codeeagle",
+  "description": "CodeEagle - Codebase knowledge graph and AI-powered code intelligence",
+  "owner": {
+    "name": "imyousuf"
+  },
+  "plugins": [
+    {
+      "name": "codeeagle-ask",
+      "source": "./.claude/skills/codeeagle-ask",
+      "description": "Ask questions about the codebase",
+      "version": "1.0.0"
+    },
+    {
+      "name": "codeeagle-plan",
+      "source": "./.claude/skills/codeeagle-plan",
+      "description": "Plan and analyze code changes",
+      "version": "1.0.0"
+    },
+    {
+      "name": "codeeagle-design",
+      "source": "./.claude/skills/codeeagle-design",
+      "description": "Review architecture and design",
+      "version": "1.0.0"
+    },
+    {
+      "name": "codeeagle-review",
+      "source": "./.claude/skills/codeeagle-review",
+      "description": "Review code changes",
+      "version": "1.0.0"
+    },
+    {
+      "name": "codeeagle-status",
+      "source": "./.claude/skills/codeeagle-status",
+      "description": "Show indexing status",
+      "version": "1.0.0"
+    },
+    {
+      "name": "codeeagle-sync",
+      "source": "./.claude/skills/codeeagle-sync",
+      "description": "Sync knowledge graph",
+      "version": "1.0.0"
+    }
+  ]
+}
