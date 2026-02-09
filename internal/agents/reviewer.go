@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/imyousuf/CodeEagle/internal/gitutil"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 
@@ -61,7 +62,22 @@ func (r *Reviewer) Ask(ctx context.Context, query string) (string, error) {
 
 // ReviewDiff runs `git diff <diffRef>` to get changed files, builds context
 // for those files, and sends a review-focused prompt to the LLM.
-func (r *Reviewer) ReviewDiff(ctx context.Context, diffRef string) (string, error) {
+// If diffRef is empty, it auto-detects the branch diff against the default branch.
+func (r *Reviewer) ReviewDiff(ctx context.Context, diffRef string, repoPaths ...string) (string, error) {
+	// Auto-detect branch diff when no explicit ref is provided.
+	if diffRef == "" && len(repoPaths) > 0 {
+		repoPath := repoPaths[0]
+		branchDiff, err := gitutil.GetBranchDiff(repoPath)
+		if err != nil {
+			return "", fmt.Errorf("auto-detect branch diff: %w", err)
+		}
+		if !branchDiff.IsFeatureBranch {
+			return "Currently on the default branch. Provide a diff ref (e.g. HEAD~1) or switch to a feature branch.", nil
+		}
+		// Use the default branch as the diff ref.
+		diffRef = branchDiff.DefaultBranch + "...HEAD"
+	}
+
 	// Run git diff to get the diff output.
 	diffOutput, err := runGitDiff(ctx, diffRef)
 	if err != nil {
@@ -75,6 +91,14 @@ func (r *Reviewer) ReviewDiff(ctx context.Context, diffRef string) (string, erro
 	}
 
 	var parts []string
+
+	// Include branch context if a repo path is available.
+	if len(repoPaths) > 0 {
+		branchCtx, err := r.ctxBuilder.BuildBranchContext(ctx, repoPaths[0])
+		if err == nil {
+			parts = append(parts, branchCtx)
+		}
+	}
 
 	// Build diff context for changed files.
 	diffCtx, err := r.ctxBuilder.BuildDiffContext(ctx, changedFiles)
@@ -92,14 +116,40 @@ func (r *Reviewer) ReviewDiff(ctx context.Context, diffRef string) (string, erro
 
 	contextText := strings.Join(parts, "\n\n")
 
+	// Build the branch description for the prompt.
+	branchDesc := fmt.Sprintf("git diff %s", diffRef)
+	if len(repoPaths) > 0 {
+		info, err := gitutil.GetBranchInfo(repoPaths[0])
+		if err == nil && info.IsFeatureBranch {
+			branchDesc = fmt.Sprintf("changes on branch %s compared to %s", info.CurrentBranch, info.DefaultBranch)
+		}
+	}
+
+	// Include commits on the branch for additional context.
+	commitInfo := ""
+	if len(repoPaths) > 0 {
+		info, err := gitutil.GetBranchInfo(repoPaths[0])
+		if err == nil && info.IsFeatureBranch {
+			commits, err := gitutil.GetCommitsBetween(repoPaths[0], info.DefaultBranch)
+			if err == nil && len(commits) > 0 {
+				var commitLines []string
+				for _, c := range commits {
+					commitLines = append(commitLines, fmt.Sprintf("- %s: %s (%s)", c.Hash[:8], c.Message, c.Author))
+				}
+				commitInfo = "\n\nCommits on this branch:\n" + strings.Join(commitLines, "\n")
+			}
+		}
+	}
+
 	reviewQuery := fmt.Sprintf(
-		"Review the following code changes (git diff %s).\n\n"+
-			"Changed files: %s\n\n"+
+		"Review the following code changes (%s).\n\n"+
+			"Changed files: %s%s\n\n"+
 			"Raw diff output:\n```\n%s\n```\n\n"+
 			"Please review for: convention adherence, pattern deviations, missing tests, "+
 			"complexity issues, and security concerns.",
-		diffRef,
+		branchDesc,
 		strings.Join(changedFiles, ", "),
+		commitInfo,
 		diffOutput,
 	)
 

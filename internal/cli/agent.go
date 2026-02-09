@@ -94,7 +94,12 @@ func newAgentPlanCmd() *cobra.Command {
 			defer store.Close()
 
 			ctxBuilder := agents.NewContextBuilder(store)
-			planner := agents.NewPlanner(client, ctxBuilder)
+
+			var repoPaths []string
+			for _, repo := range cfg.Repositories {
+				repoPaths = append(repoPaths, repo.Path)
+			}
+			planner := agents.NewPlanner(client, ctxBuilder, repoPaths...)
 
 			query := strings.Join(args, " ")
 			resp, err := planner.Ask(context.Background(), query)
@@ -182,9 +187,14 @@ func newAgentReviewCmd() *cobra.Command {
 			ctxBuilder := agents.NewContextBuilder(store)
 			reviewer := agents.NewReviewer(client, ctxBuilder)
 
+			var repoPaths []string
+			for _, repo := range cfg.Repositories {
+				repoPaths = append(repoPaths, repo.Path)
+			}
+
 			diff, _ := cmd.Flags().GetString("diff")
 			if diff != "" {
-				resp, err := reviewer.ReviewDiff(context.Background(), diff)
+				resp, err := reviewer.ReviewDiff(context.Background(), diff, repoPaths...)
 				if err != nil {
 					return fmt.Errorf("review diff failed: %w", err)
 				}

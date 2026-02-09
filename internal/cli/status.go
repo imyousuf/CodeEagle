@@ -7,6 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/imyousuf/CodeEagle/internal/config"
+	"github.com/imyousuf/CodeEagle/internal/gitutil"
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 )
@@ -50,6 +52,35 @@ func newStatusCmd() *cobra.Command {
 				edgeTypes := sortedEdgeTypes(stats.EdgesByType)
 				for _, et := range edgeTypes {
 					fmt.Fprintf(out, "    %-20s %d\n", et, stats.EdgesByType[et])
+				}
+				fmt.Fprintln(out)
+			}
+
+			// Show git branch info for configured repositories.
+			cfg, cfgErr := config.Load()
+			if cfgErr == nil && len(cfg.Repositories) > 0 {
+				fmt.Fprintf(out, "  Git Status:\n")
+				for _, repo := range cfg.Repositories {
+					info, err := gitutil.GetBranchInfo(repo.Path)
+					if err != nil {
+						continue
+					}
+					fmt.Fprintf(out, "    %s:\n", repo.Path)
+					fmt.Fprintf(out, "      Branch: %s", info.CurrentBranch)
+					if info.IsFeatureBranch {
+						fmt.Fprintf(out, " (feature branch, %d ahead, %d behind %s)", info.Ahead, info.Behind, info.DefaultBranch)
+					}
+					fmt.Fprintln(out)
+
+					if info.IsFeatureBranch {
+						diff, err := gitutil.GetBranchDiff(repo.Path)
+						if err == nil && len(diff.ChangedFiles) > 0 {
+							fmt.Fprintf(out, "      Changed files: %d\n", len(diff.ChangedFiles))
+							for _, cf := range diff.ChangedFiles {
+								fmt.Fprintf(out, "        [%s] %s (+%d/-%d)\n", cf.Status, cf.Path, cf.Additions, cf.Deletions)
+							}
+						}
+					}
 				}
 				fmt.Fprintln(out)
 			}

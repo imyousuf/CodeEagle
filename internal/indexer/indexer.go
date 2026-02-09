@@ -11,6 +11,7 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/parser"
 	"github.com/imyousuf/CodeEagle/internal/watcher"
+	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 
 // IndexerConfig holds configuration for the Indexer.
@@ -20,6 +21,8 @@ type IndexerConfig struct {
 	WatcherConfig  *watcher.WatcherConfig
 	Verbose        bool
 	Logger         func(format string, args ...any) // optional logger, defaults to fmt.Fprintf(os.Stderr, ...)
+	LLMClient      llm.Client                       // optional LLM client for auto-summarization
+	AutoSummarize  bool                              // enable post-index LLM summarization
 }
 
 // IndexStats holds statistics about the indexing state.
@@ -33,12 +36,14 @@ type IndexStats struct {
 
 // Indexer orchestrates file parsing and knowledge graph updates.
 type Indexer struct {
-	store    graph.Store
-	registry *parser.Registry
-	wcfg     *watcher.WatcherConfig
-	matcher  *watcher.GitIgnoreMatcher
-	verbose  bool
-	log      func(format string, args ...any)
+	store         graph.Store
+	registry      *parser.Registry
+	wcfg          *watcher.WatcherConfig
+	matcher       *watcher.GitIgnoreMatcher
+	verbose       bool
+	log           func(format string, args ...any)
+	llmClient     llm.Client
+	autoSummarize bool
 
 	mu           sync.Mutex
 	filesIndexed int
@@ -70,12 +75,14 @@ func NewIndexer(cfg IndexerConfig) *Indexer {
 	}
 
 	return &Indexer{
-		store:    cfg.GraphStore,
-		registry: cfg.ParserRegistry,
-		wcfg:     cfg.WatcherConfig,
-		matcher:  matcher,
-		verbose:  cfg.Verbose,
-		log:      logFn,
+		store:         cfg.GraphStore,
+		registry:      cfg.ParserRegistry,
+		wcfg:          cfg.WatcherConfig,
+		matcher:       matcher,
+		verbose:       cfg.Verbose,
+		log:           logFn,
+		llmClient:     cfg.LLMClient,
+		autoSummarize: cfg.AutoSummarize,
 	}
 }
 
@@ -191,6 +198,11 @@ func (idx *Indexer) Start(ctx context.Context) error {
 		}
 	}
 
+	// Run auto-summarization if configured.
+	if idx.autoSummarize && idx.llmClient != nil {
+		idx.runSummarization(ctx)
+	}
+
 	// Start file watcher.
 	w, err := watcher.NewWatcher(*idx.wcfg)
 	if err != nil {
@@ -253,4 +265,51 @@ func (idx *Indexer) Stats() IndexStats {
 	}
 
 	return stats
+}
+
+// runSummarization queries all nodes, groups them by top-level directory,
+// and uses the LLM to generate per-service and codebase-wide summaries.
+func (idx *Indexer) runSummarization(ctx context.Context) {
+	if idx.verbose {
+		idx.log("Running LLM-assisted summarization...")
+	}
+
+	allNodes, err := idx.store.QueryNodes(ctx, graph.NodeFilter{})
+	if err != nil {
+		idx.log("Summarization: failed to query nodes: %v", err)
+		return
+	}
+	if len(allNodes) == 0 {
+		return
+	}
+
+	var basePaths []string
+	if idx.wcfg != nil {
+		basePaths = idx.wcfg.Paths
+	}
+
+	summarizer := NewSummarizer(idx.llmClient, idx.store)
+
+	// Summarize each top-level directory group as a "service".
+	groups := GroupNodesByTopDir(allNodes, basePaths)
+	for groupName, nodes := range groups {
+		if idx.verbose {
+			idx.log("  Summarizing group: %s (%d nodes)", groupName, len(nodes))
+		}
+		if err := summarizer.SummarizeService(ctx, groupName, nodes); err != nil {
+			idx.log("Summarization of %s failed: %v", groupName, err)
+		}
+	}
+
+	// Summarize overall patterns.
+	if idx.verbose {
+		idx.log("  Summarizing codebase patterns...")
+	}
+	if err := summarizer.SummarizePatterns(ctx, allNodes); err != nil {
+		idx.log("Pattern summarization failed: %v", err)
+	}
+
+	if idx.verbose {
+		idx.log("Summarization complete.")
+	}
 }

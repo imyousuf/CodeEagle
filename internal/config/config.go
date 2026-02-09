@@ -69,6 +69,8 @@ type AgentsConfig struct {
 	Project string `mapstructure:"project"`
 	// Location is the GCP region (used when LLMProvider is "vertex-ai", e.g. "us-central1").
 	Location string `mapstructure:"location"`
+	// AutoSummarize enables LLM-based summarization after indexing.
+	AutoSummarize bool `mapstructure:"auto_summarize"`
 }
 
 // Load loads configuration from file, environment variables, and defaults.
@@ -165,4 +167,5 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("agents.llm_provider", "anthropic")
 	v.SetDefault("agents.model", "claude-sonnet-4-5-20250929")
+	v.SetDefault("agents.auto_summarize", false)
 }

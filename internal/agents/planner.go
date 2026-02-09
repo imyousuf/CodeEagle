@@ -15,10 +15,11 @@ const plannerSystemPrompt = `You are a codebase planning agent. You analyze code
 // scope estimation, and change risk assessment.
 type Planner struct {
 	BaseAgent
+	repoPaths []string // optional repo paths for branch-aware context
 }
 
-// NewPlanner creates a new planning agent.
-func NewPlanner(client llm.Client, ctxBuilder *ContextBuilder) *Planner {
+// NewPlanner creates a new planning agent. Optional repoPaths enable branch-aware context.
+func NewPlanner(client llm.Client, ctxBuilder *ContextBuilder, repoPaths ...string) *Planner {
 	return &Planner{
 		BaseAgent: BaseAgent{
 			name:         "planner",
@@ -26,6 +27,7 @@ func NewPlanner(client llm.Client, ctxBuilder *ContextBuilder) *Planner {
 			ctxBuilder:   ctxBuilder,
 			systemPrompt: plannerSystemPrompt,
 		},
+		repoPaths: repoPaths,
 	}
 }
 
@@ -37,6 +39,8 @@ func (p *Planner) Ask(ctx context.Context, query string) (string, error) {
 	var err error
 
 	switch {
+	case containsAny(lower, "branch", "changes", "current", "working"):
+		contextText, err = p.buildBranchContextFromQuery(ctx)
 	case containsAny(lower, "change", "affect", "impact", "modify"):
 		contextText, err = p.buildImpactContextFromQuery(ctx, query)
 	case containsAny(lower, "depend", "relies", "uses"):
@@ -76,6 +80,22 @@ func (p *Planner) buildServiceContextFromQuery(ctx context.Context, query string
 			return svcCtx, nil
 		}
 	}
+	return p.ctxBuilder.BuildOverviewContext(ctx)
+}
+
+// buildBranchContextFromQuery builds context about the current branch state.
+func (p *Planner) buildBranchContextFromQuery(ctx context.Context) (string, error) {
+	var parts []string
+	for _, repoPath := range p.repoPaths {
+		branchCtx, err := p.ctxBuilder.BuildBranchContext(ctx, repoPath)
+		if err == nil {
+			parts = append(parts, branchCtx)
+		}
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, "\n\n"), nil
+	}
+	// Fallback to overview context if no repo paths configured.
 	return p.ctxBuilder.BuildOverviewContext(ctx)
 }
 

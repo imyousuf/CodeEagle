@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/imyousuf/CodeEagle/internal/gitutil"
 	"github.com/imyousuf/CodeEagle/internal/graph"
 )
 
@@ -446,6 +447,48 @@ func (cb *ContextBuilder) BuildOverviewContext(ctx context.Context) (string, err
 	return b.String(), nil
 }
 
+// BuildSummaryContext queries the graph for LLM-generated summary Document nodes
+// (where properties has generated=true) and returns their content. This provides
+// high-level codebase understanding from the auto-summarization feature.
+func (cb *ContextBuilder) BuildSummaryContext(ctx context.Context) (string, error) {
+	nodes, err := cb.store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeDocument})
+	if err != nil {
+		return "", fmt.Errorf("query generated summary nodes: %w", err)
+	}
+
+	var summaries []*graph.Node
+	for _, n := range nodes {
+		if n.Properties != nil && n.Properties["generated"] == "true" {
+			summaries = append(summaries, n)
+		}
+	}
+	if len(summaries) == 0 {
+		return "", nil
+	}
+
+	// Sort: patterns summary last, service summaries alphabetically.
+	sort.Slice(summaries, func(i, j int) bool {
+		ki := summaries[i].Properties["kind"]
+		kj := summaries[j].Properties["kind"]
+		if ki != kj {
+			if ki == "patterns" {
+				return false
+			}
+			if kj == "patterns" {
+				return true
+			}
+		}
+		return summaries[i].Name < summaries[j].Name
+	})
+
+	var b strings.Builder
+	b.WriteString("## Auto-Generated Codebase Summaries\n\n")
+	for _, n := range summaries {
+		fmt.Fprintf(&b, "### %s\n\n%s\n\n", n.Name, strings.TrimSpace(n.DocComment))
+	}
+	return b.String(), nil
+}
+
 // BuildMetricsContext returns a formatted table of code quality metrics
 // for all symbols in the given file.
 func (cb *ContextBuilder) BuildMetricsContext(ctx context.Context, filePath string) (string, error) {
@@ -484,6 +527,71 @@ func (cb *ContextBuilder) BuildMetricsContext(ctx context.Context, filePath stri
 
 	if !hasMetrics {
 		b.WriteString("No metrics data available for symbols in this file.\n")
+	}
+
+	return b.String(), nil
+}
+
+// BuildBranchContext returns a formatted summary of the current git branch state
+// relative to the default branch, including changed files and their symbols.
+func (cb *ContextBuilder) BuildBranchContext(ctx context.Context, repoPath string) (string, error) {
+	diff, err := gitutil.GetBranchDiff(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("get branch diff for %s: %w", repoPath, err)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "## Git Branch Context\n\n")
+	fmt.Fprintf(&b, "Current branch: %s\n", diff.CurrentBranch)
+	fmt.Fprintf(&b, "Default branch: %s\n", diff.DefaultBranch)
+
+	if diff.IsFeatureBranch {
+		fmt.Fprintf(&b, "Ahead: %d commits\n", diff.Ahead)
+		fmt.Fprintf(&b, "Behind: %d commits\n", diff.Behind)
+	} else {
+		b.WriteString("Status: on default branch\n")
+	}
+
+	if len(diff.ChangedFiles) == 0 {
+		if diff.IsFeatureBranch {
+			b.WriteString("\nNo changed files compared to default branch.\n")
+		}
+		return b.String(), nil
+	}
+
+	fmt.Fprintf(&b, "\n### Changed Files (%d)\n", len(diff.ChangedFiles))
+	for _, cf := range diff.ChangedFiles {
+		fmt.Fprintf(&b, "- [%s] %s (+%d/-%d)\n", cf.Status, cf.Path, cf.Additions, cf.Deletions)
+	}
+
+	// For each changed file, query graph for its symbols.
+	b.WriteString("\n### Symbols in Changed Files\n")
+	for _, cf := range diff.ChangedFiles {
+		if cf.Status == "deleted" {
+			continue
+		}
+		nodes, err := cb.store.QueryNodes(ctx, graph.NodeFilter{FilePath: cf.Path})
+		if err != nil || len(nodes) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "\n**%s:**\n", cf.Path)
+		for _, n := range nodes {
+			if n.Type == graph.NodeFile {
+				continue
+			}
+			fmt.Fprintf(&b, "- [%s] %s\n", n.Type, n.Name)
+		}
+	}
+
+	// Include commits on the branch for additional context.
+	if diff.IsFeatureBranch {
+		commits, err := gitutil.GetCommitsBetween(repoPath, diff.DefaultBranch)
+		if err == nil && len(commits) > 0 {
+			fmt.Fprintf(&b, "\n### Commits on Branch (%d)\n", len(commits))
+			for _, c := range commits {
+				fmt.Fprintf(&b, "- %s %s (%s)\n", c.Hash[:8], c.Message, c.Author)
+			}
+		}
 	}
 
 	return b.String(), nil

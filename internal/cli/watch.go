@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
+	"github.com/imyousuf/CodeEagle/internal/gitutil"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/indexer"
 	"github.com/imyousuf/CodeEagle/internal/parser"
@@ -21,6 +22,10 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/parser/python"
 	"github.com/imyousuf/CodeEagle/internal/parser/typescript"
 	"github.com/imyousuf/CodeEagle/internal/watcher"
+	"github.com/imyousuf/CodeEagle/pkg/llm"
+
+	// Register LLM providers so their init() functions run.
+	_ "github.com/imyousuf/CodeEagle/internal/llm"
 )
 
 func newWatchCmd() *cobra.Command {
@@ -65,12 +70,45 @@ func newWatchCmd() *cobra.Command {
 				ExcludePatterns: cfg.Watch.Exclude,
 			}
 
+			// Create LLM client if auto-summarize is enabled.
+			var llmClient llm.Client
+			if cfg.Agents.AutoSummarize {
+				apiKey := os.Getenv("ANTHROPIC_API_KEY")
+				if apiKey != "" || cfg.Agents.LLMProvider == "vertex-ai" {
+					provider := cfg.Agents.LLMProvider
+					if provider == "" {
+						provider = "anthropic"
+					}
+					project := cfg.Agents.Project
+					if project == "" {
+						project = os.Getenv("GOOGLE_CLOUD_PROJECT")
+					}
+					c, err := llm.NewClient(llm.Config{
+						Provider: provider,
+						Model:    cfg.Agents.Model,
+						APIKey:   apiKey,
+						Project:  project,
+						Location: cfg.Agents.Location,
+					})
+					if err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: auto-summarize enabled but LLM client creation failed: %v\n", err)
+					} else {
+						llmClient = c
+						defer llmClient.Close()
+					}
+				} else if verbose {
+					fmt.Fprintln(cmd.ErrOrStderr(), "Warning: auto-summarize enabled but no API key found (set ANTHROPIC_API_KEY)")
+				}
+			}
+
 			// Create indexer.
 			idx := indexer.NewIndexer(indexer.IndexerConfig{
 				GraphStore:     store,
 				ParserRegistry: registry,
 				WatcherConfig:  wcfg,
 				Verbose:        verbose,
+				LLMClient:      llmClient,
+				AutoSummarize:  cfg.Agents.AutoSummarize,
 			})
 
 			// Set up signal handling.
@@ -88,6 +126,16 @@ func newWatchCmd() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "Watching %d repositories...\n", len(cfg.Repositories))
 			for _, repo := range cfg.Repositories {
 				fmt.Fprintf(cmd.OutOrStdout(), "  %s (%s)\n", repo.Path, repo.Type)
+				if verbose {
+					info, err := gitutil.GetBranchInfo(repo.Path)
+					if err == nil {
+						fmt.Fprintf(cmd.OutOrStdout(), "    Branch: %s", info.CurrentBranch)
+						if info.IsFeatureBranch {
+							fmt.Fprintf(cmd.OutOrStdout(), " (%d ahead, %d behind %s)", info.Ahead, info.Behind, info.DefaultBranch)
+						}
+						fmt.Fprintln(cmd.OutOrStdout())
+					}
+				}
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Graph database: %s\n", dbPath)
 
