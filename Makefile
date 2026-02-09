@@ -1,4 +1,4 @@
-.PHONY: build clean test test-fast lint fmt tidy help
+.PHONY: build clean test test-fast test-smoke lint fmt tidy help
 
 # Binary name
 BINARY_NAME=codeeagle
@@ -36,6 +36,10 @@ test:
 ## test-fast: Run tests without race detector
 test-fast:
 	$(GOTEST) -v ./...
+
+## test-smoke: Run smoke tests requiring real LLM APIs
+test-smoke:
+	$(GOTEST) ./... -tags=llm_smoke -v -count=1 -timeout=120s
 
 ## lint: Run linter
 lint:
