@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/viper"
+	"go.yaml.in/yaml/v3"
 )
 
 const (
@@ -18,7 +19,15 @@ const (
 	ProjectConfigFile = "config.yaml"
 	// DefaultDBDir is the default database directory name inside the project dir.
 	DefaultDBDir = "graph.db"
+	// ProjectConfFile is the per-project conf file committed to git (lives at project root).
+	ProjectConfFile = ".CodeEagle.conf"
 )
+
+// ProjectConf holds the contents of the .CodeEagle.conf file (committed to git).
+type ProjectConf struct {
+	// ExportFile is the relative path to the graph export file.
+	ExportFile string `yaml:"export_file"`
+}
 
 // Config holds all configuration for CodeEagle.
 type Config struct {
@@ -36,6 +45,10 @@ type Config struct {
 	Agents AgentsConfig `mapstructure:"agents"`
 	// ConfigDir is the resolved .CodeEagle directory path (not persisted in YAML).
 	ConfigDir string `mapstructure:"-"`
+	// ProjectConf is the parsed .CodeEagle.conf if found (not persisted).
+	ProjectConf *ProjectConf `mapstructure:"-"`
+	// ProjectConfDir is the directory containing .CodeEagle.conf (not persisted).
+	ProjectConfDir string `mapstructure:"-"`
 }
 
 // ProjectConfig holds project metadata.
@@ -66,10 +79,6 @@ type GraphConfig struct {
 	Neo4jURI string `mapstructure:"neo4j_uri"`
 	// DBPath is the path to the graph database directory.
 	DBPath string `mapstructure:"db_path"`
-	// MainDB is the path to the main (CI-built, committable) graph database.
-	MainDB string `mapstructure:"main_db"`
-	// LocalDB is the path to the local (gitignored) graph database.
-	LocalDB string `mapstructure:"local_db"`
 }
 
 // AgentsConfig holds AI agent configuration.
@@ -124,26 +133,38 @@ func (c *Config) ResolveDBPath(flagValue string) string {
 	return ""
 }
 
-// ResolveDBPaths determines the main and local database paths for layered storage.
-// Priority:
-//  1. flagValue (CLI --db-path): used for both (single-DB mode)
-//  2. MainDB + LocalDB from config YAML
-//  3. DBPath from config (single-DB mode)
-//  4. Defaults: <ConfigDir>/graph.db (main) and <ConfigDir>/local.db (local)
-func (c *Config) ResolveDBPaths(flagValue string) (mainDB, localDB string) {
-	if flagValue != "" {
-		return flagValue, flagValue
+// DiscoverProjectConf walks up from startDir looking for a .CodeEagle.conf file.
+// Returns the conf file path, parsed conf, and any error.
+func DiscoverProjectConf(startDir string) (confPath string, conf *ProjectConf, err error) {
+	dir := startDir
+	for {
+		candidate := filepath.Join(dir, ProjectConfFile)
+		if _, err := os.Stat(candidate); err == nil {
+			data, err := os.ReadFile(candidate)
+			if err != nil {
+				return "", nil, fmt.Errorf("read %s: %w", candidate, err)
+			}
+			var pc ProjectConf
+			if err := yaml.Unmarshal(data, &pc); err != nil {
+				return "", nil, fmt.Errorf("parse %s: %w", candidate, err)
+			}
+			return candidate, &pc, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
 	}
-	if c.Graph.MainDB != "" && c.Graph.LocalDB != "" {
-		return c.Graph.MainDB, c.Graph.LocalDB
+	return "", nil, nil
+}
+
+// ExportFilePath resolves the export file path relative to the conf directory.
+func ExportFilePath(confDir string, conf *ProjectConf) string {
+	if conf == nil || conf.ExportFile == "" {
+		return ""
 	}
-	if c.Graph.DBPath != "" {
-		return c.Graph.DBPath, c.Graph.DBPath
-	}
-	if c.ConfigDir != "" {
-		return filepath.Join(c.ConfigDir, DefaultDBDir), filepath.Join(c.ConfigDir, "local.db")
-	}
-	return "", ""
+	return filepath.Join(confDir, conf.ExportFile)
 }
 
 // Load loads configuration from file, environment variables, and defaults.
@@ -238,6 +259,21 @@ func Load() (*Config, error) {
 	}
 
 	cfg.ConfigDir = configDir
+
+	// Discover .CodeEagle.conf from CWD (or configDir parent).
+	searchDir := ""
+	if configDir != "" {
+		searchDir = filepath.Dir(configDir)
+	} else {
+		searchDir, _ = os.Getwd()
+	}
+	if searchDir != "" {
+		confPath, pc, err := DiscoverProjectConf(searchDir)
+		if err == nil && pc != nil {
+			cfg.ProjectConf = pc
+			cfg.ProjectConfDir = filepath.Dir(confPath)
+		}
+	}
 
 	return &cfg, nil
 }

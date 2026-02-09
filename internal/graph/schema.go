@@ -50,9 +50,8 @@ const (
 	// (e.g., "presentation", "business", "data_access", "infrastructure").
 	PropLayerTag = "layer"
 
-	// PropGraphSource indicates which database layer a node or edge came from
-	// when using LayeredStore ("main" for the shared/committed graph, "local"
-	// for uncommitted local changes). Set on reads only, never persisted.
+	// PropGraphSource indicates which branch a node or edge came from
+	// when using BranchStore. Set to the branch name on reads, never persisted.
 	PropGraphSource = "graph_source"
 )
 

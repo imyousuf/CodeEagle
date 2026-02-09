@@ -12,7 +12,6 @@ import (
 
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
-	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/indexer"
 	"github.com/imyousuf/CodeEagle/internal/parser"
 	"github.com/imyousuf/CodeEagle/internal/parser/golang"
@@ -45,11 +44,6 @@ func newWatchCmd() *cobra.Command {
 				return fmt.Errorf("invalid config: %w", err)
 			}
 
-			resolvedDBPath := cfg.ResolveDBPath(dbPath)
-			if resolvedDBPath == "" {
-				return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
-			}
-
 			// Set up log file output if requested.
 			var output io.Writer = cmd.OutOrStdout()
 			if logFile != "" {
@@ -77,9 +71,9 @@ func newWatchCmd() *cobra.Command {
 			}
 
 			// Open graph store.
-			store, err := embedded.NewStore(resolvedDBPath)
+			store, currentBranch, err := openBranchStore(cfg)
 			if err != nil {
-				return fmt.Errorf("open graph store: %w", err)
+				return err
 			}
 			defer store.Close()
 
@@ -158,7 +152,7 @@ func newWatchCmd() *cobra.Command {
 				cancel()
 			}()
 
-			fmt.Fprintf(output, "Watching %d repositories...\n", len(cfg.Repositories))
+			fmt.Fprintf(output, "Watching %d repositories (branch: %s)...\n", len(cfg.Repositories), currentBranch)
 			for _, repo := range cfg.Repositories {
 				fmt.Fprintf(output, "  %s (%s)\n", repo.Path, repo.Type)
 				if verbose {
@@ -172,7 +166,6 @@ func newWatchCmd() *cobra.Command {
 					}
 				}
 			}
-			fmt.Fprintf(output, "Graph database: %s\n", resolvedDBPath)
 
 			if err := idx.Start(ctx); err != nil {
 				return fmt.Errorf("indexer: %w", err)

@@ -10,7 +10,6 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
 	"github.com/imyousuf/CodeEagle/internal/graph"
-	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 )
 
 func newStatusCmd() *cobra.Command {
@@ -23,14 +22,9 @@ func newStatusCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			resolvedDBPath := cfg.ResolveDBPath(dbPath)
-			if resolvedDBPath == "" {
-				return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
-			}
-
-			store, err := embedded.NewStore(resolvedDBPath)
+			store, currentBranch, err := openBranchStore(cfg)
 			if err != nil {
-				return fmt.Errorf("open graph store: %w", err)
+				return err
 			}
 			defer store.Close()
 
@@ -43,8 +37,9 @@ func newStatusCmd() *cobra.Command {
 
 			fmt.Fprintf(out, "Knowledge Graph Status\n")
 			fmt.Fprintf(out, "======================\n\n")
-			fmt.Fprintf(out, "  Total nodes: %d\n", stats.NodeCount)
-			fmt.Fprintf(out, "  Total edges: %d\n\n", stats.EdgeCount)
+			fmt.Fprintf(out, "  Active branch: %s\n", currentBranch)
+			fmt.Fprintf(out, "  Total nodes:   %d\n", stats.NodeCount)
+			fmt.Fprintf(out, "  Total edges:   %d\n\n", stats.EdgeCount)
 
 			if len(stats.NodesByType) > 0 {
 				fmt.Fprintf(out, "  Nodes by type:\n")

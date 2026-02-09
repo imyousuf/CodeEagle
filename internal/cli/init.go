@@ -69,6 +69,15 @@ The project is also registered in ~/.codeeagle.conf for cross-project access.`,
 				fmt.Fprintf(out, "Registered project %q in %s\n", projectName, config.RegistryPath())
 			}
 
+			// Create .CodeEagle.conf at project root (for git-committed config).
+			confPath := filepath.Join(cwd, config.ProjectConfFile)
+			confContent := "export_file: codeeagle-graph.export\n"
+			if err := os.WriteFile(confPath, []byte(confContent), 0644); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not create %s: %v\n", confPath, err)
+			} else {
+				fmt.Fprintf(out, "Created %s\n", confPath)
+			}
+
 			// Print next steps.
 			fmt.Fprintln(out)
 			fmt.Fprintln(out, "Next steps:")
@@ -77,12 +86,10 @@ The project is also registered in ~/.codeeagle.conf for cross-project access.`,
 				fmt.Fprintf(out, "     (detected %s)\n", providerHint)
 			}
 			fmt.Fprintln(out, "  2. Edit .CodeEagle/config.yaml to configure repositories and languages")
-			fmt.Fprintln(out, "  3. Add to .gitignore:")
-			fmt.Fprintln(out, "       .CodeEagle/local.db/")
-			fmt.Fprintln(out, "       .CodeEagle/sync.state")
-			fmt.Fprintln(out, "       .CodeEagle/.env")
-			fmt.Fprintln(out, "  4. Run 'codeeagle sync' to index the codebase")
-			fmt.Fprintln(out, "  5. Run 'codeeagle hook install' to auto-sync on commits")
+			fmt.Fprintln(out, "  3. Add .CodeEagle/ to .gitignore")
+			fmt.Fprintln(out, "  4. Commit .CodeEagle.conf to git")
+			fmt.Fprintln(out, "  5. Run 'codeeagle sync' to index the codebase")
+			fmt.Fprintln(out, "  6. Run 'codeeagle hook install' to auto-sync on commits")
 
 			return nil
 		},

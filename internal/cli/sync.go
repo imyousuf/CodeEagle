@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/indexer"
 	"github.com/imyousuf/CodeEagle/internal/parser"
@@ -27,6 +26,7 @@ func newSyncCmd() *cobra.Command {
 	var full bool
 	var exportGraph bool
 	var importGraph bool
+	var branch string
 
 	cmd := &cobra.Command{
 		Use:   "sync",
@@ -36,8 +36,9 @@ func newSyncCmd() *cobra.Command {
 By default, syncs incrementally using git diffs (or file modification times
 for non-git directories). Use --full for a complete re-index.
 
-Use --export to export the graph to a portable file, and --import to import
-a previously exported graph into the main database.`,
+Use --export to export the current branch's graph to a portable file, and
+--import to import a previously exported graph. Use --branch to specify the
+target branch for import.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load()
 			if err != nil {
@@ -55,43 +56,33 @@ a previously exported graph into the main database.`,
 
 			// Handle export/import.
 			if exportGraph || importGraph {
-				return handleExportImport(cfg, exportGraph, cmd.OutOrStdout())
+				return handleExportImport(cfg, exportGraph, branch, cmd.OutOrStdout())
 			}
 
 			// Normal sync.
-			mainDBPath, localDBPath := cfg.ResolveDBPaths(dbPath)
-			if mainDBPath == "" {
-				return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
+			store, currentBranch, err := openBranchStore(cfg)
+			if err != nil {
+				return err
 			}
+			defer store.Close()
 
 			logFn := func(format string, args ...any) {
 				fmt.Fprintf(out, format+"\n", args...)
 			}
 
-			// Open store(s).
-			var store graph.Store
-			if mainDBPath == localDBPath {
-				// Single-DB mode.
-				s, err := embedded.NewStore(mainDBPath)
-				if err != nil {
-					return fmt.Errorf("open graph store: %w", err)
+			// Auto-import if .CodeEagle.conf is available.
+			if cfg.ProjectConf != nil && cfg.ProjectConfDir != "" {
+				exportFilePath := config.ExportFilePath(cfg.ProjectConfDir, cfg.ProjectConf)
+				statePath := cfg.ConfigDir + "/" + "sync.state"
+				state, err := indexer.LoadSyncState(statePath)
+				if err == nil {
+					if err := indexer.AutoImportIfNeeded(ctx(cmd), store, exportFilePath, state, logFn); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: auto-import failed: %v\n", err)
+					} else {
+						// Save state if auto-import updated LastImportTime.
+						_ = state.Save(statePath)
+					}
 				}
-				defer s.Close()
-				store = s
-			} else {
-				mainStore, err := embedded.NewStore(mainDBPath)
-				if err != nil {
-					return fmt.Errorf("open main graph store: %w", err)
-				}
-				defer mainStore.Close()
-
-				localStore, err := embedded.NewStore(localDBPath)
-				if err != nil {
-					return fmt.Errorf("open local graph store: %w", err)
-				}
-				defer localStore.Close()
-
-				store = graph.NewLayeredStore(mainStore, localStore)
 			}
 
 			// Build parser registry.
@@ -123,16 +114,26 @@ a previously exported graph into the main database.`,
 				Logger:         logFn,
 			})
 
-			ctx := context.Background()
-
 			mode := "incremental"
 			if full {
 				mode = "full"
 			}
-			fmt.Fprintf(out, "Syncing (%s)...\n", mode)
+			fmt.Fprintf(out, "Syncing (%s) on branch %q...\n", mode, currentBranch)
 
-			if err := indexer.SyncFiles(ctx, idx, paths, cfg.ConfigDir, full); err != nil {
+			if err := indexer.SyncFiles(ctx(cmd), idx, paths, cfg.ConfigDir, full, currentBranch); err != nil {
 				return fmt.Errorf("sync: %w", err)
+			}
+
+			// Cleanup stale branches.
+			if len(cfg.Repositories) > 0 {
+				statePath := cfg.ConfigDir + "/" + "sync.state"
+				state, err := indexer.LoadSyncState(statePath)
+				if err == nil {
+					if err := indexer.CleanupStaleBranches(ctx(cmd), store, cfg.Repositories[0].Path, state, logFn); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "Warning: branch cleanup failed: %v\n", err)
+					}
+					_ = state.Save(statePath)
+				}
 			}
 
 			// Print stats.
@@ -148,30 +149,39 @@ a previously exported graph into the main database.`,
 	}
 
 	cmd.Flags().BoolVar(&full, "full", false, "full re-index of all files")
-	cmd.Flags().BoolVar(&exportGraph, "export", false, "export graph to .CodeEagle/graph.export")
-	cmd.Flags().BoolVar(&importGraph, "import", false, "import .CodeEagle/graph.export into main DB")
+	cmd.Flags().BoolVar(&exportGraph, "export", false, "export current branch graph to a file")
+	cmd.Flags().BoolVar(&importGraph, "import", false, "import a graph export file")
+	cmd.Flags().StringVar(&branch, "branch", "", "target branch for import (auto-detected if empty)")
 
 	return cmd
 }
 
-func handleExportImport(cfg *config.Config, isExport bool, out io.Writer) error {
+// ctx returns the command's context or a background context.
+func ctx(cmd *cobra.Command) context.Context {
+	if c := cmd.Context(); c != nil {
+		return c
+	}
+	return context.Background()
+}
+
+func handleExportImport(cfg *config.Config, isExport bool, targetBranch string, out io.Writer) error {
 	if cfg.ConfigDir == "" {
 		return fmt.Errorf("no config directory found; run 'codeeagle init' first")
 	}
 
+	// Determine export path: from .CodeEagle.conf if available, else default.
 	exportPath := cfg.ConfigDir + "/graph.export"
-	ctx := context.Background()
-
-	mainDBPath, _ := cfg.ResolveDBPaths(dbPath)
-	if mainDBPath == "" {
-		return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
+	if cfg.ProjectConf != nil && cfg.ProjectConfDir != "" {
+		exportPath = config.ExportFilePath(cfg.ProjectConfDir, cfg.ProjectConf)
 	}
 
-	store, err := embedded.NewStore(mainDBPath)
+	store, currentBranch, err := openBranchStore(cfg)
 	if err != nil {
-		return fmt.Errorf("open graph store: %w", err)
+		return err
 	}
 	defer store.Close()
+
+	ctx := context.Background()
 
 	if isExport {
 		f, err := os.Create(exportPath)
@@ -180,25 +190,51 @@ func handleExportImport(cfg *config.Config, isExport bool, out io.Writer) error 
 		}
 		defer f.Close()
 
-		if err := store.Export(ctx, f); err != nil {
+		if err := store.ExportBranch(ctx, f, currentBranch); err != nil {
 			return fmt.Errorf("export: %w", err)
 		}
 
-		fmt.Fprintf(out, "Exported graph to %s\n", exportPath)
+		fmt.Fprintf(out, "Exported branch %q to %s\n", currentBranch, exportPath)
 	} else {
 		f, err := os.Open(exportPath)
 		if err != nil {
 			return fmt.Errorf("open export file: %w", err)
 		}
+
+		// If no target branch specified, read it from the export.
+		if targetBranch == "" {
+			exportBranch, err := embedded.ReadExportBranch(f)
+			f.Close()
+			if err != nil {
+				return fmt.Errorf("read export branch: %w", err)
+			}
+			if exportBranch == "" {
+				targetBranch = "main" // legacy export
+			} else {
+				targetBranch = exportBranch
+			}
+
+			// Re-open for actual import.
+			f, err = os.Open(exportPath)
+			if err != nil {
+				return fmt.Errorf("re-open export file: %w", err)
+			}
+		}
 		defer f.Close()
 
-		if err := store.Import(ctx, f); err != nil {
+		sourceBranch, err := store.ImportIntoBranch(ctx, f, targetBranch)
+		if err != nil {
 			return fmt.Errorf("import: %w", err)
 		}
 
 		stats, _ := store.Stats(ctx)
-		fmt.Fprintf(out, "Imported graph from %s: %d nodes, %d edges\n",
-			exportPath, stats.NodeCount, stats.EdgeCount)
+		if sourceBranch != "" {
+			fmt.Fprintf(out, "Imported graph (source: %q) into branch %q: %d nodes, %d edges\n",
+				sourceBranch, targetBranch, stats.NodeCount, stats.EdgeCount)
+		} else {
+			fmt.Fprintf(out, "Imported graph into branch %q: %d nodes, %d edges\n",
+				targetBranch, stats.NodeCount, stats.EdgeCount)
+		}
 	}
 
 	return nil

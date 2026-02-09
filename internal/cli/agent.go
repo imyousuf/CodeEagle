@@ -10,7 +10,6 @@ import (
 
 	"github.com/imyousuf/CodeEagle/internal/agents"
 	"github.com/imyousuf/CodeEagle/internal/config"
-	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 
 	// Register LLM providers so their init() functions run.
@@ -89,20 +88,15 @@ func newAgentPlanCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			resolvedDBPath := cfg.ResolveDBPath(dbPath)
-			if resolvedDBPath == "" {
-				return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
-			}
-
 			client, err := createLLMClient(cfg)
 			if err != nil {
 				return err
 			}
 			defer client.Close()
 
-			store, err := embedded.NewStore(resolvedDBPath)
+			store, _, err := openBranchStore(cfg)
 			if err != nil {
-				return fmt.Errorf("open graph store: %w", err)
+				return err
 			}
 			defer store.Close()
 
@@ -139,20 +133,15 @@ func newAgentDesignCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			resolvedDBPath := cfg.ResolveDBPath(dbPath)
-			if resolvedDBPath == "" {
-				return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
-			}
-
 			client, err := createLLMClient(cfg)
 			if err != nil {
 				return err
 			}
 			defer client.Close()
 
-			store, err := embedded.NewStore(resolvedDBPath)
+			store, _, err := openBranchStore(cfg)
 			if err != nil {
-				return fmt.Errorf("open graph store: %w", err)
+				return err
 			}
 			defer store.Close()
 
@@ -184,20 +173,15 @@ func newAgentReviewCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			resolvedDBPath := cfg.ResolveDBPath(dbPath)
-			if resolvedDBPath == "" {
-				return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
-			}
-
 			client, err := createLLMClient(cfg)
 			if err != nil {
 				return err
 			}
 			defer client.Close()
 
-			store, err := embedded.NewStore(resolvedDBPath)
+			store, _, err := openBranchStore(cfg)
 			if err != nil {
-				return fmt.Errorf("open graph store: %w", err)
+				return err
 			}
 			defer store.Close()
 
@@ -249,20 +233,15 @@ func newAgentAskCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			resolvedDBPath := cfg.ResolveDBPath(dbPath)
-			if resolvedDBPath == "" {
-				return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
-			}
-
 			client, err := createLLMClient(cfg)
 			if err != nil {
 				return err
 			}
 			defer client.Close()
 
-			store, err := embedded.NewStore(resolvedDBPath)
+			store, _, err := openBranchStore(cfg)
 			if err != nil {
-				return fmt.Errorf("open graph store: %w", err)
+				return err
 			}
 			defer store.Close()
 

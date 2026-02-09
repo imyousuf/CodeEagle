@@ -7,11 +7,32 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/graph"
 )
 
-func newTestStore(t *testing.T) *Store {
+func newTestStore(t *testing.T) *BranchStore {
 	t.Helper()
 	s, err := NewStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
+}
+
+func newTestBranchStore(t *testing.T, writeBranch string, readBranches []string) *BranchStore {
+	t.Helper()
+	s, err := NewBranchStore(t.TempDir(), writeBranch, readBranches)
+	if err != nil {
+		t.Fatalf("NewBranchStore: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
+}
+
+// newTestBranchStoreAt opens a branch store at an existing path.
+func newTestBranchStoreAt(t *testing.T, dbPath, writeBranch string, readBranches []string) *BranchStore {
+	t.Helper()
+	s, err := NewBranchStore(dbPath, writeBranch, readBranches)
+	if err != nil {
+		t.Fatalf("NewBranchStore: %v", err)
 	}
 	t.Cleanup(func() { s.Close() })
 	return s
@@ -605,6 +626,277 @@ func TestDeleteEdge(t *testing.T) {
 	}
 	if len(edges) != 0 {
 		t.Errorf("expected 0 edges after delete, got %d", len(edges))
+	}
+}
+
+func TestBranchStoreWriteReadIsolation(t *testing.T) {
+	dbPath := t.TempDir()
+
+	// Write to "feature" branch.
+	feature, err := NewBranchStore(dbPath, "feature", []string{"feature"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := feature.AddNode(ctx, &graph.Node{ID: "n1", Type: graph.NodeFunction, Name: "featureFunc", FilePath: "f.go"}); err != nil {
+		t.Fatal(err)
+	}
+	feature.Close()
+
+	// Open with "main" branch only — should not see feature data.
+	mainStore, err := NewBranchStore(dbPath, "main", []string{"main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mainStore.Close()
+
+	_, err = mainStore.GetNode(ctx, "n1")
+	if err == nil {
+		t.Error("main branch should NOT see feature branch data")
+	}
+}
+
+func TestBranchStoreReadPriority(t *testing.T) {
+	dbPath := t.TempDir()
+	ctx := context.Background()
+
+	// Write to "main" branch.
+	mainStore, err := NewBranchStore(dbPath, "main", []string{"main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mainStore.AddNode(ctx, &graph.Node{ID: "dup", Type: graph.NodeFunction, Name: "MainVersion", FilePath: "a.go"}); err != nil {
+		t.Fatal(err)
+	}
+	mainStore.Close()
+
+	// Write to "feature" branch.
+	featureStore, err := NewBranchStore(dbPath, "feature", []string{"feature"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := featureStore.AddNode(ctx, &graph.Node{ID: "dup", Type: graph.NodeFunction, Name: "FeatureVersion", FilePath: "a.go"}); err != nil {
+		t.Fatal(err)
+	}
+	featureStore.Close()
+
+	// Open with read branches [feature, main] — feature should win.
+	reader, err := NewBranchStore(dbPath, "feature", []string{"feature", "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	got, err := reader.GetNode(ctx, "dup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "FeatureVersion" {
+		t.Errorf("GetNode Name = %q, want FeatureVersion (feature branch takes priority)", got.Name)
+	}
+}
+
+func TestBranchStoreQueryMerge(t *testing.T) {
+	dbPath := t.TempDir()
+	ctx := context.Background()
+
+	// Write nodes to main.
+	mainStore, err := NewBranchStore(dbPath, "main", []string{"main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mainStore.AddNode(ctx, &graph.Node{ID: "m1", Type: graph.NodeFunction, Name: "fromMain", FilePath: "a.go"}); err != nil {
+		t.Fatal(err)
+	}
+	mainStore.Close()
+
+	// Write nodes to feature.
+	featureStore, err := NewBranchStore(dbPath, "feature", []string{"feature"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := featureStore.AddNode(ctx, &graph.Node{ID: "f1", Type: graph.NodeFunction, Name: "fromFeature", FilePath: "b.go"}); err != nil {
+		t.Fatal(err)
+	}
+	featureStore.Close()
+
+	// Open with both branches — should get merged results.
+	reader, err := NewBranchStore(dbPath, "feature", []string{"feature", "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	results, err := reader.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeFunction})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 merged results, got %d", len(results))
+	}
+}
+
+func TestBranchStoreDeleteByBranch(t *testing.T) {
+	dbPath := t.TempDir()
+	ctx := context.Background()
+
+	// Write data to two branches.
+	mainStore, err := NewBranchStore(dbPath, "main", []string{"main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mainStore.AddNode(ctx, &graph.Node{ID: "m1", Type: graph.NodeFunction, Name: "main_fn", FilePath: "a.go"}); err != nil {
+		t.Fatal(err)
+	}
+	mainStore.Close()
+
+	featureStore, err := NewBranchStore(dbPath, "feature", []string{"feature"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := featureStore.AddNode(ctx, &graph.Node{ID: "f1", Type: graph.NodeFunction, Name: "feat_fn", FilePath: "b.go"}); err != nil {
+		t.Fatal(err)
+	}
+	featureStore.Close()
+
+	// Delete feature branch.
+	store, err := NewBranchStore(dbPath, "main", []string{"main", "feature"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if err := store.DeleteByBranch("feature"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Main node should still be there.
+	_, err = store.GetNode(ctx, "m1")
+	if err != nil {
+		t.Errorf("main node should still exist: %v", err)
+	}
+
+	// Feature data should be gone from our merged view too.
+	branches, err := store.ListBranches()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range branches {
+		if b == "feature" {
+			t.Error("feature branch should have been deleted from DB")
+		}
+	}
+}
+
+func TestBranchStoreDeleteByFileScopedToBranch(t *testing.T) {
+	dbPath := t.TempDir()
+	ctx := context.Background()
+
+	// Write same file nodes to both branches.
+	mainStore, err := NewBranchStore(dbPath, "main", []string{"main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mainStore.AddNode(ctx, &graph.Node{ID: "n1", Type: graph.NodeFunction, Name: "shared", FilePath: "shared.go"}); err != nil {
+		t.Fatal(err)
+	}
+	mainStore.Close()
+
+	featureStore, err := NewBranchStore(dbPath, "feature", []string{"feature", "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer featureStore.Close()
+
+	if err := featureStore.AddNode(ctx, &graph.Node{ID: "n2", Type: graph.NodeFunction, Name: "feat_fn", FilePath: "shared.go"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// DeleteByFile should only affect the write branch (feature).
+	if err := featureStore.DeleteByFile(ctx, "shared.go"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Feature node should be gone.
+	results, err := featureStore.QueryNodes(ctx, graph.NodeFilter{FilePath: "shared.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only main's n1 should remain.
+	if len(results) != 1 || results[0].ID != "n1" {
+		t.Errorf("expected only main's n1, got %d results", len(results))
+	}
+}
+
+func TestBranchStoreGraphSourceTagging(t *testing.T) {
+	dbPath := t.TempDir()
+	ctx := context.Background()
+
+	// Write to "main".
+	mainStore, err := NewBranchStore(dbPath, "main", []string{"main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mainStore.AddNode(ctx, &graph.Node{ID: "n1", Type: graph.NodeFunction, Name: "fn", FilePath: "a.go"}); err != nil {
+		t.Fatal(err)
+	}
+	mainStore.Close()
+
+	// Read from main — graph_source should be "main".
+	reader, err := NewBranchStore(dbPath, "feature", []string{"feature", "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	got, err := reader.GetNode(ctx, "n1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Properties[graph.PropGraphSource] != "main" {
+		t.Errorf("PropGraphSource = %q, want %q", got.Properties[graph.PropGraphSource], "main")
+	}
+}
+
+func TestBranchStoreListBranches(t *testing.T) {
+	dbPath := t.TempDir()
+	ctx := context.Background()
+
+	// Write to two branches.
+	for _, branch := range []string{"main", "feature-a"} {
+		s, err := NewBranchStore(dbPath, branch, []string{branch})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.AddNode(ctx, &graph.Node{ID: branch + "-n1", Type: graph.NodeFunction, Name: "fn", FilePath: "a.go"}); err != nil {
+			t.Fatal(err)
+		}
+		s.Close()
+	}
+
+	// List branches.
+	s, err := NewBranchStore(dbPath, "main", []string{"main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	branches, err := s.ListBranches()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(branches) != 2 {
+		t.Errorf("expected 2 branches, got %d: %v", len(branches), branches)
+	}
+	branchSet := make(map[string]struct{})
+	for _, b := range branches {
+		branchSet[b] = struct{}{}
+	}
+	if _, ok := branchSet["main"]; !ok {
+		t.Error("missing 'main' branch")
+	}
+	if _, ok := branchSet["feature-a"]; !ok {
+		t.Error("missing 'feature-a' branch")
 	}
 }
 

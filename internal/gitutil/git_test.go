@@ -183,6 +183,63 @@ func TestGetFileHistoryDefaultLimit(t *testing.T) {
 	}
 }
 
+func TestGetCurrentBranch(t *testing.T) {
+	branch, err := GetCurrentBranch(repoPath)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if branch == "" {
+		t.Error("expected non-empty branch name")
+	}
+	// Should match what GetBranchInfo returns.
+	info, err := GetBranchInfo(repoPath)
+	if err != nil {
+		t.Fatalf("GetBranchInfo: %v", err)
+	}
+	if branch != info.CurrentBranch {
+		t.Errorf("GetCurrentBranch() = %q, GetBranchInfo().CurrentBranch = %q", branch, info.CurrentBranch)
+	}
+}
+
+func TestGetCurrentBranchInvalidRepo(t *testing.T) {
+	_, err := GetCurrentBranch("/tmp/nonexistent-repo-path-12345")
+	if err == nil {
+		t.Fatal("expected error for invalid repo path, got nil")
+	}
+}
+
+func TestListLocalBranches(t *testing.T) {
+	branches, err := ListLocalBranches(repoPath)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(branches) == 0 {
+		t.Fatal("expected at least one branch")
+	}
+	// The current branch should be in the list.
+	current, err := GetCurrentBranch(repoPath)
+	if err != nil {
+		t.Fatalf("GetCurrentBranch: %v", err)
+	}
+	found := false
+	for _, b := range branches {
+		if b == current {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("current branch %q not found in ListLocalBranches result: %v", current, branches)
+	}
+}
+
+func TestListLocalBranchesInvalidRepo(t *testing.T) {
+	_, err := ListLocalBranches("/tmp/nonexistent-repo-path-12345")
+	if err == nil {
+		t.Fatal("expected error for invalid repo path, got nil")
+	}
+}
+
 func TestGetCurrentHEAD(t *testing.T) {
 	head, err := GetCurrentHEAD(repoPath)
 	if err != nil {

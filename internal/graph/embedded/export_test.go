@@ -3,6 +3,7 @@ package embedded
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
@@ -167,5 +168,181 @@ func TestExportEmptyStore(t *testing.T) {
 	// Should produce empty output (no records).
 	if buf.Len() != 0 {
 		t.Errorf("expected empty export, got %d bytes", buf.Len())
+	}
+}
+
+func TestExportBranch(t *testing.T) {
+	ctx := context.Background()
+	dbPath := t.TempDir()
+
+	// Write to two branches.
+	mainStore, err := NewBranchStore(dbPath, "main", []string{"main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mainStore.AddNode(ctx, &graph.Node{ID: "m1", Type: graph.NodeFunction, Name: "mainFn", FilePath: "a.go"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mainStore.AddNode(ctx, &graph.Node{ID: "m2", Type: graph.NodeFunction, Name: "mainFn2", FilePath: "b.go"}); err != nil {
+		t.Fatal(err)
+	}
+	mainStore.Close()
+
+	featureStore, err := NewBranchStore(dbPath, "feature", []string{"feature"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := featureStore.AddNode(ctx, &graph.Node{ID: "f1", Type: graph.NodeFunction, Name: "featFn", FilePath: "c.go"}); err != nil {
+		t.Fatal(err)
+	}
+	featureStore.Close()
+
+	// Export only main branch.
+	store, err := NewBranchStore(dbPath, "main", []string{"main", "feature"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	var buf bytes.Buffer
+	if err := store.ExportBranch(ctx, &buf, "main"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify branch field is set.
+	branch, err := ReadExportBranch(strings.NewReader(buf.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch != "main" {
+		t.Errorf("export branch = %q, want %q", branch, "main")
+	}
+
+	// Import into a fresh store with "main" in readBranches.
+	dstPath := t.TempDir()
+	dstStore, err := NewBranchStore(dstPath, "main", []string{"main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dstStore.Close()
+
+	if err := dstStore.Import(ctx, &buf); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify only main nodes imported.
+	stats, _ := dstStore.Stats(ctx)
+	if stats.NodeCount != 2 {
+		t.Errorf("expected 2 nodes (main only), got %d", stats.NodeCount)
+	}
+}
+
+func TestImportIntoBranch(t *testing.T) {
+	ctx := context.Background()
+	dbPath := t.TempDir()
+
+	// Create export data from a "main" store.
+	srcStore, err := NewBranchStore(t.TempDir(), "main", []string{"main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srcStore.AddNode(ctx, &graph.Node{ID: "m1", Type: graph.NodeFunction, Name: "mainFn", FilePath: "a.go"}); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := srcStore.Export(ctx, &buf); err != nil {
+		t.Fatal(err)
+	}
+	srcStore.Close()
+
+	// Write feature data to dest store.
+	destStore, err := NewBranchStore(dbPath, "feature", []string{"feature", "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := destStore.AddNode(ctx, &graph.Node{ID: "f1", Type: graph.NodeFunction, Name: "featFn", FilePath: "b.go"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Import into "main" branch — should preserve "feature" data.
+	sourceBranch, err := destStore.ImportIntoBranch(ctx, &buf, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sourceBranch != "main" {
+		t.Errorf("sourceBranch = %q, want %q", sourceBranch, "main")
+	}
+	destStore.Close()
+
+	// Verify both branches exist.
+	verifyStore, err := NewBranchStore(dbPath, "feature", []string{"feature", "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer verifyStore.Close()
+
+	// Feature node should still exist.
+	if _, err := verifyStore.GetNode(ctx, "f1"); err != nil {
+		t.Errorf("feature node should still exist: %v", err)
+	}
+	// Main node should exist.
+	if _, err := verifyStore.GetNode(ctx, "m1"); err != nil {
+		t.Errorf("imported main node should exist: %v", err)
+	}
+}
+
+func TestImportLegacyFormat(t *testing.T) {
+	ctx := context.Background()
+
+	// Create legacy export (no Branch field).
+	legacy := `{"kind":"node","data":{"id":"n1","type":"Function","name":"foo","qualified_name":"","file_path":"a.go","line":0,"end_line":0,"package":"","language":"","exported":false}}
+{"kind":"edge","data":{"id":"e1","type":"Calls","source_id":"n1","target_id":"n1"}}
+`
+
+	store := newTestStore(t)
+	if err := store.Import(ctx, strings.NewReader(legacy)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should import into the default write branch.
+	got, err := store.GetNode(ctx, "n1")
+	if err != nil {
+		t.Fatalf("node not found after legacy import: %v", err)
+	}
+	if got.Name != "foo" {
+		t.Errorf("Name = %q, want %q", got.Name, "foo")
+	}
+}
+
+func TestReadExportBranch(t *testing.T) {
+	// Branch-aware export.
+	data := `{"kind":"node","branch":"main","data":{"id":"n1","type":"Function","name":"foo","qualified_name":"","file_path":"a.go","line":0,"end_line":0,"package":"","language":"","exported":false}}
+`
+	branch, err := ReadExportBranch(strings.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch != "main" {
+		t.Errorf("branch = %q, want %q", branch, "main")
+	}
+
+	// Legacy export (no branch).
+	legacyData := `{"kind":"node","data":{"id":"n1","type":"Function","name":"foo","qualified_name":"","file_path":"a.go","line":0,"end_line":0,"package":"","language":"","exported":false}}
+`
+	branch, err = ReadExportBranch(strings.NewReader(legacyData))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch != "" {
+		t.Errorf("legacy branch = %q, want empty", branch)
+	}
+
+	// Empty file.
+	branch, err = ReadExportBranch(strings.NewReader(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch != "" {
+		t.Errorf("empty file branch = %q, want empty", branch)
 	}
 }

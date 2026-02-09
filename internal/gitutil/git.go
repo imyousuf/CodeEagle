@@ -235,6 +235,35 @@ func parseCommitLog(output string) []CommitInfo {
 	return commits
 }
 
+// GetCurrentBranch returns the name of the current git branch (e.g., "main", "feature-x").
+// Returns "HEAD" if in detached HEAD state.
+func GetCurrentBranch(repoPath string) (string, error) {
+	branch, err := runGit(repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("get current branch: %w", err)
+	}
+	return branch, nil
+}
+
+// ListLocalBranches returns all local branch names in the repository.
+func ListLocalBranches(repoPath string) ([]string, error) {
+	output, err := runGit(repoPath, "branch", "--format=%(refname:short)")
+	if err != nil {
+		return nil, fmt.Errorf("list local branches: %w", err)
+	}
+	if output == "" {
+		return nil, nil
+	}
+	var branches []string
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			branches = append(branches, line)
+		}
+	}
+	return branches, nil
+}
+
 // GetCurrentHEAD returns the full commit hash of HEAD for the given repository.
 func GetCurrentHEAD(repoPath string) (string, error) {
 	return runGit(repoPath, "rev-parse", "HEAD")

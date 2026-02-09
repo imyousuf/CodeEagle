@@ -366,6 +366,64 @@ func TestResolveDBPath(t *testing.T) {
 	}
 }
 
+func TestDiscoverProjectConf(t *testing.T) {
+	// Create a hierarchy: tmpDir/sub1/sub2 with .CodeEagle.conf at tmpDir level.
+	tmpDir := t.TempDir()
+	sub1 := filepath.Join(tmpDir, "sub1")
+	sub2 := filepath.Join(sub1, "sub2")
+	if err := os.MkdirAll(sub2, 0755); err != nil {
+		t.Fatalf("create subdirs: %v", err)
+	}
+	confPath := filepath.Join(tmpDir, ProjectConfFile)
+	if err := os.WriteFile(confPath, []byte("export_file: codeeagle-graph.export\n"), 0644); err != nil {
+		t.Fatalf("write conf: %v", err)
+	}
+
+	// Discover from sub2 should find .CodeEagle.conf at tmpDir.
+	gotPath, gotConf, err := DiscoverProjectConf(sub2)
+	if err != nil {
+		t.Fatalf("DiscoverProjectConf: %v", err)
+	}
+	if gotPath != confPath {
+		t.Errorf("confPath = %q, want %q", gotPath, confPath)
+	}
+	if gotConf == nil {
+		t.Fatal("conf should not be nil")
+	}
+	if gotConf.ExportFile != "codeeagle-graph.export" {
+		t.Errorf("ExportFile = %q, want %q", gotConf.ExportFile, "codeeagle-graph.export")
+	}
+
+	// Discover from a directory without .CodeEagle.conf should return nil.
+	isolatedDir := t.TempDir()
+	_, gotConf, err = DiscoverProjectConf(isolatedDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotConf != nil {
+		t.Errorf("expected nil conf, got %+v", gotConf)
+	}
+}
+
+func TestExportFilePath(t *testing.T) {
+	conf := &ProjectConf{ExportFile: "codeeagle-graph.export"}
+	got := ExportFilePath("/home/user/project", conf)
+	want := "/home/user/project/codeeagle-graph.export"
+	if got != want {
+		t.Errorf("ExportFilePath = %q, want %q", got, want)
+	}
+
+	// Nil conf should return empty.
+	if got := ExportFilePath("/home/user/project", nil); got != "" {
+		t.Errorf("ExportFilePath(nil) = %q, want empty", got)
+	}
+
+	// Empty export file should return empty.
+	if got := ExportFilePath("/home/user/project", &ProjectConf{}); got != "" {
+		t.Errorf("ExportFilePath(empty) = %q, want empty", got)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }

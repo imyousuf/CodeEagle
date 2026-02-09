@@ -8,7 +8,6 @@ import (
 
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/graph"
-	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 )
 
 func newQueryCmd() *cobra.Command {
@@ -29,14 +28,9 @@ func newQueryCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			resolvedDBPath := cfg.ResolveDBPath(dbPath)
-			if resolvedDBPath == "" {
-				return fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
-			}
-
-			store, err := embedded.NewStore(resolvedDBPath)
+			store, _, err := openBranchStore(cfg)
 			if err != nil {
-				return fmt.Errorf("open graph store: %w", err)
+				return err
 			}
 			defer store.Close()
 
