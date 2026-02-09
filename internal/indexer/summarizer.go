@@ -538,7 +538,10 @@ func buildPatternsPrompt(allNodes []*graph.Node) string {
 }
 
 // GroupNodesByTopDir groups nodes by their top-level directory relative to the
-// given base paths. Nodes without a file path are placed in a "(root)" group.
+// given base paths. With relative paths stored in the graph, the first path
+// component is used directly. For backward compatibility with absolute paths,
+// falls back to filepath.Rel against basePaths.
+// Nodes without a file path are placed in a "(root)" group.
 func GroupNodesByTopDir(nodes []*graph.Node, basePaths []string) map[string][]*graph.Node {
 	groups := make(map[string][]*graph.Node)
 	for _, n := range nodes {
@@ -548,16 +551,25 @@ func GroupNodesByTopDir(nodes []*graph.Node, basePaths []string) map[string][]*g
 		}
 
 		group := "(root)"
-		for _, base := range basePaths {
-			rel, err := filepath.Rel(base, n.FilePath)
-			if err != nil || strings.HasPrefix(rel, "..") {
-				continue
-			}
-			parts := strings.SplitN(rel, string(filepath.Separator), 2)
+		if !filepath.IsAbs(n.FilePath) {
+			// Relative path: first component is the top-level directory.
+			parts := strings.SplitN(n.FilePath, string(filepath.Separator), 2)
 			if len(parts) > 0 && parts[0] != "" {
 				group = parts[0]
 			}
-			break
+		} else {
+			// Absolute path fallback (legacy data or transitional period).
+			for _, base := range basePaths {
+				rel, err := filepath.Rel(base, n.FilePath)
+				if err != nil || strings.HasPrefix(rel, "..") {
+					continue
+				}
+				parts := strings.SplitN(rel, string(filepath.Separator), 2)
+				if len(parts) > 0 && parts[0] != "" {
+					group = parts[0]
+				}
+				break
+			}
 		}
 		groups[group] = append(groups[group], n)
 	}

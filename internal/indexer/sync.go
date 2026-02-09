@@ -93,10 +93,11 @@ func syncGitRepo(ctx context.Context, idx *Indexer, repoPath string, state *Sync
 			}
 
 			// Delete nodes for deleted files.
+			// Git diff returns relative paths — use them directly since the graph
+			// now stores relative paths.
 			for _, relPath := range deleted {
-				absPath := filepath.Join(repoPath, relPath)
-				if err := idx.Store().DeleteByFile(ctx, absPath); err != nil {
-					idx.log("Warning: delete by file %s: %v", absPath, err)
+				if err := idx.Store().DeleteByFile(ctx, relPath); err != nil {
+					idx.log("Warning: delete by file %s: %v", relPath, err)
 				}
 			}
 
@@ -116,16 +117,17 @@ func syncGitRepo(ctx context.Context, idx *Indexer, repoPath string, state *Sync
 }
 
 // syncDirectory performs mtime-based sync for a non-git directory.
+// State tracking uses relative paths (relative to repo roots) so the state
+// file is portable across machines.
 func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *SyncState, full bool) error {
 	if full {
 		if idx.verbose {
 			idx.log("Full index of %s (non-git)", dirPath)
 		}
-		// Clear file times for this dir.
+		// Clear file times for this dir (keys may be relative or absolute from legacy state).
 		if state.FileTimes != nil {
 			for k := range state.FileTimes {
-				// Only clear times for files under this directory.
-				if isSubPath(k, dirPath) {
+				if isSubPath(k, dirPath) || !filepath.IsAbs(k) {
 					delete(state.FileTimes, k)
 				}
 			}
@@ -137,7 +139,7 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 		state.FileTimes = make(map[string]time.Time)
 	}
 
-	// Track which files still exist.
+	// Track which relative paths still exist.
 	existing := make(map[string]struct{})
 
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
@@ -154,15 +156,16 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 			return nil
 		}
 
-		existing[path] = struct{}{}
+		relPath := idx.toRelativePath(path)
+		existing[relPath] = struct{}{}
 		modTime := info.ModTime()
 
-		prevTime, hasPrev := state.FileTimes[path]
+		prevTime, hasPrev := state.FileTimes[relPath]
 		if !hasPrev || modTime.After(prevTime) {
 			if err := idx.IndexFile(ctx, path); err != nil {
 				idx.log("Warning: index file %s: %v", path, err)
 			}
-			state.FileTimes[path] = modTime
+			state.FileTimes[relPath] = modTime
 		}
 
 		return nil
@@ -172,15 +175,12 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 	}
 
 	// Delete nodes for files that no longer exist.
-	for path := range state.FileTimes {
-		if !isSubPath(path, dirPath) {
-			continue
-		}
-		if _, ok := existing[path]; !ok {
-			if err := idx.Store().DeleteByFile(ctx, path); err != nil {
-				idx.log("Warning: delete by file %s: %v", path, err)
+	for relPath := range state.FileTimes {
+		if _, ok := existing[relPath]; !ok {
+			if err := idx.Store().DeleteByFile(ctx, relPath); err != nil {
+				idx.log("Warning: delete by file %s: %v", relPath, err)
 			}
-			delete(state.FileTimes, path)
+			delete(state.FileTimes, relPath)
 		}
 	}
 

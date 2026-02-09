@@ -114,6 +114,7 @@ func newWatchCmd() *cobra.Command {
 				GraphStore:     store,
 				ParserRegistry: registry,
 				WatcherConfig:  wcfg,
+				RepoRoots:      paths,
 				Verbose:        verbose,
 				Logger:         logFn,
 				LLMClient:      llmClient,

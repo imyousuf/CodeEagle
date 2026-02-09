@@ -433,6 +433,28 @@ func TestGroupNodesByTopDir(t *testing.T) {
 	}
 }
 
+func TestGroupNodesByTopDirRelativePaths(t *testing.T) {
+	// With relative paths (the new default), basePaths is unused.
+	nodes := []*graph.Node{
+		{ID: "1", FilePath: "services/auth/main.go"},
+		{ID: "2", FilePath: "services/auth/handler.go"},
+		{ID: "3", FilePath: "lib/utils.go"},
+		{ID: "4", FilePath: ""},
+	}
+
+	groups := GroupNodesByTopDir(nodes, nil)
+
+	if len(groups["services"]) != 2 {
+		t.Errorf("expected 2 nodes in 'services', got %d", len(groups["services"]))
+	}
+	if len(groups["lib"]) != 1 {
+		t.Errorf("expected 1 node in 'lib', got %d", len(groups["lib"]))
+	}
+	if len(groups["(root)"]) != 1 {
+		t.Errorf("expected 1 node in '(root)', got %d", len(groups["(root)"]))
+	}
+}
+
 func contains(s, substr string) bool {
 	return fmt.Sprintf("%s", s) != "" && len(s) > 0 && findSubstring(s, substr)
 }

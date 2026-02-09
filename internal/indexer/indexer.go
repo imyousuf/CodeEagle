@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,7 @@ type IndexerConfig struct {
 	GraphStore     graph.Store
 	ParserRegistry *parser.Registry
 	WatcherConfig  *watcher.WatcherConfig
+	RepoRoots      []string // repository root paths for abs→rel path conversion
 	Verbose        bool
 	Logger         func(format string, args ...any) // optional logger, defaults to fmt.Fprintf(os.Stderr, ...)
 	LLMClient      llm.Client                       // optional LLM client for auto-summarization
@@ -40,6 +42,7 @@ type Indexer struct {
 	registry      *parser.Registry
 	wcfg          *watcher.WatcherConfig
 	matcher       *watcher.GitIgnoreMatcher
+	repoRoots     []string
 	verbose       bool
 	log           func(format string, args ...any)
 	llmClient     llm.Client
@@ -79,6 +82,7 @@ func NewIndexer(cfg IndexerConfig) *Indexer {
 		registry:      cfg.ParserRegistry,
 		wcfg:          cfg.WatcherConfig,
 		matcher:       matcher,
+		repoRoots:     cfg.RepoRoots,
 		verbose:       cfg.Verbose,
 		log:           logFn,
 		llmClient:     cfg.LLMClient,
@@ -91,7 +95,22 @@ func (idx *Indexer) Store() graph.Store {
 	return idx.store
 }
 
+// toRelativePath converts an absolute file path to a path relative to the
+// first matching repo root. If no repo root matches, the path is returned as-is.
+func (idx *Indexer) toRelativePath(absPath string) string {
+	for _, root := range idx.repoRoots {
+		rel, err := filepath.Rel(root, absPath)
+		if err == nil && !strings.HasPrefix(rel, "..") {
+			return rel
+		}
+	}
+	return absPath
+}
+
 // IndexFile parses a single file and updates the knowledge graph.
+// filePath must be an absolute path (for reading from disk). It is converted
+// to a relative path (relative to repo roots) before passing to the parser
+// and graph store.
 // If no parser is registered for the file extension, it silently returns nil.
 func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
 	ext := filepath.Ext(filePath)
@@ -105,13 +124,15 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
 		return fmt.Errorf("read file %s: %w", filePath, err)
 	}
 
+	relPath := idx.toRelativePath(filePath)
+
 	if idx.verbose {
-		idx.log("Parsing %s (%s)...", filePath, p.Language())
+		idx.log("Parsing %s (%s)...", relPath, p.Language())
 	}
 
-	result, err := p.ParseFile(filePath, content)
+	result, err := p.ParseFile(relPath, content)
 	if err != nil {
-		return fmt.Errorf("parse file %s: %w", filePath, err)
+		return fmt.Errorf("parse file %s: %w", relPath, err)
 	}
 
 	// Classify nodes with architectural roles, design patterns, and layer tags.
@@ -119,8 +140,8 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
 	result = classifier.Classify(result)
 
 	// Delete old nodes for this file to support incremental updates.
-	if err := idx.store.DeleteByFile(ctx, filePath); err != nil {
-		return fmt.Errorf("delete old nodes for %s: %w", filePath, err)
+	if err := idx.store.DeleteByFile(ctx, relPath); err != nil {
+		return fmt.Errorf("delete old nodes for %s: %w", relPath, err)
 	}
 
 	// Add new nodes.
@@ -274,9 +295,10 @@ func (idx *Indexer) handleEvent(ctx context.Context, evt watcher.Event) {
 			idx.mu.Unlock()
 		}
 	case watcher.Remove, watcher.Rename:
-		if err := idx.store.DeleteByFile(ctx, evt.Path); err != nil {
+		relPath := idx.toRelativePath(evt.Path)
+		if err := idx.store.DeleteByFile(ctx, relPath); err != nil {
 			idx.mu.Lock()
-			idx.errors = append(idx.errors, fmt.Sprintf("delete %s: %v", evt.Path, err))
+			idx.errors = append(idx.errors, fmt.Sprintf("delete %s: %v", relPath, err))
 			idx.mu.Unlock()
 		}
 	}

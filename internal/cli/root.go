@@ -69,6 +69,7 @@ func init() {
 	rootCmd.AddCommand(newCompletionCmd())
 	rootCmd.AddCommand(newSyncCmd())
 	rootCmd.AddCommand(newHookCmd())
+	rootCmd.AddCommand(newBackpopPathsCmd())
 }
 
 // initConfig reads in config file and ENV variables if set.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -15,12 +16,28 @@ import (
 // suitable for inclusion in LLM prompts. Each method queries the graph
 // and returns a structured, human-readable summary.
 type ContextBuilder struct {
-	store graph.Store
+	store     graph.Store
+	repoRoots []string
 }
 
 // NewContextBuilder creates a ContextBuilder backed by the given graph store.
-func NewContextBuilder(store graph.Store) *ContextBuilder {
-	return &ContextBuilder{store: store}
+// Optional repoRoots are used to resolve relative file paths (stored in the graph)
+// back to absolute paths for reading file contents from disk.
+func NewContextBuilder(store graph.Store, repoRoots ...string) *ContextBuilder {
+	return &ContextBuilder{store: store, repoRoots: repoRoots}
+}
+
+// resolveFilePath resolves a potentially relative file path to an absolute path
+// by checking against each repo root. Returns the original path if no match is found
+// or if the path is already absolute and exists.
+func (cb *ContextBuilder) resolveFilePath(relPath string) string {
+	for _, root := range cb.repoRoots {
+		abs := filepath.Join(root, relPath)
+		if _, err := os.Stat(abs); err == nil {
+			return abs
+		}
+	}
+	return relPath
 }
 
 // BuildGuidelineContext queries the graph for all AIGuideline nodes (e.g.,
@@ -38,7 +55,7 @@ func (cb *ContextBuilder) BuildGuidelineContext(ctx context.Context) (string, er
 	var b strings.Builder
 	b.WriteString("## Project AI Guidelines\n\n")
 	for _, n := range nodes {
-		content, err := os.ReadFile(n.FilePath)
+		content, err := os.ReadFile(cb.resolveFilePath(n.FilePath))
 		if err != nil {
 			fmt.Fprintf(&b, "### %s\n\n(Could not read file: %v)\n\n", n.Name, err)
 			continue

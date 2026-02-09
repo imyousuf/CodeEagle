@@ -100,12 +100,11 @@ func newAgentPlanCmd() *cobra.Command {
 			}
 			defer store.Close()
 
-			ctxBuilder := agents.NewContextBuilder(store)
-
 			var repoPaths []string
 			for _, repo := range cfg.Repositories {
 				repoPaths = append(repoPaths, repo.Path)
 			}
+			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
 			planner := agents.NewPlanner(client, ctxBuilder, repoPaths...)
 
 			query := strings.Join(args, " ")
@@ -145,7 +144,11 @@ func newAgentDesignCmd() *cobra.Command {
 			}
 			defer store.Close()
 
-			ctxBuilder := agents.NewContextBuilder(store)
+			var repoPaths []string
+			for _, repo := range cfg.Repositories {
+				repoPaths = append(repoPaths, repo.Path)
+			}
+			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
 			designer := agents.NewDesigner(client, ctxBuilder)
 
 			query := strings.Join(args, " ")
@@ -185,13 +188,12 @@ func newAgentReviewCmd() *cobra.Command {
 			}
 			defer store.Close()
 
-			ctxBuilder := agents.NewContextBuilder(store)
-			reviewer := agents.NewReviewer(client, ctxBuilder)
-
 			var repoPaths []string
 			for _, repo := range cfg.Repositories {
 				repoPaths = append(repoPaths, repo.Path)
 			}
+			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
+			reviewer := agents.NewReviewer(client, ctxBuilder)
 
 			diff, _ := cmd.Flags().GetString("diff")
 			if diff != "" {
@@ -245,12 +247,11 @@ func newAgentAskCmd() *cobra.Command {
 			}
 			defer store.Close()
 
-			ctxBuilder := agents.NewContextBuilder(store)
-
 			var repoPaths []string
 			for _, repo := range cfg.Repositories {
 				repoPaths = append(repoPaths, repo.Path)
 			}
+			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
 			asker := agents.NewAsker(client, ctxBuilder, repoPaths...)
 
 			query := strings.Join(args, " ")
