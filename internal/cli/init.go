@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
+	internalllm "github.com/imyousuf/CodeEagle/internal/llm"
 )
 
 func newInitCmd() *cobra.Command {
@@ -91,6 +92,9 @@ func detectLLMProvider() (provider, hint string) {
 	}
 	if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "" || os.Getenv("GOOGLE_CLOUD_PROJECT") != "" {
 		return "vertex-ai", "Google Cloud credentials detected"
+	}
+	if internalllm.FindClaudeCLI() != "" {
+		return "claude-cli", "Claude Code CLI detected"
 	}
 	return "anthropic", ""
 }

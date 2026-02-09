@@ -14,7 +14,7 @@ import (
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 
 	// Register LLM providers so their init() functions run.
-	_ "github.com/imyousuf/CodeEagle/internal/llm"
+	internalllm "github.com/imyousuf/CodeEagle/internal/llm"
 )
 
 func newAgentCmd() *cobra.Command {
@@ -45,6 +45,13 @@ func createLLMClient(cfg *config.Config) (llm.Client, error) {
 	provider := cfg.Agents.LLMProvider
 	if provider == "" {
 		provider = "anthropic"
+	}
+
+	// Auto-detect Claude CLI when Anthropic is configured but no API key is set.
+	if (provider == "" || provider == "anthropic") && apiKey == "" {
+		if path := internalllm.FindClaudeCLI(); path != "" {
+			provider = "claude-cli"
+		}
 	}
 
 	model := cfg.Agents.Model
