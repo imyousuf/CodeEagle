@@ -183,6 +183,73 @@ func TestGetFileHistoryDefaultLimit(t *testing.T) {
 	}
 }
 
+func TestGetCurrentHEAD(t *testing.T) {
+	head, err := GetCurrentHEAD(repoPath)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(head) < 40 {
+		t.Errorf("expected full SHA (40+ chars), got %q (%d chars)", head, len(head))
+	}
+	// Should only contain hex characters.
+	for _, c := range head {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			t.Errorf("unexpected character %q in HEAD hash %q", string(c), head)
+			break
+		}
+	}
+}
+
+func TestGetCurrentHEADInvalidRepo(t *testing.T) {
+	_, err := GetCurrentHEAD("/tmp/nonexistent-repo-path-12345")
+	if err == nil {
+		t.Fatal("expected error for invalid repo path, got nil")
+	}
+}
+
+func TestGetChangedFilesSince(t *testing.T) {
+	// Get an older commit to compare against.
+	// Use the first commit in the repo, which should have at least some files.
+	firstCommit, err := runGit(repoPath, "rev-list", "--max-parents=0", "HEAD")
+	if err != nil {
+		t.Fatalf("get first commit: %v", err)
+	}
+	// Trim to first line if multiple roots exist.
+	if idx := strings.Index(firstCommit, "\n"); idx > 0 {
+		firstCommit = firstCommit[:idx]
+	}
+
+	added, modified, deleted, err := GetChangedFilesSince(repoPath, firstCommit)
+	if err != nil {
+		t.Fatalf("GetChangedFilesSince: %v", err)
+	}
+
+	// Since comparing first commit to HEAD, there should be some changed files.
+	total := len(added) + len(modified) + len(deleted)
+	if total == 0 {
+		t.Error("expected at least some changed files since first commit")
+	}
+}
+
+func TestGetChangedFilesSinceNoChanges(t *testing.T) {
+	// Compare HEAD to itself -- should have no changes.
+	head, err := GetCurrentHEAD(repoPath)
+	if err != nil {
+		t.Fatalf("GetCurrentHEAD: %v", err)
+	}
+
+	added, modified, deleted, err := GetChangedFilesSince(repoPath, head)
+	if err != nil {
+		t.Fatalf("GetChangedFilesSince: %v", err)
+	}
+
+	total := len(added) + len(modified) + len(deleted)
+	if total != 0 {
+		t.Errorf("expected 0 changes when comparing HEAD to itself, got %d (added=%d mod=%d del=%d)",
+			total, len(added), len(modified), len(deleted))
+	}
+}
+
 func TestRunGitOutputTrimmed(t *testing.T) {
 	output, err := runGit(repoPath, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {

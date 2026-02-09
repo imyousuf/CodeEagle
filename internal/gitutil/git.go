@@ -235,6 +235,34 @@ func parseCommitLog(output string) []CommitInfo {
 	return commits
 }
 
+// GetCurrentHEAD returns the full commit hash of HEAD for the given repository.
+func GetCurrentHEAD(repoPath string) (string, error) {
+	return runGit(repoPath, "rev-parse", "HEAD")
+}
+
+// GetChangedFilesSince returns the files that changed between sinceCommit and HEAD.
+// Files are categorized as added, modified, or deleted.
+func GetChangedFilesSince(repoPath, sinceCommit string) (added, modified, deleted []string, err error) {
+	output, err := runGit(repoPath, "diff", "--name-status", sinceCommit+"..HEAD")
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("git diff --name-status: %w", err)
+	}
+
+	statusMap := parseNameStatus(output)
+	for path, status := range statusMap {
+		switch status {
+		case "added":
+			added = append(added, path)
+		case "deleted":
+			deleted = append(deleted, path)
+		default:
+			// "modified", "renamed" treated as modified
+			modified = append(modified, path)
+		}
+	}
+	return added, modified, deleted, nil
+}
+
 // runGit executes a git command in the given repository path and returns trimmed stdout.
 func runGit(repoPath string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)

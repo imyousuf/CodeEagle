@@ -67,6 +67,8 @@ func init() {
 	rootCmd.AddCommand(newMetricsCmd())
 	rootCmd.AddCommand(newLLMTestCmd())
 	rootCmd.AddCommand(newCompletionCmd())
+	rootCmd.AddCommand(newSyncCmd())
+	rootCmd.AddCommand(newHookCmd())
 }
 
 // initConfig reads in config file and ENV variables if set.

@@ -77,8 +77,12 @@ The project is also registered in ~/.codeeagle.conf for cross-project access.`,
 				fmt.Fprintf(out, "     (detected %s)\n", providerHint)
 			}
 			fmt.Fprintln(out, "  2. Edit .CodeEagle/config.yaml to configure repositories and languages")
-			fmt.Fprintln(out, "  3. Add .CodeEagle/.env to .gitignore")
-			fmt.Fprintln(out, "  4. Run 'codeeagle watch' to start indexing")
+			fmt.Fprintln(out, "  3. Add to .gitignore:")
+			fmt.Fprintln(out, "       .CodeEagle/local.db/")
+			fmt.Fprintln(out, "       .CodeEagle/sync.state")
+			fmt.Fprintln(out, "       .CodeEagle/.env")
+			fmt.Fprintln(out, "  4. Run 'codeeagle sync' to index the codebase")
+			fmt.Fprintln(out, "  5. Run 'codeeagle hook install' to auto-sync on commits")
 
 			return nil
 		},

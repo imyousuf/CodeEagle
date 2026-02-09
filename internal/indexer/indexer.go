@@ -86,6 +86,11 @@ func NewIndexer(cfg IndexerConfig) *Indexer {
 	}
 }
 
+// Store returns the underlying graph store used by this Indexer.
+func (idx *Indexer) Store() graph.Store {
+	return idx.store
+}
+
 // IndexFile parses a single file and updates the knowledge graph.
 // If no parser is registered for the file extension, it silently returns nil.
 func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {

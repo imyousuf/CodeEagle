@@ -66,6 +66,10 @@ type GraphConfig struct {
 	Neo4jURI string `mapstructure:"neo4j_uri"`
 	// DBPath is the path to the graph database directory.
 	DBPath string `mapstructure:"db_path"`
+	// MainDB is the path to the main (CI-built, committable) graph database.
+	MainDB string `mapstructure:"main_db"`
+	// LocalDB is the path to the local (gitignored) graph database.
+	LocalDB string `mapstructure:"local_db"`
 }
 
 // AgentsConfig holds AI agent configuration.
@@ -118,6 +122,28 @@ func (c *Config) ResolveDBPath(flagValue string) string {
 		return filepath.Join(c.ConfigDir, DefaultDBDir)
 	}
 	return ""
+}
+
+// ResolveDBPaths determines the main and local database paths for layered storage.
+// Priority:
+//  1. flagValue (CLI --db-path): used for both (single-DB mode)
+//  2. MainDB + LocalDB from config YAML
+//  3. DBPath from config (single-DB mode)
+//  4. Defaults: <ConfigDir>/graph.db (main) and <ConfigDir>/local.db (local)
+func (c *Config) ResolveDBPaths(flagValue string) (mainDB, localDB string) {
+	if flagValue != "" {
+		return flagValue, flagValue
+	}
+	if c.Graph.MainDB != "" && c.Graph.LocalDB != "" {
+		return c.Graph.MainDB, c.Graph.LocalDB
+	}
+	if c.Graph.DBPath != "" {
+		return c.Graph.DBPath, c.Graph.DBPath
+	}
+	if c.ConfigDir != "" {
+		return filepath.Join(c.ConfigDir, DefaultDBDir), filepath.Join(c.ConfigDir, "local.db")
+	}
+	return "", ""
 }
 
 // Load loads configuration from file, environment variables, and defaults.
