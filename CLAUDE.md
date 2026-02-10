@@ -76,6 +76,9 @@ codeeagle query coverage [--level L]    # Show test coverage by file or function
 codeeagle backpop [--all]               # Run linker phases on existing graph
 codeeagle metrics [service|file|func]   # Show code quality metrics
 codeeagle mcp serve                     # Start MCP server (stdio transport)
+
+codeeagle version                       # Print version, commit, build date
+codeeagle update [--check] [--force]    # Check for and install updates
 ```
 
 ### 4. Non-Coding AI Agents

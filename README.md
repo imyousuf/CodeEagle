@@ -19,13 +19,35 @@ It supports monorepos, multi-repo setups, and multi-language codebases (Go, Pyth
 
 ## Installation
 
-Requires Go 1.24+.
+### Pre-built Binaries (Recommended)
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/imyousuf/CodeEagle/releases):
+
+- Linux: `codeeagle-linux-amd64.tar.gz`, `codeeagle-linux-arm64.tar.gz`
+- macOS: `codeeagle-darwin-amd64.tar.gz`, `codeeagle-darwin-arm64.tar.gz`
+
+Extract and move to your PATH:
+
+```bash
+tar -xzf codeeagle-<platform>.tar.gz
+sudo mv codeeagle /usr/local/bin/
+```
+
+To update to the latest version:
+
+```bash
+codeeagle update
+```
+
+### Build from Source
+
+Requires Go 1.24+ and a C compiler (gcc or clang) — needed for [tree-sitter](https://tree-sitter.github.io/tree-sitter/) parsing via CGO.
 
 ```bash
 go install github.com/imyousuf/CodeEagle/cmd/codeeagle@latest
 ```
 
-Or build from source:
+Or clone and build:
 
 ```bash
 git clone https://github.com/imyousuf/CodeEagle.git
@@ -80,6 +102,9 @@ codeeagle backpop [--all]                   Run linker phases on existing graph
 codeeagle metrics [--file F] [--type T]     Show code quality metrics
 codeeagle mcp serve                         Start MCP server (stdio transport)
 codeeagle hook install                      Install git post-commit hook for auto-sync
+
+codeeagle version                           Print version, commit, build date
+codeeagle update [--check] [--force]        Check for and install updates
 ```
 
 Global flags: `--config <path>`, `--db-path <path>`, `-p <project-name>`, `-v` (verbose).

@@ -15,6 +15,8 @@ import (
 const (
 	// ProjectDirName is the per-project configuration directory name.
 	ProjectDirName = ".CodeEagle"
+	// HomeDirName is the user-level config directory name (lives in ~/).
+	HomeDirName = ".CodeEagle"
 	// ProjectConfigFile is the config filename inside the project dir.
 	ProjectConfigFile = "config.yaml"
 	// DefaultDBDir is the default database directory name inside the project dir.
@@ -97,6 +99,24 @@ type AgentsConfig struct {
 	AutoLink bool `mapstructure:"auto_link"`
 	// CredentialsFile is the path to a GCP service account credentials JSON file (for Vertex AI).
 	CredentialsFile string `mapstructure:"credentials_file"`
+}
+
+// HomeDir returns the path to the user-level CodeEagle directory (~/.CodeEagle/).
+func HomeDir() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+	return filepath.Join(homeDir, HomeDirName), nil
+}
+
+// EnsureHomeDir creates the user-level config directory if it doesn't exist.
+func EnsureHomeDir() error {
+	dir, err := HomeDir()
+	if err != nil {
+		return err
+	}
+	return os.MkdirAll(dir, 0755)
 }
 
 // DiscoverProjectDir walks up from startDir looking for a .CodeEagle/ directory.

@@ -1,18 +1,38 @@
-name: Release
+name: Release Dev
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
-  release-linux-amd64:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Test
+        run: make test-fast
+
+  build-linux-amd64:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -25,7 +45,8 @@ jobs:
       - name: Get version info
         id: version
         run: |
-          echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "version=dev-$SHORT_SHA" >> $GITHUB_OUTPUT
           echo "commit=${{ github.sha }}" >> $GITHUB_OUTPUT
           echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
 
@@ -46,10 +67,13 @@ jobs:
           name: codeeagle-linux-amd64
           path: dist/codeeagle-linux-amd64.tar.gz
 
-  release-linux-arm64:
+  build-linux-arm64:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -65,7 +89,8 @@ jobs:
       - name: Get version info
         id: version
         run: |
-          echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "version=dev-$SHORT_SHA" >> $GITHUB_OUTPUT
           echo "commit=${{ github.sha }}" >> $GITHUB_OUTPUT
           echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
 
@@ -90,10 +115,13 @@ jobs:
           name: codeeagle-linux-arm64
           path: dist/codeeagle-linux-arm64.tar.gz
 
-  release-darwin-amd64:
+  build-darwin-amd64:
+    needs: test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -106,7 +134,8 @@ jobs:
       - name: Get version info
         id: version
         run: |
-          echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "version=dev-$SHORT_SHA" >> $GITHUB_OUTPUT
           echo "commit=${{ github.sha }}" >> $GITHUB_OUTPUT
           echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
 
@@ -130,10 +159,13 @@ jobs:
           name: codeeagle-darwin-amd64
           path: dist/codeeagle-darwin-amd64.tar.gz
 
-  release-darwin-arm64:
+  build-darwin-arm64:
+    needs: test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
@@ -146,7 +178,8 @@ jobs:
       - name: Get version info
         id: version
         run: |
-          echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "version=dev-$SHORT_SHA" >> $GITHUB_OUTPUT
           echo "commit=${{ github.sha }}" >> $GITHUB_OUTPUT
           echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
 
@@ -172,12 +205,23 @@ jobs:
 
   create-release:
     needs:
-      - release-linux-amd64
-      - release-linux-arm64
-      - release-darwin-amd64
-      - release-darwin-arm64
+      - build-linux-amd64
+      - build-linux-arm64
+      - build-darwin-amd64
+      - build-darwin-arm64
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version info
+        id: version
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -190,13 +234,51 @@ jobs:
           sha256sum *.tar.gz > checksums.txt
           cat checksums.txt
 
-      - name: Create GitHub Release
+      - name: Delete existing dev release
+        run: |
+          gh release delete dev --yes || true
+          git push origin :refs/tags/dev || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Create dev release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          tag_name: dev
+          name: Development Build (${{ steps.version.outputs.short_sha }})
+          body: |
+            ## Development Build
+
+            This is an automated development build from the `main` branch.
+
+            **Commit:** ${{ github.sha }}
+            **Date:** ${{ steps.version.outputs.date }}
+
+            ### Installation
+
+            Download the appropriate archive for your platform and extract the `codeeagle` binary.
+
+            **Linux/macOS:**
+            ```bash
+            tar -xzf codeeagle-<platform>.tar.gz
+            chmod +x codeeagle
+            sudo mv codeeagle /usr/local/bin/
+            ```
+
+            Or if you already have CodeEagle installed:
+            ```bash
+            codeeagle update
+            ```
+
+            ---
+
+            > **Note:** This is a development build and may contain unstable features.
+            > For stable releases, please use tagged versions.
           files: |
             dist/codeeagle-linux-amd64.tar.gz
             dist/codeeagle-linux-arm64.tar.gz
             dist/codeeagle-darwin-amd64.tar.gz
             dist/codeeagle-darwin-arm64.tar.gz
             dist/checksums.txt
+          prerelease: true
+          make_latest: false

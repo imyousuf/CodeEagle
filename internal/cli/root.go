@@ -33,6 +33,13 @@ Commands:
   metrics    Show code quality metrics`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Skip auto-update check for update and version commands
+		if cmd.Name() == "update" || cmd.Name() == "version" {
+			return
+		}
+		CheckAndAutoUpdate()
+	},
 }
 
 // Execute runs the root command.
@@ -72,6 +79,8 @@ func init() {
 	rootCmd.AddCommand(newBackpopPathsCmd())
 	rootCmd.AddCommand(newBackpopCmd())
 	rootCmd.AddCommand(newMCPCmd())
+	rootCmd.AddCommand(newVersionCmd())
+	rootCmd.AddCommand(newUpdateCmd())
 }
 
 // initConfig reads in config file and ENV variables if set.
