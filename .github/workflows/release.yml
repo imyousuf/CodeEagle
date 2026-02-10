@@ -73,6 +73,7 @@ jobs:
         env:
           GOOS: linux
           GOARCH: arm64
+          CGO_ENABLED: "1"
           CC: aarch64-linux-gnu-gcc
         run: |
           mkdir -p dist
@@ -114,6 +115,7 @@ jobs:
         env:
           GOOS: darwin
           GOARCH: amd64
+          CGO_ENABLED: "1"
         run: |
           mkdir -p dist
           LDFLAGS="-s -w \
@@ -154,6 +156,7 @@ jobs:
         env:
           GOOS: darwin
           GOARCH: arm64
+          CGO_ENABLED: "1"
         run: |
           mkdir -p dist
           LDFLAGS="-s -w \

@@ -41,28 +41,28 @@ install:
 ## build-linux-amd64: Build for Linux x86_64
 build-linux-amd64:
 	@mkdir -p $(BUILD_DIR)/linux-amd64
-	GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/linux-amd64/$(BINARY_NAME) ./cmd/codeeagle
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/linux-amd64/$(BINARY_NAME) ./cmd/codeeagle
 	tar -czf $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64.tar.gz -C $(BUILD_DIR)/linux-amd64 $(BINARY_NAME)
 	@rm -rf $(BUILD_DIR)/linux-amd64
 
 ## build-linux-arm64: Build for Linux ARM64
 build-linux-arm64:
 	@mkdir -p $(BUILD_DIR)/linux-arm64
-	GOOS=linux GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/linux-arm64/$(BINARY_NAME) ./cmd/codeeagle
+	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/linux-arm64/$(BINARY_NAME) ./cmd/codeeagle
 	tar -czf $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64.tar.gz -C $(BUILD_DIR)/linux-arm64 $(BINARY_NAME)
 	@rm -rf $(BUILD_DIR)/linux-arm64
 
 ## build-darwin-amd64: Build for macOS x86_64
 build-darwin-amd64:
 	@mkdir -p $(BUILD_DIR)/darwin-amd64
-	GOOS=darwin GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/darwin-amd64/$(BINARY_NAME) ./cmd/codeeagle
+	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/darwin-amd64/$(BINARY_NAME) ./cmd/codeeagle
 	tar -czf $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64.tar.gz -C $(BUILD_DIR)/darwin-amd64 $(BINARY_NAME)
 	@rm -rf $(BUILD_DIR)/darwin-amd64
 
 ## build-darwin-arm64: Build for macOS ARM64 (Apple Silicon)
 build-darwin-arm64:
 	@mkdir -p $(BUILD_DIR)/darwin-arm64
-	GOOS=darwin GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/darwin-arm64/$(BINARY_NAME) ./cmd/codeeagle
+	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/darwin-arm64/$(BINARY_NAME) ./cmd/codeeagle
 	tar -czf $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64.tar.gz -C $(BUILD_DIR)/darwin-arm64 $(BINARY_NAME)
 	@rm -rf $(BUILD_DIR)/darwin-arm64
 
