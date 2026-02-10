@@ -290,6 +290,16 @@ func TestGetChangedFilesSince(t *testing.T) {
 		firstCommit = firstCommit[:idx]
 	}
 
+	// In shallow clones (e.g., CI with fetch-depth=1), the first commit IS HEAD,
+	// so there would be no diff. Skip the test in that case.
+	head, err := GetCurrentHEAD(repoPath)
+	if err != nil {
+		t.Fatalf("GetCurrentHEAD: %v", err)
+	}
+	if firstCommit == head {
+		t.Skip("shallow clone detected (first commit == HEAD), skipping")
+	}
+
 	added, modified, deleted, err := GetChangedFilesSince(repoPath, firstCommit)
 	if err != nil {
 		t.Fatalf("GetChangedFilesSince: %v", err)
