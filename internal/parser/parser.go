@@ -19,6 +19,7 @@ const (
 	LangYAML       Language = "yaml"
 	LangManifest   Language = "manifest"
 	LangRust       Language = "rust"
+	LangCSharp     Language = "csharp"
 )
 
 // FileExtensions maps each language to its recognized file extensions.
@@ -36,6 +37,7 @@ var FileExtensions = map[Language][]string{
 	LangYAML:       {".yml", ".yaml"},
 	LangManifest:   {".toml"},
 	LangRust:       {".rs"},
+	LangCSharp:     {".cs"},
 }
 
 // ParseResult holds the extracted nodes and edges from parsing a file.

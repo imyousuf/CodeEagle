@@ -14,6 +14,7 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/indexer"
 	"github.com/imyousuf/CodeEagle/internal/linker"
 	"github.com/imyousuf/CodeEagle/internal/parser"
+	csharpparser "github.com/imyousuf/CodeEagle/internal/parser/csharp"
 	"github.com/imyousuf/CodeEagle/internal/parser/golang"
 	htmlparser "github.com/imyousuf/CodeEagle/internal/parser/html"
 	"github.com/imyousuf/CodeEagle/internal/parser/java"
@@ -98,6 +99,7 @@ func newWatchCmd() *cobra.Command {
 			registry.Register(yamlparser.NewParser())
 			registry.Register(rustparser.NewParser())
 			registry.Register(manifest.NewParser())
+			registry.Register(csharpparser.NewParser())
 
 			// Build watcher config from project config.
 			var paths []string

@@ -297,6 +297,11 @@ func isTestFilePath(filePath, language string) bool {
 				return true
 			}
 		}
+	case "csharp":
+		name := strings.TrimSuffix(base, ".cs")
+		return strings.HasSuffix(base, ".cs") &&
+			(strings.HasSuffix(name, "Test") || strings.HasSuffix(name, "Tests") ||
+				strings.HasPrefix(name, "Test"))
 	}
 	return false
 }
@@ -320,6 +325,10 @@ func isTestFuncName(name, language, filePath string) bool {
 	case "rust":
 		// Rust test functions have #[test] attribute; convention is test_ prefix
 		return strings.HasPrefix(name, "test_") && isTestFilePath(filePath, language)
+	case "csharp":
+		// C# test methods use attributes ([Test]/[Fact]/[Theory]), but for fallback
+		// use name heuristic: methods starting with Test in test files.
+		return strings.HasPrefix(name, "Test") && isTestFilePath(filePath, language)
 	}
 	return false
 }
@@ -340,6 +349,8 @@ func inferLanguageFromPath(filePath string) string {
 		return "java"
 	case ".rs":
 		return "rust"
+	case ".cs":
+		return "csharp"
 	}
 	return ""
 }
@@ -423,6 +434,20 @@ func deriveSourceFilePaths(testPath, language string) []string {
 			candidates = append(candidates, filepath.Join(parentDir, "src", src))
 			candidates = append(candidates, filepath.Join(dir, src))
 		}
+	case "csharp":
+		// FooTest.cs -> Foo.cs, FooTests.cs -> Foo.cs, TestFoo.cs -> Foo.cs
+		name := strings.TrimSuffix(base, ".cs")
+		if strings.HasSuffix(name, "Tests") {
+			src := strings.TrimSuffix(name, "Tests") + ".cs"
+			candidates = append(candidates, filepath.Join(dir, src))
+		} else if strings.HasSuffix(name, "Test") {
+			src := strings.TrimSuffix(name, "Test") + ".cs"
+			candidates = append(candidates, filepath.Join(dir, src))
+		}
+		if strings.HasPrefix(name, "Test") {
+			src := strings.TrimPrefix(name, "Test") + ".cs"
+			candidates = append(candidates, filepath.Join(dir, src))
+		}
 	}
 
 	return candidates
@@ -481,6 +506,17 @@ func deriveSourceFuncNames(testName, language string) []string {
 		// test_process_user -> process_user
 		if strings.HasPrefix(testName, "test_") {
 			candidates = append(candidates, strings.TrimPrefix(testName, "test_"))
+		}
+	case "csharp":
+		// TestProcessUser -> ProcessUser
+		if strings.HasPrefix(testName, "Test") {
+			rest := strings.TrimPrefix(testName, "Test")
+			if len(rest) > 0 {
+				candidates = append(candidates, rest)
+				// Also try lowercase first char
+				lower := string(unicode.ToLower(rune(rest[0]))) + rest[1:]
+				candidates = append(candidates, lower)
+			}
 		}
 	}
 

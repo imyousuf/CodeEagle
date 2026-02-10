@@ -17,6 +17,7 @@ import (
 	// Register LLM providers so their init() functions run.
 	_ "github.com/imyousuf/CodeEagle/internal/llm"
 	"github.com/imyousuf/CodeEagle/internal/parser"
+	csharpparser "github.com/imyousuf/CodeEagle/internal/parser/csharp"
 	"github.com/imyousuf/CodeEagle/internal/parser/golang"
 	htmlparser "github.com/imyousuf/CodeEagle/internal/parser/html"
 	"github.com/imyousuf/CodeEagle/internal/parser/java"
@@ -111,6 +112,7 @@ target branch for import.`,
 			registry.Register(yamlparser.NewParser())
 			registry.Register(rustparser.NewParser())
 			registry.Register(manifest.NewParser())
+			registry.Register(csharpparser.NewParser())
 
 			// Build watcher config for the matcher.
 			var paths []string
