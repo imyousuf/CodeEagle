@@ -1,9 +1,12 @@
 package llm
 
 import (
+	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,7 +30,8 @@ type claudeCLIClient struct {
 	model      string // normalized: "opus", "sonnet", "haiku", or "" (CLI default)
 	timeout    time.Duration
 	verbose    bool
-	configFile string // forwarded to MCP serve subprocess
+	log        func(format string, args ...any) // verbose logger (writes to stderr)
+	configFile string                           // forwarded to MCP serve subprocess
 }
 
 // newClaudeCLIClient creates a new Claude CLI client.
@@ -110,10 +114,20 @@ func (c *claudeCLIClient) Provider() string {
 // Claude can autonomously call tools via an MCP server subprocess.
 // The full agentic loop happens inside the CLI; the returned response
 // contains only the final text (no pending tool calls).
+//
+// When verbose is enabled, a temp log file is passed to the MCP subprocess
+// via --log. A goroutine tails this file in real time, forwarding tool call
+// lines to the verbose logger.
 func (c *claudeCLIClient) ChatWithTools(ctx context.Context, systemPrompt string, messages []llm.Message, tools []llm.Tool) (*llm.Response, error) {
 	prompt := buildPrompt(systemPrompt, messages)
 
-	mcpConfig, cleanupFn, err := c.buildMCPConfig()
+	// Generate a shared log path for verbose mode.
+	var toolLogPath string
+	if c.verbose && c.log != nil {
+		toolLogPath = newMCPLogPath()
+	}
+
+	mcpConfig, cleanupFn, err := c.buildMCPConfig(toolLogPath)
 	if err != nil {
 		return nil, fmt.Errorf("build MCP config: %w", err)
 	}
@@ -139,7 +153,19 @@ func (c *claudeCLIClient) ChatWithTools(ctx context.Context, systemPrompt string
 	defer cancel()
 
 	cmd := exec.CommandContext(timeoutCtx, c.executable, args...)
+
+	// When verbose, tail the MCP tool log file in real time.
+	var logCleanup func()
+	if toolLogPath != "" {
+		logCleanup = c.tailToolLog(timeoutCtx, toolLogPath)
+	}
+
 	output, err := cmd.Output()
+
+	if logCleanup != nil {
+		logCleanup()
+	}
+
 	if err != nil {
 		if timeoutCtx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("claude CLI timed out after %v", c.timeout)
@@ -153,9 +179,93 @@ func (c *claudeCLIClient) ChatWithTools(ctx context.Context, systemPrompt string
 	return parseClaudeResponse(output)
 }
 
+// tailToolLog starts a goroutine that tails the MCP tool log file, forwarding
+// each line to the verbose logger. Returns a cleanup function that stops tailing
+// and removes the log file.
+func (c *claudeCLIClient) tailToolLog(ctx context.Context, logPath string) func() {
+	// Create the file so the tailer can open it immediately.
+	f, err := os.Create(logPath)
+	if err != nil {
+		return func() {}
+	}
+	f.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.tailFile(ctx, logPath)
+	}()
+
+	return func() {
+		// Give tailer a moment to flush remaining lines.
+		select {
+		case <-done:
+		case <-time.After(200 * time.Millisecond):
+		}
+		os.Remove(logPath)
+	}
+}
+
+// tailFile reads lines from a file as they appear, forwarding to the logger.
+// It polls because the file is written by a separate process (MCP subprocess).
+func (c *claudeCLIClient) tailFile(ctx context.Context, path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	reader := bufio.NewReader(f)
+	for {
+		select {
+		case <-ctx.Done():
+			// Drain any remaining lines before exit.
+			c.drainLines(reader)
+			return
+		default:
+		}
+
+		line, err := reader.ReadString('\n')
+		if line != "" {
+			c.log("%s", strings.TrimRight(line, "\n"))
+		}
+		if err != nil {
+			if err == io.EOF {
+				// No new data yet; poll.
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			return
+		}
+	}
+}
+
+// drainLines reads and logs any remaining lines in the reader.
+func (c *claudeCLIClient) drainLines(reader *bufio.Reader) {
+	for {
+		line, err := reader.ReadString('\n')
+		if line != "" {
+			c.log("%s", strings.TrimRight(line, "\n"))
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// newMCPLogPath returns a unique log file path for the MCP subprocess.
+func newMCPLogPath() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	id := fmt.Sprintf("%x", b)
+	return filepath.Join(os.TempDir(), fmt.Sprintf("codeeagle-mcp-%s.log", id))
+}
+
 // buildMCPConfig creates a temporary MCP config file pointing to this binary's
 // `mcp serve` command. Returns the config file path and a cleanup function.
-func (c *claudeCLIClient) buildMCPConfig() (string, func(), error) {
+// If toolLogPath is non-empty, adds --log to the MCP args so the subprocess
+// writes tool call logs to a file that the parent process can tail.
+func (c *claudeCLIClient) buildMCPConfig(toolLogPath string) (string, func(), error) {
 	selfExe, err := os.Executable()
 	if err != nil {
 		return "", func() {}, fmt.Errorf("determine executable path: %w", err)
@@ -165,6 +275,9 @@ func (c *claudeCLIClient) buildMCPConfig() (string, func(), error) {
 	mcpArgs := []string{"mcp", "serve"}
 	if c.configFile != "" {
 		mcpArgs = append(mcpArgs, "--config", c.configFile)
+	}
+	if toolLogPath != "" {
+		mcpArgs = append(mcpArgs, "--log", toolLogPath)
 	}
 
 	mcpConfig := map[string]any{
@@ -211,6 +324,18 @@ func (c *claudeCLIClient) getAllowedTools(tools []llm.Tool) []string {
 // SetConfigFile sets the config file path to be forwarded to MCP serve subprocess.
 func (c *claudeCLIClient) SetConfigFile(path string) {
 	c.configFile = path
+}
+
+// SetVerbose enables verbose logging. When true and used with ChatWithTools,
+// the MCP subprocess writes tool call logs to a temp file which is tailed in
+// real time to the provided logger.
+func (c *claudeCLIClient) SetVerbose(verbose bool, logger func(format string, args ...any)) {
+	c.verbose = verbose
+	if logger != nil {
+		c.log = logger
+	} else {
+		c.log = func(format string, args ...any) {}
+	}
 }
 
 // Close is a no-op for the CLI client.

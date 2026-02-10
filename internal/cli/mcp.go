@@ -26,6 +26,8 @@ func newMCPCmd() *cobra.Command {
 }
 
 func newMCPServeCmd() *cobra.Command {
+	var logFile string
+
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the MCP server over stdio",
@@ -60,7 +62,18 @@ This command is typically invoked automatically by the Claude CLI via
 			for _, tool := range agents.NewPlannerTools(ctxBuilder) {
 				registry.Register(tool)
 			}
-			if verbose {
+
+			// Set up verbose logging: to log file if --log is set, else to stderr if -v.
+			if logFile != "" {
+				f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+				if err != nil {
+					return fmt.Errorf("open log file %s: %w", logFile, err)
+				}
+				defer f.Close()
+				registry.SetVerbose(true, func(format string, args ...any) {
+					fmt.Fprintf(f, format+"\n", args...)
+				})
+			} else if verbose {
 				registry.SetVerbose(true, func(format string, args ...any) {
 					fmt.Fprintf(os.Stderr, format+"\n", args...)
 				})
@@ -88,6 +101,8 @@ This command is typically invoked automatically by the Claude CLI via
 			return nil
 		},
 	}
+
+	cmd.Flags().StringVar(&logFile, "log", "", "path to write tool call logs (used by Claude CLI verbose mode)")
 
 	return cmd
 }

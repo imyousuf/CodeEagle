@@ -23,6 +23,17 @@ func agentLogger() func(format string, args ...any) {
 	}
 }
 
+// setClientVerbose enables verbose logging on the LLM client if it supports
+// the SetVerbose method (e.g., Claude CLI client).
+func setClientVerbose(client llm.Client, logger func(format string, args ...any)) {
+	type verboseSetter interface {
+		SetVerbose(bool, func(format string, args ...any))
+	}
+	if vs, ok := client.(verboseSetter); ok {
+		vs.SetVerbose(true, logger)
+	}
+}
+
 func newAgentCmd() *cobra.Command {
 	agentCmd := &cobra.Command{
 		Use:   "agent",
@@ -128,7 +139,9 @@ falls back to single-turn keyword-based context selection.`,
 			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
 			planner := agents.NewPlanner(client, ctxBuilder, repoPaths...)
 			if verbose {
-				planner.SetVerbose(true, agentLogger())
+				logger := agentLogger()
+				planner.SetVerbose(true, logger)
+				setClientVerbose(client, logger)
 			}
 
 			if maxIterations > 0 {

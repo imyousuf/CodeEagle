@@ -2,6 +2,7 @@ package llm
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -233,7 +234,7 @@ func TestGetAllowedTools(t *testing.T) {
 func TestBuildMCPConfig(t *testing.T) {
 	client := &claudeCLIClient{executable: "/usr/bin/claude"}
 
-	configPath, cleanup, err := client.buildMCPConfig()
+	configPath, cleanup, err := client.buildMCPConfig("")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -265,6 +266,12 @@ func TestBuildMCPConfig(t *testing.T) {
 	if len(args) < 2 || args[0] != "mcp" || args[1] != "serve" {
 		t.Errorf("expected args to start with ['mcp', 'serve'], got %v", args)
 	}
+	// Without a log path, --log should NOT appear.
+	for _, arg := range args {
+		if arg == "--log" {
+			t.Error("expected no --log arg when toolLogPath is empty")
+		}
+	}
 
 	// Cleanup should remove the file.
 	cleanup()
@@ -279,7 +286,7 @@ func TestBuildMCPConfigWithConfigFile(t *testing.T) {
 		configFile: "/path/to/config.yaml",
 	}
 
-	configPath, cleanup, err := client.buildMCPConfig()
+	configPath, cleanup, err := client.buildMCPConfig("")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -300,10 +307,98 @@ func TestBuildMCPConfigWithConfigFile(t *testing.T) {
 	}
 }
 
+func TestBuildMCPConfigWithLogPath(t *testing.T) {
+	client := &claudeCLIClient{executable: "/usr/bin/claude"}
+
+	logPath := "/tmp/codeeagle-test-mcp.log"
+	configPath, cleanup, err := client.buildMCPConfig(logPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer cleanup()
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config file: %v", err)
+	}
+
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatalf("failed to parse config JSON: %v", err)
+	}
+
+	servers := config["mcpServers"].(map[string]any)
+	ce := servers["codeeagle"].(map[string]any)
+	args := ce["args"].([]any)
+
+	// Verify --log and path appear in args.
+	foundLog := false
+	for i, arg := range args {
+		if arg == "--log" {
+			if i+1 < len(args) && args[i+1] == logPath {
+				foundLog = true
+			}
+			break
+		}
+	}
+	if !foundLog {
+		t.Errorf("expected --log %s in MCP config args, got %v", logPath, args)
+	}
+}
+
 func TestSetConfigFile(t *testing.T) {
 	client := &claudeCLIClient{executable: "/usr/bin/claude"}
 	client.SetConfigFile("/path/to/config.yaml")
 	if client.configFile != "/path/to/config.yaml" {
 		t.Errorf("expected configFile '/path/to/config.yaml', got %q", client.configFile)
+	}
+}
+
+func TestClaudeCLISetVerbose(t *testing.T) {
+	client := &claudeCLIClient{executable: "/usr/bin/claude"}
+
+	var logged []string
+	logger := func(format string, args ...any) {
+		logged = append(logged, fmt.Sprintf(format, args...))
+	}
+
+	client.SetVerbose(true, logger)
+	if !client.verbose {
+		t.Error("expected verbose to be true")
+	}
+	if client.log == nil {
+		t.Fatal("expected log to be set")
+	}
+
+	client.log("test %s", "message")
+	if len(logged) != 1 || logged[0] != "test message" {
+		t.Errorf("expected log to capture 'test message', got %v", logged)
+	}
+}
+
+func TestClaudeCLISetVerboseNilLogger(t *testing.T) {
+	client := &claudeCLIClient{executable: "/usr/bin/claude"}
+	client.SetVerbose(true, nil)
+	if !client.verbose {
+		t.Error("expected verbose to be true")
+	}
+	// Should not panic when calling the logger.
+	client.log("test %s", "message")
+}
+
+func TestNewMCPLogPath(t *testing.T) {
+	path1 := newMCPLogPath()
+	path2 := newMCPLogPath()
+	if path1 == "" {
+		t.Error("expected non-empty log path")
+	}
+	if path1 == path2 {
+		t.Error("expected unique log paths")
+	}
+	if !strings.HasPrefix(path1, os.TempDir()) {
+		t.Errorf("expected path in temp dir, got %q", path1)
+	}
+	if !strings.Contains(path1, "codeeagle-mcp-") {
+		t.Errorf("expected codeeagle-mcp- prefix in path, got %q", path1)
 	}
 }
