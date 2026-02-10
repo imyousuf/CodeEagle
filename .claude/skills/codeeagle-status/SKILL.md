@@ -21,6 +21,7 @@ codeeagle status
 
 ## Notes
 - Displays node and edge counts by type
-- Shows indexed files, packages, and services
+- Shows indexed files, packages, services, functions, methods, classes, interfaces
+- Reports Calls edges (function call graph), DependsOn (import-to-manifest), Consumes (API calls)
 - Reports current git branch information
 - Indicates whether the graph is up to date
