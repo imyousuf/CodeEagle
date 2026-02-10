@@ -9,5 +9,5 @@
   "repository": "https://github.com/imyousuf/CodeEagle",
   "license": "Apache-2.0",
   "keywords": ["code-intelligence", "knowledge-graph", "code-analysis", "codebase-indexing"],
-  "skills": "./.claude/skills/"
+  "skills": "./skills/"
 }
