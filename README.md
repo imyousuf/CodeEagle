@@ -60,7 +60,8 @@ make build
 
 ```bash
 # 1. Initialize a project (creates .CodeEagle/ directory)
-codeeagle init
+codeeagle init                 # quick setup with defaults
+codeeagle init --interactive   # guided setup wizard
 
 # 2. Index the codebase
 codeeagle sync
@@ -78,7 +79,9 @@ codeeagle agent ask "What are the largest packages by node count?"
 ## CLI Reference
 
 ```
-codeeagle init                              Initialize project config
+codeeagle init [--interactive|-i]            Initialize project config
+codeeagle config                            View current configuration
+codeeagle config edit                       Edit configuration interactively
 codeeagle sync [--full]                     Sync knowledge graph (incremental or full)
 codeeagle sync --export                     Export graph to portable file
 codeeagle sync --import                     Import a graph export

@@ -56,7 +56,9 @@ Build and maintain a rich knowledge graph that captures:
 ### 3. CLI Interface
 
 ```
-codeeagle init                          # Initialize project config
+codeeagle init [--interactive|-i]       # Initialize project config
+codeeagle config                        # View current configuration
+codeeagle config edit                    # Edit configuration interactively
 codeeagle sync [--full]                 # Sync knowledge graph (incremental or full)
 codeeagle watch                         # Start watching and building/updating the knowledge graph
 codeeagle status                        # Show indexing status, graph stats

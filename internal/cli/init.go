@@ -12,7 +12,9 @@ import (
 )
 
 func newInitCmd() *cobra.Command {
-	return &cobra.Command{
+	var interactive bool
+
+	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize a .CodeEagle/ project directory",
 		Long: `Initialize a CodeEagle project in the current directory.
@@ -21,7 +23,9 @@ Creates a .CodeEagle/ directory containing:
   config.yaml    Project configuration
   .env           Credentials template (add your API keys here)
 
-The project is also registered in ~/.codeeagle.conf for cross-project access.`,
+The project is also registered in ~/.codeeagle.conf for cross-project access.
+
+Use --interactive (-i) for a guided setup wizard with language auto-detection.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, err := os.Getwd()
 			if err != nil {
@@ -34,6 +38,13 @@ The project is also registered in ~/.codeeagle.conf for cross-project access.`,
 			if _, err := os.Stat(projectDir); err == nil {
 				return fmt.Errorf("%s already exists; project is already initialized", projectDir)
 			}
+
+			// Interactive mode: delegate to the TUI wizard.
+			if interactive {
+				return runInteractiveInit(cmd, cwd)
+			}
+
+			// Non-interactive mode (default, unchanged behavior).
 
 			// Create .CodeEagle/ directory.
 			if err := os.MkdirAll(projectDir, 0755); err != nil {
@@ -94,6 +105,10 @@ The project is also registered in ~/.codeeagle.conf for cross-project access.`,
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "use interactive setup wizard")
+
+	return cmd
 }
 
 // detectLLMProvider checks environment variables to auto-detect the LLM provider.

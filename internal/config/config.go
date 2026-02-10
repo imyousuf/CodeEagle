@@ -34,71 +34,71 @@ type ProjectConf struct {
 // Config holds all configuration for CodeEagle.
 type Config struct {
 	// Project contains project metadata.
-	Project ProjectConfig `mapstructure:"project"`
+	Project ProjectConfig `mapstructure:"project" yaml:"project"`
 	// Repositories lists the repositories to index.
-	Repositories []RepositoryConfig `mapstructure:"repositories"`
+	Repositories []RepositoryConfig `mapstructure:"repositories" yaml:"repositories"`
 	// Watch contains file watching configuration.
-	Watch WatchConfig `mapstructure:"watch"`
+	Watch WatchConfig `mapstructure:"watch" yaml:"watch"`
 	// Languages lists the languages to parse.
-	Languages []string `mapstructure:"languages"`
+	Languages []string `mapstructure:"languages" yaml:"languages"`
 	// Graph contains knowledge graph storage configuration.
-	Graph GraphConfig `mapstructure:"graph"`
+	Graph GraphConfig `mapstructure:"graph" yaml:"graph"`
 	// Agents contains AI agent configuration.
-	Agents AgentsConfig `mapstructure:"agents"`
+	Agents AgentsConfig `mapstructure:"agents" yaml:"agents"`
 	// ConfigDir is the resolved .CodeEagle directory path (not persisted in YAML).
-	ConfigDir string `mapstructure:"-"`
+	ConfigDir string `mapstructure:"-" yaml:"-"`
 	// ProjectConf is the parsed .CodeEagle.conf if found (not persisted).
-	ProjectConf *ProjectConf `mapstructure:"-"`
+	ProjectConf *ProjectConf `mapstructure:"-" yaml:"-"`
 	// ProjectConfDir is the directory containing .CodeEagle.conf (not persisted).
-	ProjectConfDir string `mapstructure:"-"`
+	ProjectConfDir string `mapstructure:"-" yaml:"-"`
 }
 
 // ProjectConfig holds project metadata.
 type ProjectConfig struct {
 	// Name is the project name.
-	Name string `mapstructure:"name"`
+	Name string `mapstructure:"name" yaml:"name"`
 }
 
 // RepositoryConfig describes a repository to index.
 type RepositoryConfig struct {
 	// Path is the filesystem path to the repository.
-	Path string `mapstructure:"path"`
+	Path string `mapstructure:"path" yaml:"path"`
 	// Type is the repository type (monorepo or single).
-	Type string `mapstructure:"type"`
+	Type string `mapstructure:"type" yaml:"type"`
 }
 
 // WatchConfig holds file watching configuration.
 type WatchConfig struct {
 	// Exclude lists glob patterns to exclude from watching.
-	Exclude []string `mapstructure:"exclude"`
+	Exclude []string `mapstructure:"exclude" yaml:"exclude"`
 }
 
 // GraphConfig holds knowledge graph storage configuration.
 type GraphConfig struct {
 	// Storage is the storage backend (embedded or neo4j).
-	Storage string `mapstructure:"storage"`
+	Storage string `mapstructure:"storage" yaml:"storage"`
 	// Neo4jURI is the Neo4j connection URI (used when Storage is "neo4j").
-	Neo4jURI string `mapstructure:"neo4j_uri"`
+	Neo4jURI string `mapstructure:"neo4j_uri" yaml:"neo4j_uri,omitempty"`
 	// DBPath is the path to the graph database directory.
-	DBPath string `mapstructure:"db_path"`
+	DBPath string `mapstructure:"db_path" yaml:"db_path,omitempty"`
 }
 
 // AgentsConfig holds AI agent configuration.
 type AgentsConfig struct {
 	// LLMProvider is the LLM provider (anthropic, vertex-ai, openai, ollama).
-	LLMProvider string `mapstructure:"llm_provider"`
+	LLMProvider string `mapstructure:"llm_provider" yaml:"llm_provider"`
 	// Model is the model identifier.
-	Model string `mapstructure:"model"`
+	Model string `mapstructure:"model" yaml:"model"`
 	// Project is the GCP project ID (used when LLMProvider is "vertex-ai").
-	Project string `mapstructure:"project"`
+	Project string `mapstructure:"project" yaml:"project,omitempty"`
 	// Location is the GCP region (used when LLMProvider is "vertex-ai", e.g. "us-central1").
-	Location string `mapstructure:"location"`
+	Location string `mapstructure:"location" yaml:"location,omitempty"`
 	// AutoSummarize enables LLM-based summarization after indexing.
-	AutoSummarize bool `mapstructure:"auto_summarize"`
+	AutoSummarize bool `mapstructure:"auto_summarize" yaml:"auto_summarize"`
 	// AutoLink enables LLM-assisted cross-service edge detection after static linking.
-	AutoLink bool `mapstructure:"auto_link"`
+	AutoLink bool `mapstructure:"auto_link" yaml:"auto_link"`
 	// CredentialsFile is the path to a GCP service account credentials JSON file (for Vertex AI).
-	CredentialsFile string `mapstructure:"credentials_file"`
+	CredentialsFile string `mapstructure:"credentials_file" yaml:"credentials_file,omitempty"`
 }
 
 // HomeDir returns the path to the user-level CodeEagle directory (~/.CodeEagle/).

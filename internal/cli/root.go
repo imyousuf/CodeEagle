@@ -26,6 +26,7 @@ in deep codebase understanding.
 
 Commands:
   init       Initialize a .CodeEagle/ project directory
+  config     View or edit project configuration
   watch      Start watching and building/updating the knowledge graph
   status     Show indexing status and graph stats
   agent      Interact with AI agents (plan, design, review)
@@ -81,6 +82,7 @@ func init() {
 	rootCmd.AddCommand(newMCPCmd())
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newUpdateCmd())
+	rootCmd.AddCommand(newConfigCmd())
 }
 
 // initConfig reads in config file and ENV variables if set.
