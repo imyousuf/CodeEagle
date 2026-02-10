@@ -83,6 +83,8 @@ func newQueryCmd() *cobra.Command {
 	cmd.AddCommand(newQuerySymbolsCmd())
 	cmd.AddCommand(newQueryInterfaceCmd())
 	cmd.AddCommand(newQueryEdgesCmd())
+	cmd.AddCommand(newQueryUnusedCmd())
+	cmd.AddCommand(newQueryCoverageCmd())
 
 	return cmd
 }
