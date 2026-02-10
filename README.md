@@ -2,13 +2,16 @@
 
 CodeEagle is a CLI tool that indexes codebases into a knowledge graph and exposes AI agents for planning, design review, and code review — all grounded in deep codebase understanding.
 
-It supports monorepos, multi-repo setups, and multi-language codebases (Go, Python, TypeScript, JavaScript, Java, HTML, Markdown, Makefile, Shell, Terraform, YAML). No external database required — the embedded graph store runs locally with zero setup.
+It supports monorepos, multi-repo setups, and multi-language codebases (Go, Python, TypeScript, JavaScript, Java, Rust, C#, Ruby, HTML, Markdown, Makefile, Shell, Terraform, YAML). No external database required — the embedded graph store runs locally with zero setup.
 
 ## Features
 
 - **Knowledge graph** of source code entities (functions, classes, interfaces, packages, services) and their relationships (calls, imports, implements, tests, etc.)
-- **11 language parsers**: Go (stdlib AST), Python, TypeScript, JavaScript, Java, HTML, Markdown (tree-sitter), Makefile, Shell (tree-sitter bash), Terraform (tree-sitter HCL), YAML (GitHub Actions, Ansible, generic)
+- **15 language parsers**: Go (stdlib AST), Python, TypeScript, JavaScript, Java, Rust, C# (with ASP.NET), Ruby (with Rails), HTML, Markdown, Makefile, Shell, Terraform, YAML, plus a manifest parser (go.mod, package.json, pyproject.toml, requirements.txt)
+- **Cross-service dependency analysis**: API endpoint extraction, HTTP client call detection, import-to-manifest linking, cross-file interface implements resolution
+- **Test coverage mapping**: automatic test file/function detection across 8 languages with `EdgeTests` linking to source counterparts
 - **Code quality metrics**: cyclomatic complexity, lines of code, TODO/FIXME counts
+- **Graph analysis queries**: unused code detection and test coverage reporting
 - **AI agents** for planning, design, code review, and freeform Q&A — read-only, advisory, never modify code
 - **Git-aware incremental sync** with branch tracking and diff-based updates
 - **MCP server** for integration with Claude Code and other MCP-compatible tools
@@ -69,8 +72,11 @@ codeeagle agent ask <query>                 Freeform Q&A about the codebase
 codeeagle query [--type T] [--name N]       Query the knowledge graph
 codeeagle query symbols --file <path>       List symbols in a file
 codeeagle query interface --name <name>     Show interface and implementors
-codeeagle query edges --id <node-id>        Show relationships for a node
+codeeagle query edges --node <name>         Show relationships for a node
+codeeagle query unused [--type T]           Find potentially unused functions/methods
+codeeagle query coverage [--level L]        Show test coverage by file or function
 
+codeeagle backpop [--all]                   Run linker phases on existing graph
 codeeagle metrics [--file F] [--type T]     Show code quality metrics
 codeeagle mcp serve                         Start MCP server (stdio transport)
 codeeagle hook install                      Install git post-commit hook for auto-sync
@@ -103,6 +109,9 @@ languages:
   - typescript
   - javascript
   - java
+  - rust
+  - csharp
+  - ruby
   - html
   - markdown
   - makefile
@@ -114,17 +123,18 @@ graph:
   storage: embedded
 
 agents:
-  llm_provider: anthropic   # anthropic, vertex-ai, or claude-cli
-  model: claude-sonnet-4-5-20250929
+  llm_provider: claude-cli   # claude-cli, anthropic, or vertex-ai
+  model: sonnet
+  auto_link: true            # enable LLM-assisted cross-service edge detection
 ```
 
 ### LLM Providers
 
 | Provider | Config | Auth |
 |----------|--------|------|
+| Claude CLI (default) | `llm_provider: claude-cli` | Claude Code installed and authenticated |
 | Anthropic API | `llm_provider: anthropic` | `ANTHROPIC_API_KEY` env var |
 | Vertex AI | `llm_provider: vertex-ai` | GCP Application Default Credentials + `project`, `location` |
-| Claude CLI | `llm_provider: claude-cli` | Claude Code installed and authenticated |
 
 ### Multi-Project Registry
 
@@ -145,20 +155,38 @@ codeeagle -p my-project status
 | Service | Service or module within a repo |
 | Package | Language-level package/module |
 | File | Source file |
+| TestFile | Test file (detected by naming convention) |
 | Function | Function or standalone method |
 | Method | Method bound to a type/class |
+| TestFunction | Test function (detected by naming convention or annotation) |
 | Struct, Class | Data structures |
-| Interface | Interface or abstract class |
+| Interface | Interface or abstract class (includes Python Protocol) |
 | Enum, Constant | Enumerations, exported constants |
 | Type | Type aliases and definitions |
-| APIEndpoint | REST routes, gRPC services |
+| Module | Module (Ruby, Rust) |
+| APIEndpoint | REST routes, gRPC services, ASP.NET endpoints, Rails routes |
 | DBModel, DomainModel, ViewModel, DTO | Classified model types |
 | Dependency | External dependency |
 | Document | Documentation file (README, spec, etc.) |
+| AIGuideline | AI-related guideline files (CLAUDE.md, etc.) |
 
 ### Edge Types
 
-`Contains`, `Imports`, `Calls`, `Implements`, `DependsOn`, `Tests`, `Documents`, `Exposes`, `Configures`, `Migrates`, `References`, `Embeds`
+| Edge | Description |
+|------|-------------|
+| Contains | Parent contains child (Service -> File -> Function) |
+| Imports | File/package imports a dependency |
+| Calls | Function/method calls another (includes qualified callees like `Store.QueryNodes`) |
+| Implements | Type implements interface (Go structural, Java/TS/C# nominal, Python Protocol) |
+| DependsOn | Import-to-manifest linking, service-to-service dependencies |
+| Tests | Test file/function tests a source file/function |
+| Documents | Documentation file describes a code entity |
+| Exposes | Service exposes an API endpoint |
+| Consumes | Code makes HTTP client call to an API endpoint |
+| Configures | Config file configures a service/deployment |
+| Migrates | Migration file migrates a schema |
+| References | General cross-reference |
+| Embeds | Struct embeds another type |
 
 ### Storage
 
@@ -184,7 +212,7 @@ codeeagle mcp serve
 }
 ```
 
-Available MCP tools: `get_graph_overview`, `search_nodes`, `get_node_details`, `get_node_edges`, `get_service_structure`, `get_file_symbols`, `search_edges`, `get_project_guidelines`.
+Available MCP tools: `get_graph_overview`, `search_nodes`, `get_node_details`, `get_node_edges`, `get_service_structure`, `get_file_symbols`, `search_edges`, `get_project_guidelines`, `query_file_symbols`, `query_interface_impl`, `query_node_edges`.
 
 ## Architecture
 
@@ -201,7 +229,8 @@ codeeagle/
 │   ├── llm/               LLM provider implementations
 │   ├── mcp/               MCP server (JSON-RPC over stdio)
 │   ├── metrics/            Code quality metric calculators
-│   ├── parser/             Language parsers (Go, Python, TS, JS, Java, HTML, MD, Makefile, Shell, Terraform, YAML)
+│   ├── linker/             Cross-service linker (7 phases: services, endpoints, API calls, deps, imports, implements, tests)
+│   ├── parser/             Language parsers (Go, Python, TS, JS, Java, Rust, C#, Ruby, HTML, MD, + 5 more)
 │   └── watcher/            Filesystem watcher (fsnotify)
 └── pkg/llm/               Public LLM client interface + provider registry
 ```

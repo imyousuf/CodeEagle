@@ -21,16 +21,20 @@ Pick the right command based on what you need:
 | Cross-service API dependencies | `codeeagle query edges --node <name> --type Consumes` |
 | Import-to-manifest dep tracing | `codeeagle query edges --node <name> --type DependsOn` |
 | Service endpoints | `codeeagle query edges --node <name> --type Exposes` |
+| Test coverage for a file/function | `codeeagle query edges --node <name> --type Tests` |
 | All relationships for a symbol | `codeeagle query edges --node <name>` |
 | Search nodes by type/name/package | `codeeagle query --type X --name Y` |
+| Find unused functions/methods | `codeeagle query unused` |
+| Test coverage report by file/function | `codeeagle query coverage [--level function]` |
 | Impact analysis ("what breaks if I change X?") | `codeeagle agent plan "<question>"` |
 | Design patterns, API consistency | `codeeagle agent design "<question>"` |
 | General "how does X work?" questions | `codeeagle agent ask "<question>"` |
 
 ## Node Types
 
-`File`, `Package`, `Service`, `Function`, `Method`, `Struct`, `Class`, `Interface`, `Enum`,
-`Variable`, `Constant`, `Type`, `Dependency`, `APIEndpoint`, `Document`, `Module`, `DTO`, `AIGuideline`
+`File`, `TestFile`, `Package`, `Service`, `Function`, `TestFunction`, `Method`, `Struct`, `Class`,
+`Interface`, `Enum`, `Variable`, `Constant`, `Type`, `Module`, `Dependency`, `APIEndpoint`,
+`Document`, `DTO`, `AIGuideline`, `DBModel`, `DomainModel`, `ViewModel`
 
 ## Edge Types
 
@@ -40,7 +44,8 @@ Pick the right command based on what you need:
 | `Contains` | Parent contains child | `Service -> File -> Function` |
 | `Imports` | File/package imports dependency | `parser.go -> go/ast` |
 | `DependsOn` | Dependency relationship | import node -> manifest dep, service -> service |
-| `Implements` | Type implements interface | `GoParser -> Parser` |
+| `Implements` | Type implements interface | `GoParser -> Parser` (Go structural, Java/TS/C# nominal, Python Protocol) |
+| `Tests` | Test covers source | `parser_test.go -> parser.go`, `TestParseFile -> ParseFile` |
 | `Exposes` | Service exposes endpoint | `backend -> GET /api/users` |
 | `Consumes` | API call targets endpoint | `fetch /api/users -> GET /api/users` |
 | `Documents` | Doc describes code entity | `README -> Service` |
@@ -88,12 +93,32 @@ codeeagle query --type APIEndpoint
 codeeagle query edges --node "GET /api/users" --type Consumes --direction in
 ```
 
+### Find unused code
+```
+codeeagle query unused
+codeeagle query unused --type Function --language go
+codeeagle query unused --include-exported --package mypackage
+```
+Finds functions/methods with no incoming Calls edges. Test functions, `init()`, and `main()` are excluded.
+By default excludes exported functions (they may be called externally). Use `--include-exported` to include them.
+
+### Show test coverage
+```
+codeeagle query coverage
+codeeagle query coverage --level function
+codeeagle query coverage --language go --package parser
+```
+Reports which files (default) or functions have test coverage via EdgeTests edges.
+Shows per-package coverage percentages.
+
 ### General node search
 ```
 codeeagle query --type Function --name "New*" --package embedded
 codeeagle query --type Struct --language go
 codeeagle query --type Dependency --name "axios"
 codeeagle query --type Service
+codeeagle query --type TestFile
+codeeagle query --type TestFunction --language rust
 ```
 
 ## AI Agents (slower, prose answers)
@@ -122,7 +147,9 @@ Use for: high-level understanding, "how does X work?" questions.
 2. `codeeagle query interface --name <name>` — understand contracts and implementors
 3. `codeeagle query edges --node <name> --type Calls` — map the call graph
 4. `codeeagle query edges --node <name> --type DependsOn` — trace dependency chains
-5. `codeeagle agent plan "<what you plan to change>"` — assess impact and risk
+5. `codeeagle query edges --node <name> --type Tests` — find existing tests for a symbol
+6. `codeeagle query coverage --level function --package <pkg>` — check test coverage gaps
+7. `codeeagle agent plan "<what you plan to change>"` — assess impact and risk
 
 ## Prerequisites
 - CodeEagle must be installed and on PATH
@@ -133,4 +160,8 @@ Use for: high-level understanding, "how does X work?" questions.
 - Use `--type Calls --direction out` to see what a function depends on
 - Use `--type Calls --direction in` to find all callers of a function
 - Use `--type DependsOn` to trace imports through to manifest dependencies
+- Use `--type Tests` to find which tests cover a given file or function
+- Use `query unused` to find dead code; `query coverage` for test gaps
+- All query commands support `--json` for machine-readable output
 - Prefer structured queries for implementation planning, AI agents for understanding
+- Supported languages: Go, Python, TypeScript, JavaScript, Java, Rust, C#, Ruby, HTML, Markdown, Makefile, Shell, Terraform, YAML

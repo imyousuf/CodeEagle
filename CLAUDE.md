@@ -50,13 +50,14 @@ Build and maintain a rich knowledge graph that captures:
 - Watch configured repositories for file changes using filesystem events
 - Incrementally update the knowledge graph on change (not full rebuild)
 - Support git-aware change detection (branch tracking, diff-based updates)
-- Handle multi-language codebases: Go, Python, TypeScript/JavaScript, and extensible to others
+- Handle multi-language codebases: Go, Python, TypeScript, JavaScript, Java, Rust, C#, Ruby, HTML, Markdown, Makefile, Shell, Terraform, YAML, and extensible to others
 - Respect `.gitignore` and configurable exclude patterns
 
 ### 3. CLI Interface
 
 ```
 codeeagle init                          # Initialize project config
+codeeagle sync [--full]                 # Sync knowledge graph (incremental or full)
 codeeagle watch                         # Start watching and building/updating the knowledge graph
 codeeagle status                        # Show indexing status, graph stats
 
@@ -65,8 +66,16 @@ codeeagle agent design <query>          # Ask the design agent a question
 codeeagle agent review <query>          # Ask the code review agent a question
 codeeagle agent review --diff <ref>     # Review changes in a git diff/PR
 
-codeeagle query <cypher-or-natural>     # Query the knowledge graph directly
+codeeagle query [--type T] [--name N]   # Query the knowledge graph
+codeeagle query symbols --file <path>   # List symbols in a file
+codeeagle query interface --name <name> # Show interface and implementors
+codeeagle query edges --node <name>     # Show relationships for a node
+codeeagle query unused [--type T]       # Find potentially unused functions/methods
+codeeagle query coverage [--level L]    # Show test coverage by file or function
+
+codeeagle backpop [--all]               # Run linker phases on existing graph
 codeeagle metrics [service|file|func]   # Show code quality metrics
+codeeagle mcp serve                     # Start MCP server (stdio transport)
 ```
 
 ### 4. Non-Coding AI Agents
@@ -94,18 +103,22 @@ All agents are grounded in the knowledge graph — they do NOT modify code, they
 
 ### 5. Multi-Language Support
 
-Day-1 support for language parsing and graph extraction:
-- **Go** — AST via `go/ast`, `go/parser`
-- **Python** — AST via tree-sitter or similar
-- **TypeScript** — AST via tree-sitter or similar
-- **JavaScript** — AST via tree-sitter (separate grammar from TypeScript, covers CommonJS/ESM)
-- **Java** — AST via tree-sitter (classes, interfaces, annotations, packages, Maven/Gradle deps)
-- **HTML / Templates** — tree-sitter HTML + template derivatives (JSX/TSX, Jinja2, Go templates, Thymeleaf); extract component references, includes, slots, template variables
-- **Markdown** — structure-aware parsing (headings, links, code blocks, front matter); cross-reference links to source files and other docs
+Language parsing and graph extraction:
+- **Go** — AST via `go/ast`, `go/parser`; struct field type resolution for deeper call graphs
+- **Python** — tree-sitter; Protocol detection (`typing.Protocol` -> NodeInterface)
+- **TypeScript** — tree-sitter; test detection (`.test.ts`, `.spec.ts`)
+- **JavaScript** — tree-sitter (separate grammar from TypeScript, covers CommonJS/ESM)
+- **Java** — tree-sitter (classes, interfaces, annotations, packages, Maven/Gradle deps)
+- **Rust** — tree-sitter; traits, impls, modules, test detection (`#[test]`, `test_` prefix)
+- **C# / ASP.NET** — tree-sitter; attributes, route annotations (`[HttpGet]`, `[Route]`), test detection (`[Fact]`, `[Test]`)
+- **Ruby / Rails** — tree-sitter; modules, Rails routes (`routes.rb`), controllers, test detection (`_spec.rb`, `_test.rb`)
+- **HTML / Templates** — `golang.org/x/net/html`; component references, includes, template variables
+- **Markdown** — line-based parsing (headings, links, code blocks, front matter); cross-reference links to source files and other docs
 - **Makefile** — line-based parsing of targets, variables, includes, .PHONY declarations
 - **Shell** (bash/sh) — tree-sitter bash grammar; functions, variables, exports, source imports, shebang detection
 - **Terraform** (HCL) — tree-sitter HCL grammar; resources, data sources, modules, variables, outputs, providers, locals
 - **YAML** — content-aware dialect detection for GitHub Actions workflows, Ansible playbooks/roles, and generic YAML configs
+- **Manifest** — FilenameParser for `go.mod`, `package.json`, `pyproject.toml`, `requirements.txt`
 - Extensible parser interface for adding new languages
 
 ### 6. Configuration
@@ -137,6 +150,9 @@ languages:
   - typescript
   - javascript
   - java
+  - rust
+  - csharp
+  - ruby
   - html
   - markdown
   - makefile
@@ -145,60 +161,53 @@ languages:
   - yaml
 
 graph:
-  storage: embedded  # embedded (BadgerDB/Bolt) or neo4j
-  # neo4j_uri: bolt://localhost:7687  # if using neo4j
+  storage: embedded  # embedded (BadgerDB)
 
 agents:
-  llm_provider: anthropic  # anthropic (direct API) or vertex-ai (Claude + Gemini on GCP)
-  model: claude-sonnet-4-5-20250929
-  # api_key: sk-...           # for direct Anthropic API
-  # project: my-gcp-project   # for Vertex AI
-  # location: us-central1     # for Vertex AI
+  llm_provider: claude-cli  # claude-cli, anthropic, or vertex-ai
+  model: sonnet
+  auto_link: true           # LLM-assisted cross-service edge detection
+  # api_key: sk-...          # for direct Anthropic API
+  # project: my-gcp-project  # for Vertex AI
+  # location: us-central1    # for Vertex AI
 ```
 
 ## Architecture
 
 ```
 codeeagle/
-├── cmd/                    # CLI entry points (cobra commands)
-│   ├── root.go
-│   ├── init.go
-│   ├── watch.go
-│   ├── agent.go
-│   ├── query.go
-│   └── metrics.go
+├── cmd/codeeagle/          # CLI entry point
 ├── internal/
-│   ├── config/             # Configuration loading and validation
-│   ├── watcher/            # File system watching (fsnotify-based)
-│   ├── parser/             # Language-specific AST parsers
-│   │   ├── parser.go       # Parser interface
-│   │   ├── golang/         # Go parser using go/ast
-│   │   ├── python/         # Python parser using tree-sitter
-│   │   ├── typescript/     # TypeScript parser using tree-sitter
-│   │   ├── javascript/     # JavaScript parser using tree-sitter
-│   │   ├── java/           # Java parser using tree-sitter
-│   │   ├── html/           # HTML + template derivatives parser
-│   │   ├── markdown/       # Markdown structure parser
-│   │   ├── makefile/       # Makefile parser (line-based)
-│   │   ├── shell/          # Shell parser using tree-sitter bash
-│   │   ├── terraform/      # Terraform parser using tree-sitter HCL
-│   │   └── yaml/           # YAML parser (GHA, Ansible, generic)
-│   ├── graph/              # Knowledge graph storage and queries
-│   │   ├── graph.go        # Graph interface
-│   │   ├── schema.go       # Node/edge type definitions
-│   │   ├── embedded/       # Embedded graph store implementation
-│   │   └── neo4j/          # Neo4j implementation (optional)
+│   ├── agents/             # AI agents (planner, designer, reviewer, asker) + MCP query tools
+│   ├── cli/                # Cobra command definitions (sync, watch, query, backpop, etc.)
+│   ├── config/             # Configuration loading and validation (viper)
+│   ├── gitutil/            # Git operations (branch detection, diffs)
+│   ├── graph/              # Knowledge graph interface + embedded store (BadgerDB)
+│   ├── indexer/            # Orchestrates parsing -> graph updates + LLM summarization
+│   ├── linker/             # Cross-service linker (7 phases: services, endpoints, API calls, deps, imports, implements, tests)
+│   ├── llm/                # LLM provider implementations (Anthropic, Vertex AI, Claude CLI)
+│   ├── mcp/                # MCP server (JSON-RPC over stdio)
 │   ├── metrics/            # Code quality metric calculators
-│   ├── indexer/            # Orchestrates parsing -> graph updates
-│   └── agents/             # AI agent implementations
-│       ├── agent.go        # Agent interface
-│       ├── context.go      # Graph-to-prompt context builder
-│       ├── planner.go      # Planning agent
-│       ├── designer.go     # Design agent
-│       └── reviewer.go     # Code review agent
-├── pkg/                    # Public API (if any)
+│   ├── parser/             # Language parsers
+│   │   ├── parser.go       # Parser + FilenameParser interfaces
+│   │   ├── golang/         # Go parser (stdlib go/ast, struct field type resolution)
+│   │   ├── python/         # Python parser (tree-sitter, Protocol detection)
+│   │   ├── typescript/     # TypeScript parser (tree-sitter)
+│   │   ├── javascript/     # JavaScript parser (tree-sitter)
+│   │   ├── java/           # Java parser (tree-sitter)
+│   │   ├── rust/           # Rust parser (tree-sitter)
+│   │   ├── csharp/         # C# parser (tree-sitter, ASP.NET support)
+│   │   ├── ruby/           # Ruby parser (tree-sitter, Rails support)
+│   │   ├── html/           # HTML parser (golang.org/x/net/html)
+│   │   ├── markdown/       # Markdown parser (line-based)
+│   │   ├── makefile/       # Makefile parser (line-based, FilenameParser)
+│   │   ├── shell/          # Shell parser (tree-sitter bash)
+│   │   ├── terraform/      # Terraform parser (tree-sitter HCL)
+│   │   ├── yaml/           # YAML parser (GHA, Ansible, generic)
+│   │   └── manifest/       # Manifest parser (go.mod, package.json, pyproject.toml, requirements.txt)
+│   └── watcher/            # Filesystem watcher (fsnotify + gitignore)
+├── pkg/llm/                # Public LLM client interface + provider registry
 ├── testdata/               # Test fixtures
-├── .codeeagle.yaml         # Self-referential config for testing
 ├── go.mod
 ├── go.sum
 ├── Makefile
@@ -211,8 +220,8 @@ codeeagle/
 - **CLI Framework:** cobra
 - **File Watching:** fsnotify
 - **Go AST Parsing:** stdlib `go/ast`, `go/parser`, `go/types`
-- **Tree-sitter:** for Python, TypeScript, JavaScript, Java, HTML, and Markdown parsing (via go bindings)
-- **Graph Storage:** Embedded (e.g., CayleyDB or custom adjacency store on BadgerDB) with optional Neo4j
+- **Tree-sitter:** for Python, TypeScript, JavaScript, Java, Rust, C#, Ruby, Shell, Terraform parsing (via `github.com/smacker/go-tree-sitter` bindings)
+- **Graph Storage:** Embedded (BadgerDB with secondary indexes), branch-aware with fallback reads
 - **LLM Integration:** Anthropic API (direct) + Vertex AI (Claude & Gemini on GCP), extensible to others
 - **Config:** viper (YAML config loading)
 - **Testing:** stdlib `testing` + testify
