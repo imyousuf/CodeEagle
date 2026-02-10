@@ -193,9 +193,9 @@ func (c *anthropicClient) Chat(ctx context.Context, systemPrompt string, message
 	if resp.StatusCode != http.StatusOK {
 		var apiErr anthropicError
 		if json.Unmarshal(respBody, &apiErr) == nil && apiErr.Error.Message != "" {
-			return nil, fmt.Errorf("Anthropic API error (HTTP %d): %s: %s", resp.StatusCode, apiErr.Error.Type, apiErr.Error.Message)
+			return nil, fmt.Errorf("anthropic API error (HTTP %d): %s: %s", resp.StatusCode, apiErr.Error.Type, apiErr.Error.Message)
 		}
-		return nil, fmt.Errorf("Anthropic API error (HTTP %d): %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("anthropic API error (HTTP %d): %s", resp.StatusCode, string(respBody))
 	}
 
 	var apiResp anthropicResponse
@@ -262,9 +262,9 @@ func (c *anthropicClient) ChatWithTools(ctx context.Context, systemPrompt string
 	if resp.StatusCode != http.StatusOK {
 		var apiErr anthropicError
 		if json.Unmarshal(respBody, &apiErr) == nil && apiErr.Error.Message != "" {
-			return nil, fmt.Errorf("Anthropic API error (HTTP %d): %s: %s", resp.StatusCode, apiErr.Error.Type, apiErr.Error.Message)
+			return nil, fmt.Errorf("anthropic API error (HTTP %d): %s: %s", resp.StatusCode, apiErr.Error.Type, apiErr.Error.Message)
 		}
-		return nil, fmt.Errorf("Anthropic API error (HTTP %d): %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("anthropic API error (HTTP %d): %s", resp.StatusCode, string(respBody))
 	}
 
 	var apiResp anthropicToolResponse

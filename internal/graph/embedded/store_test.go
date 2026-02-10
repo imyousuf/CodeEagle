@@ -17,27 +17,6 @@ func newTestStore(t *testing.T) *BranchStore {
 	return s
 }
 
-func newTestBranchStore(t *testing.T, writeBranch string, readBranches []string) *BranchStore {
-	t.Helper()
-	s, err := NewBranchStore(t.TempDir(), writeBranch, readBranches)
-	if err != nil {
-		t.Fatalf("NewBranchStore: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-	return s
-}
-
-// newTestBranchStoreAt opens a branch store at an existing path.
-func newTestBranchStoreAt(t *testing.T, dbPath, writeBranch string, readBranches []string) *BranchStore {
-	t.Helper()
-	s, err := NewBranchStore(dbPath, writeBranch, readBranches)
-	if err != nil {
-		t.Fatalf("NewBranchStore: %v", err)
-	}
-	t.Cleanup(func() { s.Close() })
-	return s
-}
-
 func TestAddGetNode(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

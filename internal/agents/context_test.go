@@ -55,7 +55,7 @@ func setupTestGraph(t *testing.T) graph.Store {
 		Signature:     "func HandleRequest(ctx context.Context, req *Request) error",
 		Metrics: map[string]float64{
 			"cyclomatic_complexity": 5,
-			"lines_of_code":        15,
+			"lines_of_code":         15,
 		},
 	}
 	reqConfig := &graph.Node{
@@ -96,7 +96,7 @@ func setupTestGraph(t *testing.T) graph.Store {
 		Exported:      true,
 		Metrics: map[string]float64{
 			"cyclomatic_complexity": 8,
-			"lines_of_code":        15,
+			"lines_of_code":         15,
 		},
 	}
 	validateInput := &graph.Node{
@@ -403,9 +403,9 @@ func setupArchTestGraph(t *testing.T) graph.Store {
 			Language: "go",
 			Exported: true,
 			Properties: map[string]string{
-				"fields":              "id, name, email, created_at",
-				graph.PropArchRole:    "repository",
-				graph.PropLayerTag:    "data_access",
+				"fields":                "id, name, email, created_at",
+				graph.PropArchRole:      "repository",
+				graph.PropLayerTag:      "data_access",
 				graph.PropDesignPattern: "repository",
 			},
 		},

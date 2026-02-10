@@ -250,7 +250,7 @@ func TestGetCurrentHEAD(t *testing.T) {
 	}
 	// Should only contain hex characters.
 	for _, c := range head {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			t.Errorf("unexpected character %q in HEAD hash %q", string(c), head)
 			break
 		}

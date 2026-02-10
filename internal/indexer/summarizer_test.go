@@ -2,7 +2,6 @@ package indexer
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -34,8 +33,8 @@ func (m *mockLLMClient) Chat(_ context.Context, systemPrompt string, messages []
 }
 
 func (m *mockLLMClient) Model() string    { return "mock-model" }
-func (m *mockLLMClient) Provider() string  { return "mock" }
-func (m *mockLLMClient) Close() error      { return nil }
+func (m *mockLLMClient) Provider() string { return "mock" }
+func (m *mockLLMClient) Close() error     { return nil }
 
 func setupSummarizerTest(t *testing.T) (graph.Store, *mockLLMClient) {
 	t.Helper()
@@ -456,7 +455,7 @@ func TestGroupNodesByTopDirRelativePaths(t *testing.T) {
 }
 
 func contains(s, substr string) bool {
-	return fmt.Sprintf("%s", s) != "" && len(s) > 0 && findSubstring(s, substr)
+	return s != "" && len(s) > 0 && findSubstring(s, substr)
 }
 
 func findSubstring(s, substr string) bool {

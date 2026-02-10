@@ -32,8 +32,8 @@ func (m *mockClient) Chat(_ context.Context, systemPrompt string, messages []llm
 }
 
 func (m *mockClient) Model() string    { return "test-model" }
-func (m *mockClient) Provider() string  { return "test" }
-func (m *mockClient) Close() error      { return nil }
+func (m *mockClient) Provider() string { return "test" }
+func (m *mockClient) Close() error     { return nil }
 
 // mockToolClient implements llm.ToolCapableClient for testing.
 type mockToolClient struct {

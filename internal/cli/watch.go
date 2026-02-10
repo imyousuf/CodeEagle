@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -45,7 +44,7 @@ func newWatchCmd() *cobra.Command {
 			}
 
 			// Set up log file output if requested.
-			var output io.Writer = cmd.OutOrStdout()
+			output := cmd.OutOrStdout()
 			if logFile != "" {
 				f, err := os.Create(logFile)
 				if err != nil {

@@ -42,11 +42,11 @@ func (p *HTMLParser) ParseFile(filePath string, content []byte) (*parser.ParseRe
 }
 
 type extractor struct {
-	filePath   string
-	content    string
-	nodes      []*graph.Node
-	edges      []*graph.Edge
-	docNodeID  string
+	filePath  string
+	content   string
+	nodes     []*graph.Node
+	edges     []*graph.Edge
+	docNodeID string
 }
 
 func (e *extractor) extract() {
@@ -147,9 +147,10 @@ func (e *extractor) extractLink(n *html.Node) {
 	}
 	rel := getAttr(n, "rel")
 	kind := "link"
-	if rel == "stylesheet" {
+	switch rel {
+	case "stylesheet":
 		kind = "stylesheet"
-	} else if rel == "icon" {
+	case "icon":
 		kind = "icon"
 	}
 
@@ -317,7 +318,7 @@ func (e *extractor) extractVueSections() {
 		attrs := match[2]
 
 		props := map[string]string{
-			"kind": "vue-section",
+			"kind":    "vue-section",
 			"section": section,
 		}
 
@@ -360,7 +361,7 @@ func (e *extractor) extractSvelteSections() {
 		attrs := match[2]
 
 		props := map[string]string{
-			"kind": "svelte-section",
+			"kind":    "svelte-section",
 			"section": section,
 		}
 

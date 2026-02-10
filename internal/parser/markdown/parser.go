@@ -65,12 +65,12 @@ func isAIGuidelineFile(filePath string) bool {
 
 // Regex patterns for Markdown elements.
 var (
-	headingRe    = regexp.MustCompile(`^(#{1,6})\s+(.+)$`)
-	linkRe       = regexp.MustCompile(`\[([^\]]*)\]\(([^)]+)\)`)
-	codeBlockRe  = regexp.MustCompile("^```(\\w*)\\s*$")
-	codeBlockEnd = regexp.MustCompile("^```\\s*$")
+	headingRe        = regexp.MustCompile(`^(#{1,6})\s+(.+)$`)
+	linkRe           = regexp.MustCompile(`\[([^\]]*)\]\(([^)]+)\)`)
+	codeBlockRe      = regexp.MustCompile("^```(\\w*)\\s*$")
+	codeBlockEnd     = regexp.MustCompile("^```\\s*$")
 	frontMatterDelim = "---"
-	todoRe       = regexp.MustCompile(`(?i)\b(TODO|FIXME|HACK|XXX)\b[:\s]*(.*)`)
+	todoRe           = regexp.MustCompile(`(?i)\b(TODO|FIXME|HACK|XXX)\b[:\s]*(.*)`)
 )
 
 func (e *extractor) extract() {
@@ -269,8 +269,8 @@ func (e *extractor) addCodeBlock(lang string, startLine, endLine int) {
 		EndLine:  endLine,
 		Language: string(parser.LangMarkdown),
 		Properties: map[string]string{
-			"kind":           "code-block",
-			"code_language":  lang,
+			"kind":          "code-block",
+			"code_language": lang,
 		},
 	})
 	e.edges = append(e.edges, &graph.Edge{

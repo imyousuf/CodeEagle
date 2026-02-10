@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
+	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 )
 
 const syncStateFile = "sync.state"

@@ -19,9 +19,9 @@ type mockToolForMCP struct {
 	success     bool
 }
 
-func (m *mockToolForMCP) Name() string                { return m.name }
-func (m *mockToolForMCP) Description() string          { return m.description }
-func (m *mockToolForMCP) Parameters() map[string]any   { return m.params }
+func (m *mockToolForMCP) Name() string               { return m.name }
+func (m *mockToolForMCP) Description() string        { return m.description }
+func (m *mockToolForMCP) Parameters() map[string]any { return m.params }
 func (m *mockToolForMCP) Execute(_ context.Context, _ map[string]any) (string, bool) {
 	return m.result, m.success
 }

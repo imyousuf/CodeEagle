@@ -13,11 +13,11 @@ import (
 
 // MigrateResult holds statistics about a path migration.
 type MigrateResult struct {
-	NodesScanned   int
-	NodesMigrated  int
-	EdgesScanned   int
-	EdgesRemapped  int
-	BranchesFound  []string
+	NodesScanned  int
+	NodesMigrated int
+	EdgesScanned  int
+	EdgesRemapped int
+	BranchesFound []string
 }
 
 // MigrateAbsToRelPaths converts absolute file paths to relative paths

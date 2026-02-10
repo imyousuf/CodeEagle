@@ -639,12 +639,6 @@ func isDomainPackage(pkg string) bool {
 // extractPackageDirName extracts the immediate directory name from the file path.
 // For Go, uses the Package field; for others, derives from the file path.
 func extractPackageDirName(filePath, pkg string) string {
-	if pkg != "" {
-		// For Go files, package name is already set. But we also want the directory
-		// name for package-based heuristics in other languages.
-		// Try to extract from file path as it's more reliable for directory-based checks.
-	}
-
 	// Extract last directory component from file path
 	parts := strings.Split(filePath, "/")
 	if len(parts) >= 2 {

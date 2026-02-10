@@ -46,7 +46,7 @@ func (s *SyncState) MigrateLegacy(branch string) {
 	if s.LastCommit == "" && s.Timestamp.IsZero() {
 		return // nothing to migrate
 	}
-	if s.BranchStates != nil && len(s.BranchStates) > 0 {
+	if len(s.BranchStates) > 0 {
 		return // already migrated
 	}
 	bs := s.GetBranchState(branch)

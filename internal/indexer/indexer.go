@@ -24,7 +24,7 @@ type IndexerConfig struct {
 	Verbose        bool
 	Logger         func(format string, args ...any) // optional logger, defaults to fmt.Fprintf(os.Stderr, ...)
 	LLMClient      llm.Client                       // optional LLM client for auto-summarization
-	AutoSummarize  bool                              // enable post-index LLM summarization
+	AutoSummarize  bool                             // enable post-index LLM summarization
 }
 
 // IndexStats holds statistics about the indexing state.

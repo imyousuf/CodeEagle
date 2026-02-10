@@ -62,7 +62,7 @@ type extractor struct {
 	fileNodeID string
 
 	// Track interfaces and struct methods for Implements edge detection.
-	interfaces map[string]map[string]bool // interface name -> set of method names
+	interfaces    map[string]map[string]bool // interface name -> set of method names
 	structMethods map[string]map[string]bool // struct name -> set of method names
 }
 

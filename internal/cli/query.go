@@ -218,11 +218,11 @@ func newQuerySymbolsCmd() *cobra.Command {
 
 // interfaceResult holds the structured output for the interface subcommand.
 type interfaceResult struct {
-	Name      string                `json:"name"`
-	FilePath  string                `json:"file_path"`
-	Line      int                   `json:"line"`
-	Package   string                `json:"package"`
-	Signature string                `json:"signature,omitempty"`
+	Name         string               `json:"name"`
+	FilePath     string               `json:"file_path"`
+	Line         int                  `json:"line"`
+	Package      string               `json:"package"`
+	Signature    string               `json:"signature,omitempty"`
 	Implementors []interfaceImplEntry `json:"implementors"`
 }
 
@@ -351,13 +351,13 @@ func newQueryInterfaceCmd() *cobra.Command {
 
 // edgeEntry holds a resolved edge for display.
 type edgeEntry struct {
-	EdgeType   graph.EdgeType `json:"edge_type"`
-	NodeID     string         `json:"node_id"`
-	NodeType   graph.NodeType `json:"node_type"`
-	NodeName   string         `json:"node_name"`
-	FilePath   string         `json:"file_path,omitempty"`
-	Line       int            `json:"line,omitempty"`
-	Package    string         `json:"package,omitempty"`
+	EdgeType   graph.EdgeType    `json:"edge_type"`
+	NodeID     string            `json:"node_id"`
+	NodeType   graph.NodeType    `json:"node_type"`
+	NodeName   string            `json:"node_name"`
+	FilePath   string            `json:"file_path,omitempty"`
+	Line       int               `json:"line,omitempty"`
+	Package    string            `json:"package,omitempty"`
 	Properties map[string]string `json:"properties,omitempty"`
 }
 

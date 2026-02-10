@@ -4,10 +4,10 @@ import "sync"
 
 // Registry manages a collection of language parsers.
 type Registry struct {
-	mu         sync.RWMutex
-	parsers    map[Language]Parser
-	extIndex   map[string]Parser
-	order      []Language
+	mu       sync.RWMutex
+	parsers  map[Language]Parser
+	extIndex map[string]Parser
+	order    []Language
 }
 
 // NewRegistry creates a new parser registry.

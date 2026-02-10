@@ -15,20 +15,20 @@ import (
 
 // extToLanguage maps file extensions to language names for metrics calculation.
 var extToLanguage = map[string]string{
-	".go":      "go",
-	".py":      "python",
-	".pyi":     "python",
-	".ts":      "typescript",
-	".tsx":     "typescript",
-	".js":      "javascript",
-	".jsx":     "javascript",
-	".mjs":     "javascript",
-	".cjs":     "javascript",
-	".java":    "java",
-	".html":    "html",
-	".htm":     "html",
-	".md":      "markdown",
-	".mdx":     "markdown",
+	".go":   "go",
+	".py":   "python",
+	".pyi":  "python",
+	".ts":   "typescript",
+	".tsx":  "typescript",
+	".js":   "javascript",
+	".jsx":  "javascript",
+	".mjs":  "javascript",
+	".cjs":  "javascript",
+	".java": "java",
+	".html": "html",
+	".htm":  "html",
+	".md":   "markdown",
+	".mdx":  "markdown",
 }
 
 func newMetricsCmd() *cobra.Command {

@@ -408,10 +408,10 @@ loop:
 
 func TestConvertOp(t *testing.T) {
 	tests := []struct {
-		name    string
-		op      fsnotify.Op
-		want    EventOp
-		wantOk  bool
+		name   string
+		op     fsnotify.Op
+		want   EventOp
+		wantOk bool
 	}{
 		{"create", fsnotify.Create, Create, true},
 		{"write", fsnotify.Write, Write, true},

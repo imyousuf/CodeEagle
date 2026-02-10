@@ -626,10 +626,10 @@ func (cb *ContextBuilder) BuildModelContext(ctx context.Context, serviceName str
 
 	found := false
 	groupLabels := map[graph.NodeType]string{
-		graph.NodeDBModel:      "DB Models",
-		graph.NodeDomainModel:  "Domain Models",
-		graph.NodeViewModel:    "View Models / DTOs",
-		graph.NodeDTO:          "View Models / DTOs",
+		graph.NodeDBModel:     "DB Models",
+		graph.NodeDomainModel: "Domain Models",
+		graph.NodeViewModel:   "View Models / DTOs",
+		graph.NodeDTO:         "View Models / DTOs",
 	}
 
 	// Group ViewModel and DTO together.
