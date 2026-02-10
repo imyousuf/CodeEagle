@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "codeeagle",
-      "source": ".",
+      "source": "./",
       "description": "Query and analyze codebases using CodeEagle's knowledge graph — symbols, interfaces, edges, unused code, test coverage, and AI agents",
       "version": "1.0.0"
     }
