@@ -20,8 +20,8 @@ func TestNewPlannerTools(t *testing.T) {
 	defer cleanup()
 
 	tools := NewPlannerTools(ctxBuilder)
-	if len(tools) != 8 {
-		t.Fatalf("expected 8 tools, got %d", len(tools))
+	if len(tools) != 11 {
+		t.Fatalf("expected 11 tools, got %d", len(tools))
 	}
 
 	expectedNames := []string{
@@ -33,6 +33,9 @@ func TestNewPlannerTools(t *testing.T) {
 		"search_nodes",
 		"get_model_info",
 		"get_project_guidelines",
+		"query_file_symbols",
+		"query_interface_implementors",
+		"query_node_edges",
 	}
 	for i, tool := range tools {
 		if tool.Name() != expectedNames[i] {

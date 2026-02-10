@@ -19,6 +19,9 @@ func NewPlannerTools(ctxBuilder *ContextBuilder) []Tool {
 		&searchNodesTool{store: ctxBuilder.store},
 		&modelInfoTool{ctxBuilder: ctxBuilder},
 		&projectGuidelinesTool{ctxBuilder: ctxBuilder},
+		&queryFileSymbolsTool{store: ctxBuilder.store},
+		&queryInterfaceImplTool{store: ctxBuilder.store},
+		&queryNodeEdgesTool{store: ctxBuilder.store},
 	}
 }
 

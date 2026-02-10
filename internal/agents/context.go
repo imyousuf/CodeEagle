@@ -372,7 +372,7 @@ func (cb *ContextBuilder) BuildDiffContext(ctx context.Context, changedFiles []s
 		// Find what depends on these symbols.
 		affected := make(map[string]string) // filePath -> node name for dedup
 		for _, n := range nodes {
-			for _, et := range []graph.EdgeType{graph.EdgeImports, graph.EdgeDependsOn, graph.EdgeCalls, graph.EdgeTests} {
+			for _, et := range []graph.EdgeType{graph.EdgeImports, graph.EdgeDependsOn, graph.EdgeCalls, graph.EdgeImplements, graph.EdgeTests} {
 				neighbors, err := cb.store.GetNeighbors(ctx, n.ID, et, graph.Incoming)
 				if err != nil {
 					continue
