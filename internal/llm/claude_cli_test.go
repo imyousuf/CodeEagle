@@ -104,18 +104,37 @@ func TestParseClaudeResponse(t *testing.T) {
 		wantErr     bool
 	}{
 		{
-			name:        "success with usage",
+			name:        "single object with usage",
 			input:       `{"type":"result","subtype":"success","result":"Hello world","usage":{"input_tokens":10,"output_tokens":5}}`,
 			wantContent: "Hello world",
 			wantInput:   10,
 			wantOutput:  5,
 		},
 		{
-			name:        "success without usage",
+			name:        "single object without usage",
 			input:       `{"type":"result","subtype":"success","result":"Hello"}`,
 			wantContent: "Hello",
 			wantInput:   0,
 			wantOutput:  0,
+		},
+		{
+			name:        "JSON array with tool use",
+			input:       `[{"type":"system","subtype":"init"},{"type":"assistant","message":{"content":[{"type":"tool_use"}]}},{"type":"tool_result"},{"type":"assistant","message":{"content":[{"type":"text","text":"final answer"}]}},{"type":"result","subtype":"success","result":"The top 5 packages are...","usage":{"input_tokens":1000,"output_tokens":200}}]`,
+			wantContent: "The top 5 packages are...",
+			wantInput:   1000,
+			wantOutput:  200,
+		},
+		{
+			name:        "JSON array simple (no tool use)",
+			input:       `[{"type":"system","subtype":"init"},{"type":"result","subtype":"success","result":"Simple answer"}]`,
+			wantContent: "Simple answer",
+			wantInput:   0,
+			wantOutput:  0,
+		},
+		{
+			name:    "JSON array without result entry",
+			input:   `[{"type":"system","subtype":"init"},{"type":"assistant"}]`,
+			wantErr: true,
 		},
 		{
 			name:    "malformed JSON",
@@ -125,6 +144,16 @@ func TestParseClaudeResponse(t *testing.T) {
 		{
 			name:    "empty response",
 			input:   `{}`,
+			wantErr: true,
+		},
+		{
+			name:    "empty string",
+			input:   ``,
+			wantErr: true,
+		},
+		{
+			name:    "whitespace only",
+			input:   `   `,
 			wantErr: true,
 		},
 	}
@@ -151,6 +180,15 @@ func TestParseClaudeResponse(t *testing.T) {
 				t.Errorf("output tokens = %d, want %d", resp.Usage.OutputTokens, tt.wantOutput)
 			}
 		})
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	if got := truncate("short", 10); got != "short" {
+		t.Errorf("expected 'short', got %q", got)
+	}
+	if got := truncate("this is a long string", 10); got != "this is a ..." {
+		t.Errorf("expected 'this is a ...', got %q", got)
 	}
 }
 

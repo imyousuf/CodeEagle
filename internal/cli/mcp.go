@@ -72,6 +72,7 @@ This command is typically invoked automatically by the Claude CLI via
 				defer f.Close()
 				registry.SetLogger(func(format string, args ...any) {
 					fmt.Fprintf(f, format+"\n", args...)
+					f.Sync()
 				})
 			} else if verbose {
 				registry.SetLogger(func(format string, args ...any) {

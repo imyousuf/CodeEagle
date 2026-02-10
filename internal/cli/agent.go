@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -120,9 +121,15 @@ falls back to single-turn keyword-based context selection.`,
 			defer client.Close()
 
 			// Forward config file path to Claude CLI for MCP subprocess.
+			// Always resolve and pass the config file so the MCP subprocess
+			// can find the project config regardless of its working directory.
 			if setter, ok := client.(interface{ SetConfigFile(string) }); ok {
-				if cfgFile != "" {
-					setter.SetConfigFile(cfgFile)
+				resolvedCfg := cfgFile
+				if resolvedCfg == "" && cfg.ConfigDir != "" {
+					resolvedCfg = filepath.Join(cfg.ConfigDir, config.ProjectConfigFile)
+				}
+				if resolvedCfg != "" {
+					setter.SetConfigFile(resolvedCfg)
 				}
 			}
 
@@ -130,7 +137,6 @@ falls back to single-turn keyword-based context selection.`,
 			if err != nil {
 				return err
 			}
-			defer store.Close()
 
 			var repoPaths []string
 			for _, repo := range cfg.Repositories {
@@ -149,6 +155,15 @@ falls back to single-turn keyword-based context selection.`,
 
 			if maxIterations > 0 {
 				planner.SetMaxIterations(maxIterations)
+			}
+
+			// For claude-cli provider, the agentic loop runs in a subprocess
+			// that opens the DB via MCP serve. Close the store to release the
+			// BadgerDB lock so the subprocess can access the database.
+			if client.Provider() == "claude-cli" {
+				store.Close()
+			} else {
+				defer store.Close()
 			}
 
 			query := strings.Join(args, " ")

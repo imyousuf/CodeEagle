@@ -119,7 +119,8 @@ func (c *claudeCLIClient) Provider() string {
 // tool calls are unconditionally logged. When verbose is enabled, a goroutine
 // tails this file in real time, forwarding lines to the verbose logger.
 func (c *claudeCLIClient) ChatWithTools(ctx context.Context, systemPrompt string, messages []llm.Message, tools []llm.Tool) (*llm.Response, error) {
-	prompt := buildPrompt(systemPrompt, messages)
+	// Build user prompt from messages only (system prompt goes to --system-prompt).
+	userPrompt := buildPrompt("", messages)
 
 	// Always create a log file for the MCP subprocess to write tool calls to.
 	toolLogPath := newMCPLogPath()
@@ -132,14 +133,16 @@ func (c *claudeCLIClient) ChatWithTools(ctx context.Context, systemPrompt string
 
 	allowedTools := c.getAllowedTools(tools)
 
-	args := []string{"-p", prompt}
+	args := []string{"-p", userPrompt}
+	if systemPrompt != "" {
+		args = append(args, "--system-prompt", systemPrompt)
+	}
 	if c.model != "" {
 		args = append(args, "--model", c.model)
 	}
+	args = append(args, "--output-format", "json")
 	args = append(args, "--mcp-config", mcpConfig)
-	for _, tool := range allowedTools {
-		args = append(args, "--allowedTools", tool)
-	}
+	args = append(args, "--allowedTools", strings.Join(allowedTools, ","))
 	args = append(args, "--dangerously-skip-permissions")
 
 	if c.verbose {
@@ -150,6 +153,10 @@ func (c *claudeCLIClient) ChatWithTools(ctx context.Context, systemPrompt string
 	defer cancel()
 
 	cmd := exec.CommandContext(timeoutCtx, c.executable, args...)
+
+	// Capture stderr for debugging.
+	var stderrBuf strings.Builder
+	cmd.Stderr = &stderrBuf
 
 	// Create the log file so the subprocess can write to it immediately.
 	if f, err := os.Create(toolLogPath); err == nil {
@@ -175,20 +182,31 @@ func (c *claudeCLIClient) ChatWithTools(ctx context.Context, systemPrompt string
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
-	os.Remove(toolLogPath)
+	// Keep the log file if verbose for post-mortem inspection; clean up otherwise.
+	if !c.verbose {
+		os.Remove(toolLogPath)
+	}
+
+	// Log stderr if verbose.
+	if c.verbose && c.log != nil && stderrBuf.Len() > 0 {
+		c.log("Claude CLI stderr:\n%s", stderrBuf.String())
+	}
 
 	if err != nil {
 		if timeoutCtx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("claude CLI timed out after %v", c.timeout)
 		}
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("claude CLI exited with error: %w\nstderr: %s", err, exitErr.Stderr)
-		}
-		return nil, fmt.Errorf("claude CLI execution failed: %w", err)
+		stderrStr := stderrBuf.String()
+		return nil, fmt.Errorf("claude CLI exited with error: %w\nstderr: %s", err, stderrStr)
 	}
 
-	// Claude CLI without --output-format json returns plain text.
-	return &llm.Response{Content: strings.TrimSpace(string(output))}, nil
+	// Parse JSON response from Claude CLI.
+	resp, err := parseClaudeResponse(output)
+	if err != nil {
+		// Fall back to plain text if JSON parsing fails.
+		return &llm.Response{Content: strings.TrimSpace(string(output))}, nil
+	}
+	return resp, nil
 }
 
 // tailFile reads lines from a file as they appear, forwarding to the logger.
@@ -403,10 +421,35 @@ func buildPrompt(systemPrompt string, messages []llm.Message) string {
 }
 
 // parseClaudeResponse parses the JSON output from the Claude CLI.
+// It handles two formats:
+//   - Single object: {"type":"result","result":"..."}  (simple Chat)
+//   - JSON array: [{"type":"system",...},{"type":"result","result":"..."}]  (ChatWithTools)
+//
+// For arrays, it scans for the last entry with type "result".
 func parseClaudeResponse(data []byte) (*llm.Response, error) {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		return nil, fmt.Errorf("empty response from claude CLI")
+	}
+
+	// Try single object first.
+	if trimmed[0] == '{' {
+		return parseSingleResponse(data)
+	}
+
+	// Try JSON array (multi-turn output with tool use).
+	if trimmed[0] == '[' {
+		return parseArrayResponse([]byte(trimmed))
+	}
+
+	return nil, fmt.Errorf("unexpected claude CLI output format: %s", truncate(trimmed, 200))
+}
+
+// parseSingleResponse parses a single JSON object response.
+func parseSingleResponse(data []byte) (*llm.Response, error) {
 	var resp claudeJSONResponse
 	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("failed to parse claude CLI JSON response: %w\nraw output: %s", err, string(data))
+		return nil, fmt.Errorf("failed to parse claude CLI JSON response: %w\nraw output: %s", err, truncate(string(data), 500))
 	}
 
 	if resp.Result == "" && resp.Type == "" {
@@ -425,6 +468,41 @@ func parseClaudeResponse(data []byte) (*llm.Response, error) {
 	}
 
 	return response, nil
+}
+
+// parseArrayResponse parses a JSON array of response objects, extracting the
+// result from the last entry with type "result".
+func parseArrayResponse(data []byte) (*llm.Response, error) {
+	var entries []claudeJSONResponse
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, fmt.Errorf("failed to parse claude CLI JSON array response: %w\nraw output: %s", err, truncate(string(data), 500))
+	}
+
+	// Scan backwards for the result entry.
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Type == "result" {
+			response := &llm.Response{
+				Content: entries[i].Result,
+			}
+			if entries[i].Usage != nil {
+				response.Usage = llm.TokenUsage{
+					InputTokens:  entries[i].Usage.InputTokens,
+					OutputTokens: entries[i].Usage.OutputTokens,
+				}
+			}
+			return response, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no result entry found in claude CLI JSON array response")
+}
+
+// truncate returns s truncated to maxLen characters with "..." appended if truncated.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // isExecutable checks if a file exists and has execute permission.
