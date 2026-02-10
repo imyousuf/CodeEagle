@@ -1,0 +1,13 @@
+{
+  "name": "codeeagle",
+  "version": "1.0.0",
+  "description": "Codebase knowledge graph and AI-powered code intelligence. Index codebases into a knowledge graph and query symbols, interfaces, dependencies, test coverage, and unused code.",
+  "author": {
+    "name": "imyousuf",
+    "url": "https://github.com/imyousuf"
+  },
+  "repository": "https://github.com/imyousuf/CodeEagle",
+  "license": "Apache-2.0",
+  "keywords": ["code-intelligence", "knowledge-graph", "code-analysis", "codebase-indexing"],
+  "skills": "./.claude/skills/"
+}

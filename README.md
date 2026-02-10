@@ -192,24 +192,45 @@ codeeagle -p my-project status
 
 The embedded graph store uses [BadgerDB](https://github.com/dgraph-io/badger) with secondary indexes. Data is stored per-branch with fallback reads (current branch -> default branch). No external database required.
 
-## MCP Server
+## Claude Code Integration
 
-CodeEagle exposes its knowledge graph as an [MCP](https://modelcontextprotocol.io/) server for integration with Claude Code and other LLM tools.
+The recommended way to use CodeEagle with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) is as a plugin. This gives Claude Code access to all CodeEagle commands — no MCP server configuration needed.
+
+### Install as Plugin
 
 ```bash
-# Start directly (stdio transport)
-codeeagle mcp serve
+# 1. Install CodeEagle CLI
+go install github.com/imyousuf/CodeEagle/cmd/codeeagle@latest
 
-# Or configure as an MCP server in Claude Code settings:
-# ~/.claude/settings.json
-{
-  "mcpServers": {
-    "codeeagle": {
-      "command": "codeeagle",
-      "args": ["mcp", "serve", "--config", "/path/to/.CodeEagle/config.yaml"]
-    }
-  }
-}
+# 2. Initialize and index your project
+cd /path/to/your/project
+codeeagle init
+codeeagle sync
+
+# 3. Add CodeEagle as a Claude Code plugin marketplace
+/plugin marketplace add imyousuf/CodeEagle
+
+# 4. Install the plugin
+/plugin install codeeagle@imyousuf-CodeEagle
+```
+
+Once installed, Claude Code gains access to all CodeEagle skills. The skills teach Claude Code when and how to use each command — querying symbols, tracing dependencies, finding unused code, checking test coverage, running code review, etc.
+
+### Available Skills
+
+| Skill | What it does |
+|-------|-------------|
+| `/codeeagle:codeeagle` | Query the knowledge graph — symbols, interfaces, edges, unused code, coverage |
+| `/codeeagle:codeeagle-sync` | Sync the graph with latest code changes, run linker phases |
+| `/codeeagle:codeeagle-review` | Review code changes and diffs against codebase conventions |
+| `/codeeagle:codeeagle-status` | Show indexing status and graph statistics |
+
+### MCP Server (alternative)
+
+For integration with other MCP-compatible tools, CodeEagle also exposes an MCP server:
+
+```bash
+codeeagle mcp serve
 ```
 
 Available MCP tools: `get_graph_overview`, `search_nodes`, `get_node_details`, `get_node_edges`, `get_service_structure`, `get_file_symbols`, `search_edges`, `get_project_guidelines`, `query_file_symbols`, `query_interface_impl`, `query_node_edges`.
