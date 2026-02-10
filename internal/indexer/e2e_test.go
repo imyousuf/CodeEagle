@@ -19,15 +19,19 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/parser/html"
 	"github.com/imyousuf/CodeEagle/internal/parser/java"
 	"github.com/imyousuf/CodeEagle/internal/parser/javascript"
+	makefileparser "github.com/imyousuf/CodeEagle/internal/parser/makefile"
 	"github.com/imyousuf/CodeEagle/internal/parser/markdown"
 	"github.com/imyousuf/CodeEagle/internal/parser/python"
+	"github.com/imyousuf/CodeEagle/internal/parser/shell"
+	"github.com/imyousuf/CodeEagle/internal/parser/terraform"
 	"github.com/imyousuf/CodeEagle/internal/parser/typescript"
+	yamlparser "github.com/imyousuf/CodeEagle/internal/parser/yaml"
 	"github.com/imyousuf/CodeEagle/internal/watcher"
 )
 
 const opalAppPath = "/home/imyousuf/projects/opal-app"
 
-// setupE2EIndexer creates an indexer with all 7 parsers and a temp DB.
+// setupE2EIndexer creates an indexer with all 11 parsers and a temp DB.
 func setupE2EIndexer(t *testing.T, paths ...string) (*Indexer, graph.Store) {
 	t.Helper()
 
@@ -46,6 +50,10 @@ func setupE2EIndexer(t *testing.T, paths ...string) (*Indexer, graph.Store) {
 	registry.Register(java.NewParser())
 	registry.Register(html.NewParser())
 	registry.Register(markdown.NewParser())
+	registry.Register(makefileparser.NewParser())
+	registry.Register(shell.NewParser())
+	registry.Register(terraform.NewParser())
+	registry.Register(yamlparser.NewParser())
 
 	wcfg := &watcher.WatcherConfig{
 		Paths: paths,

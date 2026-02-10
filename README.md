@@ -2,12 +2,12 @@
 
 CodeEagle is a CLI tool that indexes codebases into a knowledge graph and exposes AI agents for planning, design review, and code review — all grounded in deep codebase understanding.
 
-It supports monorepos, multi-repo setups, and multi-language codebases (Go, Python, TypeScript, JavaScript, Java, HTML, Markdown). No external database required — the embedded graph store runs locally with zero setup.
+It supports monorepos, multi-repo setups, and multi-language codebases (Go, Python, TypeScript, JavaScript, Java, HTML, Markdown, Makefile, Shell, Terraform, YAML). No external database required — the embedded graph store runs locally with zero setup.
 
 ## Features
 
 - **Knowledge graph** of source code entities (functions, classes, interfaces, packages, services) and their relationships (calls, imports, implements, tests, etc.)
-- **7 language parsers**: Go (stdlib AST), Python, TypeScript, JavaScript, Java, HTML, Markdown (tree-sitter)
+- **11 language parsers**: Go (stdlib AST), Python, TypeScript, JavaScript, Java, HTML, Markdown (tree-sitter), Makefile, Shell (tree-sitter bash), Terraform (tree-sitter HCL), YAML (GitHub Actions, Ansible, generic)
 - **Code quality metrics**: cyclomatic complexity, lines of code, TODO/FIXME counts
 - **AI agents** for planning, design, code review, and freeform Q&A — read-only, advisory, never modify code
 - **Git-aware incremental sync** with branch tracking and diff-based updates
@@ -105,6 +105,10 @@ languages:
   - java
   - html
   - markdown
+  - makefile
+  - shell
+  - terraform
+  - yaml
 
 graph:
   storage: embedded
@@ -197,7 +201,7 @@ codeeagle/
 │   ├── llm/               LLM provider implementations
 │   ├── mcp/               MCP server (JSON-RPC over stdio)
 │   ├── metrics/            Code quality metric calculators
-│   ├── parser/             Language parsers (Go, Python, TS, JS, Java, HTML, MD)
+│   ├── parser/             Language parsers (Go, Python, TS, JS, Java, HTML, MD, Makefile, Shell, Terraform, YAML)
 │   └── watcher/            Filesystem watcher (fsnotify)
 └── pkg/llm/               Public LLM client interface + provider registry
 ```

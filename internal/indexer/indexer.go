@@ -133,10 +133,9 @@ func (idx *Indexer) toRelativePath(absPath string) string {
 // and graph store.
 // If no parser is registered for the file extension, it silently returns nil.
 func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
-	ext := filepath.Ext(filePath)
-	p, ok := idx.registry.GetByExtension(ext)
+	p, ok := idx.registry.ParserForFile(filePath)
 	if !ok {
-		return nil // no parser for this extension
+		return nil // no parser for this file
 	}
 
 	content, err := os.ReadFile(filePath)

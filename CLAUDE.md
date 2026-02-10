@@ -102,6 +102,10 @@ Day-1 support for language parsing and graph extraction:
 - **Java** — AST via tree-sitter (classes, interfaces, annotations, packages, Maven/Gradle deps)
 - **HTML / Templates** — tree-sitter HTML + template derivatives (JSX/TSX, Jinja2, Go templates, Thymeleaf); extract component references, includes, slots, template variables
 - **Markdown** — structure-aware parsing (headings, links, code blocks, front matter); cross-reference links to source files and other docs
+- **Makefile** — line-based parsing of targets, variables, includes, .PHONY declarations
+- **Shell** (bash/sh) — tree-sitter bash grammar; functions, variables, exports, source imports, shebang detection
+- **Terraform** (HCL) — tree-sitter HCL grammar; resources, data sources, modules, variables, outputs, providers, locals
+- **YAML** — content-aware dialect detection for GitHub Actions workflows, Ansible playbooks/roles, and generic YAML configs
 - Extensible parser interface for adding new languages
 
 ### 6. Configuration
@@ -135,6 +139,10 @@ languages:
   - java
   - html
   - markdown
+  - makefile
+  - shell
+  - terraform
+  - yaml
 
 graph:
   storage: embedded  # embedded (BadgerDB/Bolt) or neo4j
@@ -170,7 +178,11 @@ codeeagle/
 │   │   ├── javascript/     # JavaScript parser using tree-sitter
 │   │   ├── java/           # Java parser using tree-sitter
 │   │   ├── html/           # HTML + template derivatives parser
-│   │   └── markdown/       # Markdown structure parser
+│   │   ├── markdown/       # Markdown structure parser
+│   │   ├── makefile/       # Makefile parser (line-based)
+│   │   ├── shell/          # Shell parser using tree-sitter bash
+│   │   ├── terraform/      # Terraform parser using tree-sitter HCL
+│   │   └── yaml/           # YAML parser (GHA, Ansible, generic)
 │   ├── graph/              # Knowledge graph storage and queries
 │   │   ├── graph.go        # Graph interface
 │   │   ├── schema.go       # Node/edge type definitions

@@ -13,6 +13,10 @@ const (
 	LangJava       Language = "java"
 	LangHTML       Language = "html"
 	LangMarkdown   Language = "markdown"
+	LangMakefile   Language = "makefile"
+	LangShell      Language = "shell"
+	LangTerraform  Language = "terraform"
+	LangYAML       Language = "yaml"
 )
 
 // FileExtensions maps each language to its recognized file extensions.
@@ -24,6 +28,10 @@ var FileExtensions = map[Language][]string{
 	LangJava:       {".java"},
 	LangHTML:       {".html", ".htm", ".jinja2", ".j2", ".tmpl", ".gohtml", ".vue", ".svelte"},
 	LangMarkdown:   {".md", ".mdx"},
+	LangMakefile:   {".mk"},
+	LangShell:      {".sh", ".bash"},
+	LangTerraform:  {".tf", ".tfvars"},
+	LangYAML:       {".yml", ".yaml"},
 }
 
 // ParseResult holds the extracted nodes and edges from parsing a file.
@@ -44,4 +52,12 @@ type Parser interface {
 
 	// ParseFile parses the given file content and returns extracted nodes and edges.
 	ParseFile(filePath string, content []byte) (*ParseResult, error)
+}
+
+// FilenameParser extends Parser for languages where files are identified by
+// exact filenames rather than extensions (e.g., "Makefile", "Dockerfile").
+type FilenameParser interface {
+	Parser
+	// Filenames returns the exact filenames this parser can handle.
+	Filenames() []string
 }

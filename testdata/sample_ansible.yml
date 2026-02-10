@@ -1,0 +1,40 @@
+---
+- name: Deploy web application
+  hosts: webservers
+  vars:
+    app_port: 8080
+    app_user: deploy
+  roles:
+    - common
+    - role: nginx
+  tasks:
+    - name: Install dependencies
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - python3
+        - python3-pip
+
+    - name: Copy application files
+      copy:
+        src: /local/app/
+        dest: /opt/app/
+
+    - name: Start application
+      service:
+        name: myapp
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Restart nginx
+      service:
+        name: nginx
+        state: restarted
+
+- name: Configure database
+  hosts: dbservers
+  tasks:
+    - name: Run migrations
+      command: python manage.py migrate

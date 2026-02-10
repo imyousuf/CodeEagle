@@ -20,9 +20,13 @@ import (
 	htmlparser "github.com/imyousuf/CodeEagle/internal/parser/html"
 	"github.com/imyousuf/CodeEagle/internal/parser/java"
 	"github.com/imyousuf/CodeEagle/internal/parser/javascript"
+	makefileparser "github.com/imyousuf/CodeEagle/internal/parser/makefile"
 	"github.com/imyousuf/CodeEagle/internal/parser/markdown"
 	"github.com/imyousuf/CodeEagle/internal/parser/python"
+	"github.com/imyousuf/CodeEagle/internal/parser/shell"
+	"github.com/imyousuf/CodeEagle/internal/parser/terraform"
 	"github.com/imyousuf/CodeEagle/internal/parser/typescript"
+	yamlparser "github.com/imyousuf/CodeEagle/internal/parser/yaml"
 	"github.com/imyousuf/CodeEagle/internal/watcher"
 )
 
@@ -98,6 +102,10 @@ target branch for import.`,
 			registry.Register(java.NewParser())
 			registry.Register(htmlparser.NewParser())
 			registry.Register(markdown.NewParser())
+			registry.Register(makefileparser.NewParser())
+			registry.Register(shell.NewParser())
+			registry.Register(terraform.NewParser())
+			registry.Register(yamlparser.NewParser())
 
 			// Build watcher config for the matcher.
 			var paths []string
