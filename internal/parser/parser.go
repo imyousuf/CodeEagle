@@ -20,6 +20,7 @@ const (
 	LangManifest   Language = "manifest"
 	LangRust       Language = "rust"
 	LangCSharp     Language = "csharp"
+	LangRuby       Language = "ruby"
 )
 
 // FileExtensions maps each language to its recognized file extensions.
@@ -38,6 +39,7 @@ var FileExtensions = map[Language][]string{
 	LangManifest:   {".toml"},
 	LangRust:       {".rs"},
 	LangCSharp:     {".cs"},
+	LangRuby:       {".rb", ".rake"},
 }
 
 // ParseResult holds the extracted nodes and edges from parsing a file.

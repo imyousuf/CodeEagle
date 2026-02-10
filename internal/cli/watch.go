@@ -23,6 +23,7 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/parser/manifest"
 	"github.com/imyousuf/CodeEagle/internal/parser/markdown"
 	"github.com/imyousuf/CodeEagle/internal/parser/python"
+	rubyparser "github.com/imyousuf/CodeEagle/internal/parser/ruby"
 	rustparser "github.com/imyousuf/CodeEagle/internal/parser/rust"
 	"github.com/imyousuf/CodeEagle/internal/parser/shell"
 	"github.com/imyousuf/CodeEagle/internal/parser/terraform"
@@ -98,6 +99,7 @@ func newWatchCmd() *cobra.Command {
 			registry.Register(terraform.NewParser())
 			registry.Register(yamlparser.NewParser())
 			registry.Register(rustparser.NewParser())
+			registry.Register(rubyparser.NewParser())
 			registry.Register(manifest.NewParser())
 			registry.Register(csharpparser.NewParser())
 

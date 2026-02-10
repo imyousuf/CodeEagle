@@ -302,6 +302,13 @@ func isTestFilePath(filePath, language string) bool {
 		return strings.HasSuffix(base, ".cs") &&
 			(strings.HasSuffix(name, "Test") || strings.HasSuffix(name, "Tests") ||
 				strings.HasPrefix(name, "Test"))
+	case "ruby":
+		if !strings.HasSuffix(base, ".rb") {
+			return false
+		}
+		name := strings.TrimSuffix(base, ".rb")
+		return strings.HasSuffix(name, "_spec") || strings.HasSuffix(name, "_test") ||
+			strings.HasPrefix(name, "test_")
 	}
 	return false
 }
@@ -329,6 +336,8 @@ func isTestFuncName(name, language, filePath string) bool {
 		// C# test methods use attributes ([Test]/[Fact]/[Theory]), but for fallback
 		// use name heuristic: methods starting with Test in test files.
 		return strings.HasPrefix(name, "Test") && isTestFilePath(filePath, language)
+	case "ruby":
+		return strings.HasPrefix(name, "test_") && isTestFilePath(filePath, language)
 	}
 	return false
 }
@@ -351,6 +360,8 @@ func inferLanguageFromPath(filePath string) string {
 		return "rust"
 	case ".cs":
 		return "csharp"
+	case ".rb", ".rake":
+		return "ruby"
 	}
 	return ""
 }
@@ -448,6 +459,23 @@ func deriveSourceFilePaths(testPath, language string) []string {
 			src := strings.TrimPrefix(name, "Test") + ".cs"
 			candidates = append(candidates, filepath.Join(dir, src))
 		}
+	case "ruby":
+		name := strings.TrimSuffix(base, ".rb")
+		// foo_spec.rb -> foo.rb
+		if strings.HasSuffix(name, "_spec") {
+			src := strings.TrimSuffix(name, "_spec") + ".rb"
+			candidates = append(candidates, filepath.Join(dir, src))
+		}
+		// foo_test.rb -> foo.rb
+		if strings.HasSuffix(name, "_test") {
+			src := strings.TrimSuffix(name, "_test") + ".rb"
+			candidates = append(candidates, filepath.Join(dir, src))
+		}
+		// test_foo.rb -> foo.rb
+		if strings.HasPrefix(name, "test_") {
+			src := strings.TrimPrefix(name, "test_") + ".rb"
+			candidates = append(candidates, filepath.Join(dir, src))
+		}
 	}
 
 	return candidates
@@ -502,7 +530,7 @@ func deriveSourceFuncNames(testName, language string) []string {
 				candidates = append(candidates, rest) // Also try unchanged
 			}
 		}
-	case "rust":
+	case "rust", "ruby":
 		// test_process_user -> process_user
 		if strings.HasPrefix(testName, "test_") {
 			candidates = append(candidates, strings.TrimPrefix(testName, "test_"))
