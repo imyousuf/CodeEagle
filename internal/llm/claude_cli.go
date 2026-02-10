@@ -132,7 +132,7 @@ func (c *claudeCLIClient) ChatWithTools(ctx context.Context, systemPrompt string
 
 	allowedTools := c.getAllowedTools(tools)
 
-	args := []string{"-p", prompt, "--output-format", "json"}
+	args := []string{"-p", prompt}
 	if c.model != "" {
 		args = append(args, "--model", c.model)
 	}
@@ -187,7 +187,8 @@ func (c *claudeCLIClient) ChatWithTools(ctx context.Context, systemPrompt string
 		return nil, fmt.Errorf("claude CLI execution failed: %w", err)
 	}
 
-	return parseClaudeResponse(output)
+	// Claude CLI without --output-format json returns plain text.
+	return &llm.Response{Content: strings.TrimSpace(string(output))}, nil
 }
 
 // tailFile reads lines from a file as they appear, forwarding to the logger.
