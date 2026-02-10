@@ -1253,6 +1253,203 @@ func TestPhasesCount(t *testing.T) {
 	}
 }
 
+func TestIsTestFilePath(t *testing.T) {
+	tests := []struct {
+		path     string
+		language string
+		want     bool
+	}{
+		{"pkg/handler_test.go", "go", true},
+		{"pkg/handler.go", "go", false},
+		{"tests/test_handlers.py", "python", true},
+		{"tests/handlers_test.py", "python", true},
+		{"tests/handlers.py", "python", false},
+		{"src/utils.test.ts", "typescript", true},
+		{"src/utils.spec.ts", "typescript", true},
+		{"src/utils.ts", "typescript", false},
+		{"src/utils.test.js", "javascript", true},
+		{"src/utils.spec.jsx", "javascript", true},
+		{"src/utils.js", "javascript", false},
+		{"src/FooTest.java", "java", true},
+		{"src/FooTests.java", "java", true},
+		{"src/TestFoo.java", "java", true},
+		{"src/FooIT.java", "java", true},
+		{"src/Foo.java", "java", false},
+		// Infer language from extension when empty
+		{"pkg/handler_test.go", "", true},
+		{"src/utils.test.ts", "", true},
+	}
+	for _, tt := range tests {
+		got := isTestFilePath(tt.path, tt.language)
+		if got != tt.want {
+			t.Errorf("isTestFilePath(%q, %q) = %v, want %v", tt.path, tt.language, got, tt.want)
+		}
+	}
+}
+
+func TestIsTestFuncName(t *testing.T) {
+	tests := []struct {
+		name     string
+		language string
+		filePath string
+		want     bool
+	}{
+		{"TestParseFile", "go", "pkg/handler_test.go", true},
+		{"BenchmarkSort", "go", "pkg/handler_test.go", true},
+		{"ExampleFoo", "go", "pkg/handler_test.go", true},
+		{"FuzzParse", "go", "pkg/handler_test.go", true},
+		{"ParseFile", "go", "pkg/handler.go", false},
+		{"test_process_user", "python", "tests/test_handlers.py", true},
+		{"test_process_user", "python", "src/handlers.py", false},
+		{"helper_func", "python", "tests/test_handlers.py", false},
+		{"testProcess", "java", "src/FooTest.java", true},
+		{"process", "java", "src/Foo.java", false},
+	}
+	for _, tt := range tests {
+		got := isTestFuncName(tt.name, tt.language, tt.filePath)
+		if got != tt.want {
+			t.Errorf("isTestFuncName(%q, %q, %q) = %v, want %v", tt.name, tt.language, tt.filePath, got, tt.want)
+		}
+	}
+}
+
+func TestInferLanguageFromPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"pkg/handler.go", "go"},
+		{"src/app.py", "python"},
+		{"src/app.ts", "typescript"},
+		{"src/app.tsx", "typescript"},
+		{"src/app.js", "javascript"},
+		{"src/app.jsx", "javascript"},
+		{"src/App.java", "java"},
+		{"Makefile", ""},
+		{"config.yaml", ""},
+	}
+	for _, tt := range tests {
+		got := inferLanguageFromPath(tt.path)
+		if got != tt.want {
+			t.Errorf("inferLanguageFromPath(%q) = %q, want %q", tt.path, got, tt.want)
+		}
+	}
+}
+
+// TestLinkTestFilesFallback tests that linkTestFiles works with NodeFile nodes
+// when no NodeTestFile nodes exist (backpop on older graphs).
+func TestLinkTestFilesFallback(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	srcID := graph.NewNodeID("File", "pkg/handler.go", "pkg/handler.go")
+	testID := graph.NewNodeID("File", "pkg/handler_test.go", "pkg/handler_test.go")
+
+	// Both nodes are NodeFile — no NodeTestFile at all.
+	addNodes(t, store,
+		&graph.Node{
+			ID: srcID, Type: graph.NodeFile, Name: "pkg/handler.go",
+			FilePath: "pkg/handler.go", Language: "go",
+		},
+		&graph.Node{
+			ID: testID, Type: graph.NodeFile, Name: "pkg/handler_test.go",
+			FilePath: "pkg/handler_test.go", Language: "go",
+		},
+	)
+
+	linker := NewLinker(store, nil, nil, false)
+	count, err := linker.linkTestFiles(ctx)
+	if err != nil {
+		t.Fatalf("linkTestFiles: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("linkTestFiles returned %d, want 1", count)
+	}
+
+	edges, err := store.GetEdges(ctx, testID, graph.EdgeTests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 1 {
+		t.Errorf("got %d EdgeTests from test file, want 1", len(edges))
+	} else if edges[0].TargetID != srcID {
+		t.Errorf("EdgeTests target = %s, want %s", edges[0].TargetID, srcID)
+	}
+}
+
+// TestLinkTestFunctionsFallback tests that linkTestFunctions works with NodeFunction nodes
+// when no NodeTestFunction nodes exist (backpop on older graphs).
+func TestLinkTestFunctionsFallback(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	funcID := graph.NewNodeID("Function", "pkg/handler.go", "ParseFile")
+	testFuncID := graph.NewNodeID("Function", "pkg/handler_test.go", "TestParseFile")
+
+	// Both nodes are NodeFunction — no NodeTestFunction at all.
+	addNodes(t, store,
+		&graph.Node{
+			ID: funcID, Type: graph.NodeFunction, Name: "ParseFile",
+			FilePath: "pkg/handler.go", Language: "go",
+			Package: "handler",
+		},
+		&graph.Node{
+			ID: testFuncID, Type: graph.NodeFunction, Name: "TestParseFile",
+			FilePath: "pkg/handler_test.go", Language: "go",
+			Package: "handler",
+		},
+	)
+
+	linker := NewLinker(store, nil, nil, false)
+	count, err := linker.linkTestFunctions(ctx)
+	if err != nil {
+		t.Fatalf("linkTestFunctions: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("linkTestFunctions returned %d, want 1", count)
+	}
+
+	edges, err := store.GetEdges(ctx, testFuncID, graph.EdgeTests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 1 {
+		t.Errorf("got %d EdgeTests from test func, want 1", len(edges))
+	} else if edges[0].TargetID != funcID {
+		t.Errorf("EdgeTests target = %s, want %s", edges[0].TargetID, funcID)
+	}
+}
+
+// TestLinkTestFilesFallbackMultiLanguage tests fallback detection across languages.
+func TestLinkTestFilesFallbackMultiLanguage(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	// Python test file
+	pySrcID := graph.NewNodeID("File", "app/handlers.py", "app/handlers.py")
+	pyTestID := graph.NewNodeID("File", "app/test_handlers.py", "app/test_handlers.py")
+
+	// TypeScript test file
+	tsSrcID := graph.NewNodeID("File", "src/utils.ts", "src/utils.ts")
+	tsTestID := graph.NewNodeID("File", "src/utils.test.ts", "src/utils.test.ts")
+
+	addNodes(t, store,
+		&graph.Node{ID: pySrcID, Type: graph.NodeFile, Name: "app/handlers.py", FilePath: "app/handlers.py", Language: "python"},
+		&graph.Node{ID: pyTestID, Type: graph.NodeFile, Name: "app/test_handlers.py", FilePath: "app/test_handlers.py", Language: "python"},
+		&graph.Node{ID: tsSrcID, Type: graph.NodeFile, Name: "src/utils.ts", FilePath: "src/utils.ts", Language: "typescript"},
+		&graph.Node{ID: tsTestID, Type: graph.NodeFile, Name: "src/utils.test.ts", FilePath: "src/utils.test.ts", Language: "typescript"},
+	)
+
+	linker := NewLinker(store, nil, nil, false)
+	count, err := linker.linkTestFiles(ctx)
+	if err != nil {
+		t.Fatalf("linkTestFiles: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("linkTestFiles returned %d, want 2", count)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstr(s, substr))
 }

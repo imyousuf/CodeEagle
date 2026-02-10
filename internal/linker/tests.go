@@ -34,6 +34,8 @@ func (l *Linker) linkTests(ctx context.Context) (int, error) {
 }
 
 // linkTestFiles creates EdgeTests from TestFile nodes to their corresponding File nodes.
+// It first looks for NodeTestFile nodes (from re-indexed graphs), then falls back to
+// detecting test files among NodeFile nodes (for backpop on older graphs).
 func (l *Linker) linkTestFiles(ctx context.Context) (int, error) {
 	testFiles, err := l.store.QueryNodes(ctx, graph.NodeFilter{
 		Type: graph.NodeTestFile,
@@ -41,11 +43,27 @@ func (l *Linker) linkTestFiles(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+
+	// Fallback: if no NodeTestFile nodes exist, scan NodeFile nodes for test patterns.
+	if len(testFiles) == 0 {
+		allFileNodes, err := l.store.QueryNodes(ctx, graph.NodeFilter{
+			Type: graph.NodeFile,
+		})
+		if err != nil {
+			return 0, err
+		}
+		for _, f := range allFileNodes {
+			if isTestFilePath(f.FilePath, f.Language) {
+				testFiles = append(testFiles, f)
+			}
+		}
+	}
+
 	if len(testFiles) == 0 {
 		return 0, nil
 	}
 
-	// Build file index: filePath -> node for regular files.
+	// Build file index: filePath -> node for regular (non-test) files.
 	allFiles, err := l.store.QueryNodes(ctx, graph.NodeFilter{
 		Type: graph.NodeFile,
 	})
@@ -55,12 +73,18 @@ func (l *Linker) linkTestFiles(ctx context.Context) (int, error) {
 
 	fileByPath := make(map[string]*graph.Node)
 	for _, f := range allFiles {
-		fileByPath[f.FilePath] = f
+		if !isTestFilePath(f.FilePath, f.Language) {
+			fileByPath[f.FilePath] = f
+		}
 	}
 
 	linked := 0
 	for _, tf := range testFiles {
-		sourceFiles := deriveSourceFilePaths(tf.FilePath, tf.Language)
+		lang := tf.Language
+		if lang == "" {
+			lang = inferLanguageFromPath(tf.FilePath)
+		}
+		sourceFiles := deriveSourceFilePaths(tf.FilePath, lang)
 		for _, sourcePath := range sourceFiles {
 			target, ok := fileByPath[sourcePath]
 			if !ok {
@@ -92,6 +116,8 @@ func (l *Linker) linkTestFiles(ctx context.Context) (int, error) {
 }
 
 // linkTestFunctions creates EdgeTests from TestFunction nodes to source Function/Method nodes.
+// It first looks for NodeTestFunction nodes, then falls back to detecting test functions
+// among NodeFunction nodes (for backpop on older graphs).
 func (l *Linker) linkTestFunctions(ctx context.Context) (int, error) {
 	testFuncs, err := l.store.QueryNodes(ctx, graph.NodeFilter{
 		Type: graph.NodeTestFunction,
@@ -99,11 +125,27 @@ func (l *Linker) linkTestFunctions(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+
+	// Fallback: if no NodeTestFunction nodes exist, scan NodeFunction nodes for test patterns.
+	if len(testFuncs) == 0 {
+		allFuncs, err := l.store.QueryNodes(ctx, graph.NodeFilter{
+			Type: graph.NodeFunction,
+		})
+		if err != nil {
+			return 0, err
+		}
+		for _, f := range allFuncs {
+			if isTestFuncName(f.Name, f.Language, f.FilePath) {
+				testFuncs = append(testFuncs, f)
+			}
+		}
+	}
+
 	if len(testFuncs) == 0 {
 		return 0, nil
 	}
 
-	// Build lookup maps for source functions and methods.
+	// Build lookup maps for source functions and methods (excluding test functions).
 	functions, err := l.store.QueryNodes(ctx, graph.NodeFilter{
 		Type: graph.NodeFunction,
 	})
@@ -122,12 +164,15 @@ func (l *Linker) linkTestFunctions(ctx context.Context) (int, error) {
 		byDir map[string]map[string]*graph.Node // dir -> name -> node
 		byPkg map[string]map[string]*graph.Node // pkg -> name -> node
 	}
-	buildIndex := func(nodes []*graph.Node) nameIndex {
+	buildIndex := func(nodes []*graph.Node, excludeTests bool) nameIndex {
 		idx := nameIndex{
 			byDir: make(map[string]map[string]*graph.Node),
 			byPkg: make(map[string]map[string]*graph.Node),
 		}
 		for _, n := range nodes {
+			if excludeTests && isTestFuncName(n.Name, n.Language, n.FilePath) {
+				continue
+			}
 			dir := filepath.Dir(n.FilePath)
 			if idx.byDir[dir] == nil {
 				idx.byDir[dir] = make(map[string]*graph.Node)
@@ -144,13 +189,17 @@ func (l *Linker) linkTestFunctions(ctx context.Context) (int, error) {
 		return idx
 	}
 
-	funcIdx := buildIndex(functions)
-	methodIdx := buildIndex(methods)
+	funcIdx := buildIndex(functions, true)
+	methodIdx := buildIndex(methods, false)
 
 	linked := 0
 	for _, tf := range testFuncs {
+		lang := tf.Language
+		if lang == "" {
+			lang = inferLanguageFromPath(tf.FilePath)
+		}
 		// Derive candidate source names from the test function name.
-		candidates := deriveSourceFuncNames(tf.Name, tf.Language)
+		candidates := deriveSourceFuncNames(tf.Name, lang)
 		if len(candidates) == 0 {
 			continue
 		}
@@ -215,6 +264,71 @@ func (l *Linker) linkTestFunctions(ctx context.Context) (int, error) {
 	}
 
 	return linked, nil
+}
+
+// isTestFilePath returns true if the given file path matches test file naming conventions.
+func isTestFilePath(filePath, language string) bool {
+	base := filepath.Base(filePath)
+	if language == "" {
+		language = inferLanguageFromPath(filePath)
+	}
+	switch language {
+	case "go":
+		return strings.HasSuffix(base, "_test.go")
+	case "python":
+		return (strings.HasPrefix(base, "test_") && strings.HasSuffix(base, ".py")) ||
+			strings.HasSuffix(base, "_test.py")
+	case "typescript":
+		return strings.HasSuffix(base, ".test.ts") || strings.HasSuffix(base, ".spec.ts") ||
+			strings.HasSuffix(base, ".test.tsx") || strings.HasSuffix(base, ".spec.tsx")
+	case "javascript":
+		return strings.HasSuffix(base, ".test.js") || strings.HasSuffix(base, ".spec.js") ||
+			strings.HasSuffix(base, ".test.jsx") || strings.HasSuffix(base, ".spec.jsx")
+	case "java":
+		name := strings.TrimSuffix(base, ".java")
+		return strings.HasSuffix(base, ".java") &&
+			(strings.HasSuffix(name, "Test") || strings.HasSuffix(name, "Tests") ||
+				strings.HasPrefix(name, "Test") || strings.HasSuffix(name, "IT"))
+	}
+	return false
+}
+
+// isTestFuncName returns true if the given function name matches test function naming conventions.
+func isTestFuncName(name, language, filePath string) bool {
+	if language == "" {
+		language = inferLanguageFromPath(filePath)
+	}
+	switch language {
+	case "go":
+		return strings.HasPrefix(name, "Test") || strings.HasPrefix(name, "Benchmark") ||
+			strings.HasPrefix(name, "Example") || strings.HasPrefix(name, "Fuzz")
+	case "python":
+		return strings.HasPrefix(name, "test_") && isTestFilePath(filePath, language)
+	case "typescript", "javascript":
+		// TS/JS test functions (describe/it/test) only in test files
+		return isTestFilePath(filePath, language)
+	case "java":
+		return strings.HasPrefix(name, "test")
+	}
+	return false
+}
+
+// inferLanguageFromPath guesses the language from the file extension.
+func inferLanguageFromPath(filePath string) string {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".go":
+		return "go"
+	case ".py":
+		return "python"
+	case ".ts", ".tsx":
+		return "typescript"
+	case ".js", ".jsx":
+		return "javascript"
+	case ".java":
+		return "java"
+	}
+	return ""
 }
 
 // deriveSourceFilePaths generates candidate source file paths from a test file path.
