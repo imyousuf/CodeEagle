@@ -780,6 +780,297 @@ func TestExtractFunctionCalls(t *testing.T) {
 	}
 }
 
+const protocolSource = `"""Module with Protocol types."""
+
+from typing import Protocol
+
+class Serializable(Protocol):
+    """A protocol for serializable objects."""
+
+    def serialize(self) -> str: ...
+    def deserialize(self, data: str) -> None: ...
+
+class JsonSerializer(Serializable):
+    """Concrete implementation."""
+
+    def serialize(self) -> str:
+        return "{}"
+
+    def deserialize(self, data: str) -> None:
+        pass
+`
+
+func TestParseProtocol(t *testing.T) {
+	p := NewParser()
+	result, err := p.ParseFile("mylib/protocols.py", []byte(protocolSource))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	nodeByName := indexByName(result.Nodes)
+
+	// Serializable should be an Interface (Protocol)
+	if n, ok := nodeByName["Serializable"]; ok {
+		if n.Type != graph.NodeInterface {
+			t.Errorf("Serializable type = %s, want %s", n.Type, graph.NodeInterface)
+		}
+		if n.Properties["protocol"] != "true" {
+			t.Error("Serializable should have protocol=true property")
+		}
+		// Should have methods listed
+		if n.Properties["methods"] == "" {
+			t.Error("Serializable should have methods property")
+		}
+	} else {
+		t.Error("expected Serializable node")
+	}
+
+	// JsonSerializer should be a Class with Serializable as base
+	if n, ok := nodeByName["JsonSerializer"]; ok {
+		if n.Type != graph.NodeClass {
+			t.Errorf("JsonSerializer type = %s, want %s", n.Type, graph.NodeClass)
+		}
+		if n.Properties["bases"] != "Serializable" {
+			t.Errorf("JsonSerializer bases = %q, want %q", n.Properties["bases"], "Serializable")
+		}
+	} else {
+		t.Error("expected JsonSerializer node")
+	}
+}
+
+const protocolAliasSource = `"""Protocol with alias."""
+
+from typing import Protocol as Proto
+
+class Renderable(Proto):
+    def render(self) -> str: ...
+`
+
+func TestParseProtocolAlias(t *testing.T) {
+	p := NewParser()
+	result, err := p.ParseFile("mylib/render.py", []byte(protocolAliasSource))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	nodeByName := indexByName(result.Nodes)
+
+	if n, ok := nodeByName["Renderable"]; ok {
+		if n.Type != graph.NodeInterface {
+			t.Errorf("Renderable type = %s, want %s", n.Type, graph.NodeInterface)
+		}
+		if n.Properties["protocol"] != "true" {
+			t.Error("Renderable should have protocol=true property")
+		}
+	} else {
+		t.Error("expected Renderable node")
+	}
+}
+
+const protocolQualifiedSource = `"""Protocol via import typing."""
+
+import typing
+
+class Hashable(typing.Protocol):
+    def hash(self) -> int: ...
+`
+
+func TestParseProtocolQualified(t *testing.T) {
+	p := NewParser()
+	result, err := p.ParseFile("mylib/hash.py", []byte(protocolQualifiedSource))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	nodeByName := indexByName(result.Nodes)
+
+	if n, ok := nodeByName["Hashable"]; ok {
+		if n.Type != graph.NodeInterface {
+			t.Errorf("Hashable type = %s, want %s", n.Type, graph.NodeInterface)
+		}
+		if n.Properties["protocol"] != "true" {
+			t.Error("Hashable should have protocol=true property")
+		}
+	} else {
+		t.Error("expected Hashable node")
+	}
+}
+
+func TestParseProtocolFixture(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not determine test file path")
+	}
+	fixturePath := filepath.Join(filepath.Dir(thisFile), "testdata", "protocols.py")
+
+	content, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Skipf("testdata/protocols.py not found: %v", err)
+	}
+
+	p := NewParser()
+	result, err := p.ParseFile(fixturePath, content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	nodeByName := indexByName(result.Nodes)
+
+	// Serializable and Comparable should be Interface (Protocol)
+	for _, name := range []string{"Serializable", "Comparable"} {
+		if n, ok := nodeByName[name]; ok {
+			if n.Type != graph.NodeInterface {
+				t.Errorf("%s type = %s, want %s", name, n.Type, graph.NodeInterface)
+			}
+		} else {
+			t.Errorf("expected %s node", name)
+		}
+	}
+
+	// JsonSerializer and UserComparator should be Class
+	for _, name := range []string{"JsonSerializer", "UserComparator"} {
+		if n, ok := nodeByName[name]; ok {
+			if n.Type != graph.NodeClass {
+				t.Errorf("%s type = %s, want %s", name, n.Type, graph.NodeClass)
+			}
+		} else {
+			t.Errorf("expected %s node", name)
+		}
+	}
+}
+
+const testFileSource = `"""Tests for handlers."""
+
+import pytest
+
+def test_create_handler():
+    handler = create_handler()
+    assert handler is not None
+
+def test_process_request():
+    result = process_request({})
+    assert result is not None
+
+def helper_function():
+    return 42
+
+class TestHandlerClass:
+    def test_handler_type(self):
+        pass
+
+    def helper_method(self):
+        pass
+`
+
+func TestParseTestFile(t *testing.T) {
+	p := NewParser()
+	// Test file name pattern: test_*.py
+	result, err := p.ParseFile("tests/test_handlers.py", []byte(testFileSource))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	// File should be NodeTestFile
+	counts := make(map[graph.NodeType]int)
+	for _, n := range result.Nodes {
+		counts[n.Type]++
+	}
+	assertCount(t, counts, graph.NodeTestFile, 1)
+	assertCount(t, counts, graph.NodeFile, 0)
+
+	// test_create_handler and test_process_request should be NodeTestFunction
+	assertCount(t, counts, graph.NodeTestFunction, 2)
+
+	// helper_function should still be NodeFunction
+	nodeByName := indexByName(result.Nodes)
+	if n, ok := nodeByName["helper_function"]; ok {
+		if n.Type != graph.NodeFunction {
+			t.Errorf("helper_function type = %s, want %s", n.Type, graph.NodeFunction)
+		}
+	} else {
+		t.Error("expected helper_function node")
+	}
+
+	// Methods in test class should still be NodeMethod (test detection is for top-level functions only)
+	if n, ok := nodeByName["test_handler_type"]; ok {
+		if n.Type != graph.NodeMethod {
+			t.Errorf("test_handler_type type = %s, want %s (methods stay as Method)", n.Type, graph.NodeMethod)
+		}
+	}
+}
+
+func TestNonTestFile(t *testing.T) {
+	p := NewParser()
+	// Regular file should not detect test functions
+	result, err := p.ParseFile("handlers.py", []byte(testFileSource))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	counts := make(map[graph.NodeType]int)
+	for _, n := range result.Nodes {
+		counts[n.Type]++
+	}
+	// Should be NodeFile, not NodeTestFile
+	assertCount(t, counts, graph.NodeFile, 1)
+	assertCount(t, counts, graph.NodeTestFile, 0)
+	// No test functions since file doesn't match test pattern
+	assertCount(t, counts, graph.NodeTestFunction, 0)
+}
+
+func TestTestFileSuffix(t *testing.T) {
+	p := NewParser()
+	// Test file name pattern: *_test.py
+	result, err := p.ParseFile("handlers_test.py", []byte(testFileSource))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	counts := make(map[graph.NodeType]int)
+	for _, n := range result.Nodes {
+		counts[n.Type]++
+	}
+	assertCount(t, counts, graph.NodeTestFile, 1)
+	assertCount(t, counts, graph.NodeTestFunction, 2)
+}
+
+func TestParseTestFixture(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not determine test file path")
+	}
+	fixturePath := filepath.Join(filepath.Dir(thisFile), "testdata", "test_handlers.py")
+
+	content, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Skipf("testdata/test_handlers.py not found: %v", err)
+	}
+
+	p := NewParser()
+	result, err := p.ParseFile(fixturePath, content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	counts := make(map[graph.NodeType]int)
+	for _, n := range result.Nodes {
+		counts[n.Type]++
+	}
+
+	// File matches test_*.py pattern
+	assertCount(t, counts, graph.NodeTestFile, 1)
+	// test_process_request and test_empty_request are top-level test functions
+	assertCount(t, counts, graph.NodeTestFunction, 2)
+
+	// helper_function should be NodeFunction
+	nodeByName := indexByName(result.Nodes)
+	if n, ok := nodeByName["helper_function"]; ok {
+		if n.Type != graph.NodeFunction {
+			t.Errorf("helper_function type = %s, want %s", n.Type, graph.NodeFunction)
+		}
+	}
+}
+
 // Helpers
 
 func assertCount(t *testing.T, counts map[graph.NodeType]int, nt graph.NodeType, want int) {

@@ -882,6 +882,193 @@ func TestExtractFunctionCalls(t *testing.T) {
 	}
 }
 
+func TestTestFileDetection(t *testing.T) {
+	source := `
+import { UserService } from './user-service';
+
+describe('UserService', () => {
+  it('should create a user', () => {
+    const svc = new UserService();
+    expect(svc.create('test')).toBeTruthy();
+  });
+
+  test('handles invalid input', () => {
+    const svc = new UserService();
+    expect(() => svc.create('')).toThrow();
+  });
+});
+`
+	p := NewParser()
+
+	// Parse as a test file (.test.ts extension).
+	result, err := p.ParseFile("src/user-service.test.ts", []byte(source))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	// Verify file node is NodeTestFile.
+	var testFileNodes []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeTestFile {
+			testFileNodes = append(testFileNodes, n)
+		}
+	}
+	if len(testFileNodes) != 1 {
+		t.Errorf("TestFile count = %d, want 1", len(testFileNodes))
+	}
+
+	// Verify NodeFile is NOT present (replaced by NodeTestFile).
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeFile {
+			t.Error("expected NodeTestFile, not NodeFile for test file")
+		}
+	}
+
+	// Verify test functions are extracted.
+	var testFuncs []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeTestFunction {
+			testFuncs = append(testFuncs, n)
+		}
+	}
+
+	if len(testFuncs) != 3 {
+		t.Errorf("TestFunction count = %d, want 3", len(testFuncs))
+		for _, tf := range testFuncs {
+			t.Logf("  test func: %s (test_type=%s)", tf.Name, tf.Properties["test_type"])
+		}
+	}
+
+	// Verify specific test functions.
+	nodeByName := indexByName(result.Nodes)
+	if n, ok := nodeByName["UserService"]; ok {
+		if n.Type != graph.NodeTestFunction {
+			t.Errorf("UserService should be TestFunction (describe), got %s", n.Type)
+		}
+		if n.Properties["test_type"] != "describe" {
+			t.Errorf("test_type = %q, want %q", n.Properties["test_type"], "describe")
+		}
+	} else {
+		t.Error("expected 'UserService' describe block as TestFunction")
+	}
+
+	if n, ok := nodeByName["should create a user"]; ok {
+		if n.Type != graph.NodeTestFunction {
+			t.Errorf("'should create a user' should be TestFunction (it), got %s", n.Type)
+		}
+		if n.Properties["test_type"] != "it" {
+			t.Errorf("test_type = %q, want %q", n.Properties["test_type"], "it")
+		}
+	} else {
+		t.Error("expected 'should create a user' it block as TestFunction")
+	}
+
+	if n, ok := nodeByName["handles invalid input"]; ok {
+		if n.Type != graph.NodeTestFunction {
+			t.Errorf("'handles invalid input' should be TestFunction (test), got %s", n.Type)
+		}
+		if n.Properties["test_type"] != "test" {
+			t.Errorf("test_type = %q, want %q", n.Properties["test_type"], "test")
+		}
+	} else {
+		t.Error("expected 'handles invalid input' test block as TestFunction")
+	}
+
+	// Verify Contains edges exist for test functions.
+	testContainsCount := 0
+	for _, e := range result.Edges {
+		if e.Type == graph.EdgeContains {
+			for _, tf := range testFuncs {
+				if e.TargetID == tf.ID {
+					testContainsCount++
+				}
+			}
+		}
+	}
+	if testContainsCount != 3 {
+		t.Errorf("Contains edges for test functions = %d, want 3", testContainsCount)
+	}
+}
+
+func TestNonTestFileHasNoTestNodes(t *testing.T) {
+	// Parsing a non-test file should NOT produce TestFile or TestFunction nodes,
+	// even if the source contains describe/it/test calls.
+	source := `
+describe('example', () => {
+  it('works', () => {});
+});
+`
+	p := NewParser()
+	result, err := p.ParseFile("src/utils.ts", []byte(source))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeTestFile {
+			t.Error("non-test file should not have NodeTestFile")
+		}
+		if n.Type == graph.NodeTestFunction {
+			t.Error("non-test file should not have NodeTestFunction")
+		}
+	}
+}
+
+func TestSpecFileDetection(t *testing.T) {
+	source := `
+test('adds numbers', () => {
+  expect(1 + 1).toBe(2);
+});
+`
+	p := NewParser()
+	result, err := p.ParseFile("src/math.spec.ts", []byte(source))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	// Verify file is detected as test file.
+	var hasTestFile bool
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeTestFile {
+			hasTestFile = true
+		}
+	}
+	if !hasTestFile {
+		t.Error("spec.ts file should be detected as NodeTestFile")
+	}
+
+	// Verify test function is extracted.
+	var testFuncs []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeTestFunction {
+			testFuncs = append(testFuncs, n)
+		}
+	}
+	if len(testFuncs) != 1 {
+		t.Errorf("TestFunction count = %d, want 1", len(testFuncs))
+	}
+}
+
+func TestTSXTestFileDetection(t *testing.T) {
+	tests := []struct {
+		filename string
+		isTest   bool
+	}{
+		{"component.test.tsx", true},
+		{"component.spec.tsx", true},
+		{"component.tsx", false},
+		{"helper.test.ts", true},
+		{"helper.spec.ts", true},
+		{"helper.ts", false},
+	}
+	for _, tc := range tests {
+		got := isTestFilename(tc.filename)
+		if got != tc.isTest {
+			t.Errorf("isTestFilename(%q) = %v, want %v", tc.filename, got, tc.isTest)
+		}
+	}
+}
+
 // helpers
 
 func assertCount(t *testing.T, counts map[graph.NodeType]int, nt graph.NodeType, want int) {

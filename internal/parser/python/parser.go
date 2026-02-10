@@ -65,6 +65,10 @@ type extractor struct {
 
 	moduleNodeID string
 	fileNodeID   string
+	isTestFile   bool
+
+	// Protocol detection
+	protocolNames map[string]bool // tracks Protocol aliases (e.g., "Protocol", "Proto")
 
 	// Lookup maps for function call resolution (built after walkTopLevel)
 	importNames      map[string]string            // module/alias name → dep node ID
@@ -73,6 +77,7 @@ type extractor struct {
 }
 
 func (e *extractor) extract() {
+	e.protocolNames = make(map[string]bool)
 	e.extractFileNode()
 	e.extractModule()
 
@@ -83,14 +88,28 @@ func (e *extractor) extract() {
 }
 
 func (e *extractor) extractFileNode() {
-	e.fileNodeID = graph.NewNodeID(string(graph.NodeFile), e.filePath, e.filePath)
+	base := filepath.Base(e.filePath)
+	e.isTestFile = isTestFilename(base)
+
+	fileType := graph.NodeFile
+	if e.isTestFile {
+		fileType = graph.NodeTestFile
+	}
+
+	e.fileNodeID = graph.NewNodeID(string(fileType), e.filePath, e.filePath)
 	e.nodes = append(e.nodes, &graph.Node{
 		ID:       e.fileNodeID,
-		Type:     graph.NodeFile,
+		Type:     fileType,
 		Name:     e.filePath,
 		FilePath: e.filePath,
 		Language: string(parser.LangPython),
 	})
+}
+
+// isTestFilename returns true if the filename matches Python test file patterns.
+func isTestFilename(base string) bool {
+	return (strings.HasPrefix(base, "test_") && strings.HasSuffix(base, ".py")) ||
+		(strings.HasSuffix(base, "_test.py"))
 }
 
 func (e *extractor) extractModule() {
@@ -157,11 +176,23 @@ func (e *extractor) extractImport(node *sitter.Node) {
 		child := node.NamedChild(i)
 		if child.Type() == "dotted_name" || child.Type() == "aliased_import" {
 			name := e.nodeText(child)
+			alias := ""
 			if child.Type() == "aliased_import" {
-				// Get the module name from the aliased import
+				// Get the module name and alias from the aliased import
 				if child.NamedChildCount() > 0 {
 					name = e.nodeText(child.NamedChild(0))
 				}
+				if child.NamedChildCount() > 1 {
+					alias = e.nodeText(child.NamedChild(1))
+				}
+			}
+			// Track "import typing" or "import typing as X" for Protocol detection
+			if name == "typing" || name == "typing_extensions" {
+				qualifier := name
+				if alias != "" {
+					qualifier = alias
+				}
+				e.protocolNames[qualifier+".Protocol"] = true
 			}
 			e.addDependency(name, int(node.StartPoint().Row)+1)
 		}
@@ -180,6 +211,29 @@ func (e *extractor) extractFromImport(node *sitter.Node) {
 	}
 	if moduleName != "" {
 		e.addDependency(moduleName, int(node.StartPoint().Row)+1)
+	}
+
+	// Track Protocol imports for Protocol detection
+	if moduleName == "typing" || moduleName == "typing_extensions" {
+		for i := 0; i < int(node.NamedChildCount()); i++ {
+			child := node.NamedChild(i)
+			switch child.Type() {
+			case "dotted_name":
+				name := e.nodeText(child)
+				if name == "Protocol" {
+					e.protocolNames["Protocol"] = true
+				}
+			case "aliased_import":
+				// from typing import Protocol as Proto
+				if child.NamedChildCount() >= 2 {
+					name := e.nodeText(child.NamedChild(0))
+					alias := e.nodeText(child.NamedChild(1))
+					if name == "Protocol" {
+						e.protocolNames[alias] = true
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -231,11 +285,30 @@ func (e *extractor) extractClass(node *sitter.Node, parentID string) {
 	endLine := int(node.EndPoint().Row) + 1
 	exported := isExported(name)
 
-	classID := graph.NewNodeID(string(graph.NodeClass), e.filePath, name)
+	// Check if this class is a Protocol (typing.Protocol)
+	isProtocol := false
+	var filteredBases []string
+	for _, base := range bases {
+		if e.protocolNames[base] {
+			isProtocol = true
+		} else {
+			filteredBases = append(filteredBases, base)
+		}
+	}
+
+	nodeType := graph.NodeClass
+	if isProtocol {
+		nodeType = graph.NodeInterface
+	}
+
+	classID := graph.NewNodeID(string(nodeType), e.filePath, name)
 
 	props := make(map[string]string)
-	if len(bases) > 0 {
-		props["bases"] = strings.Join(bases, ",")
+	if isProtocol {
+		props["protocol"] = "true"
+	}
+	if len(filteredBases) > 0 {
+		props["bases"] = strings.Join(filteredBases, ",")
 	}
 
 	// Extract docstring from class body
@@ -244,9 +317,40 @@ func (e *extractor) extractClass(node *sitter.Node, parentID string) {
 		docComment = e.extractDocstring(bodyNode)
 	}
 
+	// Extract method names for Protocol interface
+	var methodNames []string
+	if isProtocol && bodyNode != nil {
+		for i := 0; i < int(bodyNode.NamedChildCount()); i++ {
+			child := bodyNode.NamedChild(i)
+			if child.Type() == "function_definition" || child.Type() == "decorated_definition" {
+				funcNode := child
+				if child.Type() == "decorated_definition" {
+					for j := 0; j < int(child.NamedChildCount()); j++ {
+						if child.NamedChild(j).Type() == "function_definition" {
+							funcNode = child.NamedChild(j)
+							break
+						}
+					}
+				}
+				for j := 0; j < int(funcNode.NamedChildCount()); j++ {
+					if funcNode.NamedChild(j).Type() == "identifier" {
+						mName := e.nodeText(funcNode.NamedChild(j))
+						if mName != "__init__" && !strings.HasPrefix(mName, "_") {
+							methodNames = append(methodNames, mName)
+						}
+						break
+					}
+				}
+			}
+		}
+		if len(methodNames) > 0 {
+			props["methods"] = strings.Join(methodNames, ",")
+		}
+	}
+
 	e.nodes = append(e.nodes, &graph.Node{
 		ID:            classID,
-		Type:          graph.NodeClass,
+		Type:          nodeType,
 		Name:          name,
 		QualifiedName: name,
 		FilePath:      e.filePath,
@@ -393,6 +497,10 @@ func (e *extractor) extractFunction(node *sitter.Node, parentID, className strin
 	nodeType := graph.NodeFunction
 	if isMethod {
 		nodeType = graph.NodeMethod
+	}
+	// Detect test functions: test_* prefix in test files (non-method functions only)
+	if e.isTestFile && !isMethod && strings.HasPrefix(name, "test_") {
+		nodeType = graph.NodeTestFunction
 	}
 
 	qualifiedName := name
@@ -702,7 +810,7 @@ func (e *extractor) buildCallMaps() {
 					e.importNames[parts[0]] = n.ID
 				}
 			}
-		case graph.NodeFunction:
+		case graph.NodeFunction, graph.NodeTestFunction:
 			e.funcNames[n.Name] = n.ID
 		case graph.NodeMethod:
 			className := n.Properties["class"]
@@ -765,7 +873,11 @@ func (e *extractor) walkForCalls(node *sitter.Node, parentFuncID string, classNa
 				if currentClassName != "" {
 					currentFuncID = graph.NewNodeID(string(graph.NodeMethod), e.filePath, currentClassName+"."+name)
 				} else {
-					currentFuncID = graph.NewNodeID(string(graph.NodeFunction), e.filePath, name)
+					funcType := graph.NodeFunction
+					if e.isTestFile && strings.HasPrefix(name, "test_") {
+						funcType = graph.NodeTestFunction
+					}
+					currentFuncID = graph.NewNodeID(string(funcType), e.filePath, name)
 				}
 				break
 			}

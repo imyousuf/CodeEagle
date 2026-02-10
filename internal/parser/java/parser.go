@@ -3,6 +3,7 @@ package java
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
@@ -64,6 +65,7 @@ type extractor struct {
 	pkgNodeID  string
 	fileNodeID string
 	pkgName    string
+	isTestFile bool
 
 	// Lookup maps for function call resolution (built after walkProgram)
 	importMap      map[string]string            // simple class name → dep node ID
@@ -83,14 +85,34 @@ func (e *extractor) extract() {
 }
 
 func (e *extractor) extractFileNode() {
-	e.fileNodeID = graph.NewNodeID(string(graph.NodeFile), e.filePath, e.filePath)
+	base := filepath.Base(e.filePath)
+	e.isTestFile = isTestFilename(base)
+
+	fileType := graph.NodeFile
+	if e.isTestFile {
+		fileType = graph.NodeTestFile
+	}
+
+	e.fileNodeID = graph.NewNodeID(string(fileType), e.filePath, e.filePath)
 	e.nodes = append(e.nodes, &graph.Node{
 		ID:       e.fileNodeID,
-		Type:     graph.NodeFile,
+		Type:     fileType,
 		Name:     e.filePath,
 		FilePath: e.filePath,
 		Language: string(parser.LangJava),
 	})
+}
+
+// isTestFilename returns true if the filename matches Java test file patterns.
+func isTestFilename(base string) bool {
+	if !strings.HasSuffix(base, ".java") {
+		return false
+	}
+	name := strings.TrimSuffix(base, ".java")
+	return strings.HasSuffix(name, "Test") ||
+		strings.HasSuffix(name, "Tests") ||
+		strings.HasPrefix(name, "Test") ||
+		strings.HasSuffix(name, "IT")
 }
 
 func (e *extractor) walkProgram(root *sitter.Node) {
@@ -481,6 +503,26 @@ func (e *extractor) walkInterfaceBody(body *sitter.Node, ifaceID, ifaceName stri
 	}
 }
 
+// javaTestAnnotations are the JUnit/TestNG annotations that indicate a test method.
+var javaTestAnnotations = map[string]bool{
+	"Test": true, "ParameterizedTest": true, "RepeatedTest": true,
+}
+
+// hasTestAnnotation returns true if the annotations list contains a test annotation.
+func hasTestAnnotation(annotations []string) bool {
+	for _, ann := range annotations {
+		// Strip any arguments: "ParameterizedTest(name = ...)" -> "ParameterizedTest"
+		name := ann
+		if idx := strings.Index(ann, "("); idx > 0 {
+			name = ann[:idx]
+		}
+		if javaTestAnnotations[name] {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *extractor) extractMethod(node *sitter.Node, parentID, className string) {
 	name := ""
 	returnType := ""
@@ -524,11 +566,17 @@ func (e *extractor) extractMethod(node *sitter.Node, parentID, className string)
 	}
 	props["class"] = className
 
-	methodID := graph.NewNodeID(string(graph.NodeMethod), e.filePath, qualifiedName)
+	// Determine if this is a test method (only in test files with test annotations).
+	nodeType := graph.NodeMethod
+	if e.isTestFile && hasTestAnnotation(annotations) {
+		nodeType = graph.NodeTestFunction
+	}
+
+	methodID := graph.NewNodeID(string(nodeType), e.filePath, qualifiedName)
 
 	e.nodes = append(e.nodes, &graph.Node{
 		ID:            methodID,
-		Type:          graph.NodeMethod,
+		Type:          nodeType,
 		Name:          name,
 		QualifiedName: qualifiedName,
 		FilePath:      e.filePath,
@@ -797,7 +845,7 @@ func (e *extractor) buildCallMaps() {
 				shortName := parts[len(parts)-1]
 				e.importMap[shortName] = n.ID
 			}
-		case graph.NodeMethod:
+		case graph.NodeMethod, graph.NodeTestFunction:
 			className := n.Properties["class"]
 			if className != "" {
 				if e.classMethodMap[className] == nil {
@@ -844,8 +892,15 @@ func (e *extractor) walkClassBodiesForCalls(classNode *sitter.Node) {
 			if methodName == "" {
 				continue
 			}
-			qualifiedName := className + "." + methodName
-			methodID := graph.NewNodeID(string(graph.NodeMethod), e.filePath, qualifiedName)
+			// Look up the method ID from classMethodMap (handles both Method and TestFunction).
+			methodID := ""
+			if methods, ok := e.classMethodMap[className]; ok {
+				methodID = methods[methodName]
+			}
+			if methodID == "" {
+				qualifiedName := className + "." + methodName
+				methodID = graph.NewNodeID(string(graph.NodeMethod), e.filePath, qualifiedName)
+			}
 			// Walk the method body for calls
 			for j := 0; j < int(child.NamedChildCount()); j++ {
 				bodyChild := child.NamedChild(j)

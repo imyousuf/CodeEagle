@@ -70,6 +70,7 @@ func init() {
 	rootCmd.AddCommand(newSyncCmd())
 	rootCmd.AddCommand(newHookCmd())
 	rootCmd.AddCommand(newBackpopPathsCmd())
+	rootCmd.AddCommand(newBackpopCmd())
 	rootCmd.AddCommand(newMCPCmd())
 }
 

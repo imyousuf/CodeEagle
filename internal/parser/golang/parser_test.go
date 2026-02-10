@@ -701,6 +701,211 @@ func TestImportNodesHaveKindImport(t *testing.T) {
 	}
 }
 
+func TestTestFileDetection(t *testing.T) {
+	content := []byte(`package mypkg
+
+import "testing"
+
+func TestAdd(t *testing.T) {
+	if add(1, 2) != 3 {
+		t.Error("bad")
+	}
+}
+
+func BenchmarkAdd(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		add(1, 2)
+	}
+}
+
+func ExampleAdd() {
+	add(1, 2)
+}
+
+func FuzzAdd(f *testing.F) {
+	f.Fuzz(func(t *testing.T, a, b int) {
+		add(a, b)
+	})
+}
+
+func add(a, b int) int {
+	return a + b
+}
+
+type helper struct{}
+
+func (h *helper) setup() {}
+`)
+
+	p := NewParser()
+	result, err := p.ParseFile("mypkg/math_test.go", content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	// Count nodes by type
+	counts := make(map[graph.NodeType]int)
+	nodeByName := indexByName(result.Nodes)
+
+	for _, n := range result.Nodes {
+		counts[n.Type]++
+	}
+
+	// File node should be TestFile, not File
+	assertCount(t, counts, graph.NodeTestFile, 1)
+	assertCount(t, counts, graph.NodeFile, 0)
+
+	// Test/Benchmark/Example/Fuzz functions should be TestFunction
+	assertCount(t, counts, graph.NodeTestFunction, 4)
+
+	// "add" is a regular function even in a test file
+	assertCount(t, counts, graph.NodeFunction, 1)
+	if n, ok := nodeByName["add"]; ok {
+		if n.Type != graph.NodeFunction {
+			t.Errorf("add should be NodeFunction, got %s", n.Type)
+		}
+	} else {
+		t.Error("expected 'add' function node")
+	}
+
+	// Methods in test files remain NodeMethod
+	assertCount(t, counts, graph.NodeMethod, 1)
+	if n, ok := nodeByName["setup"]; ok {
+		if n.Type != graph.NodeMethod {
+			t.Errorf("setup should be NodeMethod, got %s", n.Type)
+		}
+	} else {
+		t.Error("expected 'setup' method node")
+	}
+
+	// Verify test functions have correct type
+	for _, name := range []string{"TestAdd", "BenchmarkAdd", "ExampleAdd", "FuzzAdd"} {
+		if n, ok := nodeByName[name]; ok {
+			if n.Type != graph.NodeTestFunction {
+				t.Errorf("%s should be NodeTestFunction, got %s", name, n.Type)
+			}
+		} else {
+			t.Errorf("expected %s test function node", name)
+		}
+	}
+}
+
+func TestNonTestFileDoesNotProduceTestNodes(t *testing.T) {
+	// Regular file with a function that happens to start with "Test" but is not a test file.
+	content := []byte(`package mypkg
+
+func TestHelper() string {
+	return "not actually a test"
+}
+`)
+
+	p := NewParser()
+	result, err := p.ParseFile("mypkg/helper.go", content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	counts := make(map[graph.NodeType]int)
+	for _, n := range result.Nodes {
+		counts[n.Type]++
+	}
+
+	// Should be a regular File and Function since it's not a _test.go file.
+	assertCount(t, counts, graph.NodeFile, 1)
+	assertCount(t, counts, graph.NodeTestFile, 0)
+	assertCount(t, counts, graph.NodeFunction, 1)
+	assertCount(t, counts, graph.NodeTestFunction, 0)
+}
+
+func TestStructFieldTypeResolution(t *testing.T) {
+	content, err := os.ReadFile("testdata/field_calls.go")
+	if err != nil {
+		t.Fatalf("reading testdata: %v", err)
+	}
+
+	p := NewParser()
+	result, err := p.ParseFile("testdata/field_calls.go", content)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+
+	// Collect EdgeCalls edges.
+	type callEdge struct {
+		sourceID string
+		targetID string
+		callee   string
+	}
+	var calls []callEdge
+	for _, e := range result.Edges {
+		if e.Type == graph.EdgeCalls {
+			calls = append(calls, callEdge{
+				sourceID: e.SourceID,
+				targetID: e.TargetID,
+				callee:   e.Properties["callee"],
+			})
+		}
+	}
+
+	methodID := func(recv, name string) string {
+		return graph.NewNodeID(string(graph.NodeMethod), "testdata/field_calls.go", recv+"."+name)
+	}
+	depID := func(path string) string {
+		return graph.NewNodeID(string(graph.NodeDependency), "testdata/field_calls.go", path)
+	}
+
+	hasEdge := func(src, tgt, callee string) bool {
+		for _, c := range calls {
+			if c.sourceID == src && c.targetID == tgt {
+				if callee == "" || c.callee == callee {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	// l.store.QueryNodes() should resolve through struct field type "graph.Store" -> import "graph" dep
+	graphDepID := depID("github.com/imyousuf/CodeEagle/internal/graph")
+	if !hasEdge(methodID("Linker", "Run"), graphDepID, "QueryNodes") {
+		t.Error("missing call edge: Linker.Run -> graph dep (QueryNodes) via l.store")
+	}
+
+	// l.settings.Validate() should resolve through struct field type "*config.Settings" -> import "config" dep
+	configDepID := depID("github.com/imyousuf/CodeEagle/internal/config")
+	if !hasEdge(methodID("Linker", "Run"), configDepID, "Validate") {
+		t.Error("missing call edge: Linker.Run -> config dep (Validate) via l.settings")
+	}
+
+	// l.store.AddNode() in helper()
+	if !hasEdge(methodID("Linker", "helper"), graphDepID, "AddNode") {
+		t.Error("missing call edge: Linker.helper -> graph dep (AddNode) via l.store")
+	}
+}
+
+func TestExtractPackagePrefix(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"graph.Store", "graph"},
+		{"*graph.Store", "graph"},
+		{"[]config.Item", "config"},
+		{"*[]config.Item", "config"},
+		{"string", ""},
+		{"int", ""},
+		{"*string", ""},
+		{"**graph.Store", "graph"},
+		{"[][]graph.Store", "graph"},
+	}
+
+	for _, tt := range tests {
+		got := extractPackagePrefix(tt.input)
+		if got != tt.want {
+			t.Errorf("extractPackagePrefix(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 func filterNodesByType(nodes []*graph.Node, nt graph.NodeType) []*graph.Node {
 	var result []*graph.Node
 	for _, n := range nodes {

@@ -50,6 +50,9 @@ func (p *GoParser) ParseFile(filePath string, content []byte) (*parser.ParseResu
 	}, nil
 }
 
+// testFuncPrefixes lists prefixes that identify Go test functions.
+var testFuncPrefixes = []string{"Test", "Benchmark", "Example", "Fuzz"}
+
 // extractor walks a Go AST and builds graph nodes and edges.
 type extractor struct {
 	fset     *token.FileSet
@@ -60,10 +63,14 @@ type extractor struct {
 
 	pkgNodeID  string
 	fileNodeID string
+	isTestFile bool
 
 	// Track interfaces and struct methods for Implements edge detection.
 	interfaces    map[string]map[string]bool // interface name -> set of method names
 	structMethods map[string]map[string]bool // struct name -> set of method names
+
+	// Struct field types: struct name -> field name -> type string.
+	structFieldTypes map[string]map[string]string
 
 	// Lookup maps for function call extraction, built by buildCallMaps().
 	importAliasMap    map[string]string            // import alias → dep node ID
@@ -74,6 +81,7 @@ type extractor struct {
 func (e *extractor) extract() {
 	e.interfaces = make(map[string]map[string]bool)
 	e.structMethods = make(map[string]map[string]bool)
+	e.structFieldTypes = make(map[string]map[string]string)
 
 	e.extractFileNode()
 	e.extractPackage()
@@ -87,10 +95,15 @@ func (e *extractor) extract() {
 }
 
 func (e *extractor) extractFileNode() {
-	e.fileNodeID = graph.NewNodeID(string(graph.NodeFile), e.filePath, e.filePath)
+	nodeType := graph.NodeFile
+	if strings.HasSuffix(e.filePath, "_test.go") {
+		nodeType = graph.NodeTestFile
+		e.isTestFile = true
+	}
+	e.fileNodeID = graph.NewNodeID(string(nodeType), e.filePath, e.filePath)
 	e.nodes = append(e.nodes, &graph.Node{
 		ID:       e.fileNodeID,
-		Type:     graph.NodeFile,
+		Type:     nodeType,
 		Name:     e.filePath,
 		FilePath: e.filePath,
 		Language: string(parser.LangGo),
@@ -211,12 +224,16 @@ func (e *extractor) extractFuncDecl(fn *ast.FuncDecl) {
 		}
 		e.structMethods[recvType][name] = true
 	} else {
-		// Function
-		funcID := graph.NewNodeID(string(graph.NodeFunction), e.filePath, name)
+		// Function — detect test functions in test files.
+		nodeType := graph.NodeFunction
+		if e.isTestFile && isTestFuncName(name) {
+			nodeType = graph.NodeTestFunction
+		}
+		funcID := graph.NewNodeID(string(nodeType), e.filePath, name)
 
 		e.nodes = append(e.nodes, &graph.Node{
 			ID:            funcID,
-			Type:          graph.NodeFunction,
+			Type:          nodeType,
 			Name:          name,
 			QualifiedName: e.file.Name.Name + "." + name,
 			FilePath:      e.filePath,
@@ -292,16 +309,22 @@ func (e *extractor) extractTypeSpec(ts *ast.TypeSpec, decl *ast.GenDecl) {
 	}
 }
 
-func (e *extractor) extractStruct(name string, exported bool, doc string, startLine, endLine int, st *ast.StructType) {
-	structID := graph.NewNodeID(string(graph.NodeStruct), e.filePath, name)
+func (e *extractor) extractStruct(structName string, exported bool, doc string, startLine, endLine int, st *ast.StructType) {
+	structID := graph.NewNodeID(string(graph.NodeStruct), e.filePath, structName)
 
 	props := make(map[string]string)
 	if st.Fields != nil {
 		fields := make([]string, 0, len(st.Fields.List))
 		for _, f := range st.Fields.List {
 			if len(f.Names) > 0 {
+				typeStr := typeExprString(f.Type)
 				for _, n := range f.Names {
 					fields = append(fields, n.Name)
+					// Store field type for chained call resolution.
+					if e.structFieldTypes[structName] == nil {
+						e.structFieldTypes[structName] = make(map[string]string)
+					}
+					e.structFieldTypes[structName][n.Name] = typeStr
 				}
 			} else {
 				// Embedded field
@@ -314,8 +337,8 @@ func (e *extractor) extractStruct(name string, exported bool, doc string, startL
 	e.nodes = append(e.nodes, &graph.Node{
 		ID:            structID,
 		Type:          graph.NodeStruct,
-		Name:          name,
-		QualifiedName: e.file.Name.Name + "." + name,
+		Name:          structName,
+		QualifiedName: e.file.Name.Name + "." + structName,
 		FilePath:      e.filePath,
 		Line:          startLine,
 		EndLine:       endLine,
@@ -451,14 +474,7 @@ func (e *extractor) extractHTTPRoutes() {
 			continue
 		}
 
-		// Determine the enclosing function node ID for Exposes edges.
-		var enclosingNodeID string
-		if fn.Recv != nil && len(fn.Recv.List) > 0 {
-			recvType := receiverTypeName(fn.Recv.List[0].Type)
-			enclosingNodeID = graph.NewNodeID(string(graph.NodeMethod), e.filePath, recvType+"."+fn.Name.Name)
-		} else {
-			enclosingNodeID = graph.NewNodeID(string(graph.NodeFunction), e.filePath, fn.Name.Name)
-		}
+		enclosingNodeID := e.enclosingFuncNodeID(fn)
 
 		// Collect group prefix assignments: variable name -> prefix path.
 		groupPrefixes := make(map[string]string)
@@ -793,13 +809,7 @@ func (e *extractor) extractHTTPClientCalls() {
 			continue
 		}
 
-		var enclosingNodeID string
-		if fn.Recv != nil && len(fn.Recv.List) > 0 {
-			recvType := receiverTypeName(fn.Recv.List[0].Type)
-			enclosingNodeID = graph.NewNodeID(string(graph.NodeMethod), e.filePath, recvType+"."+fn.Name.Name)
-		} else {
-			enclosingNodeID = graph.NewNodeID(string(graph.NodeFunction), e.filePath, fn.Name.Name)
-		}
+		enclosingNodeID := e.enclosingFuncNodeID(fn)
 
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
@@ -957,7 +967,7 @@ func (e *extractor) buildCallMaps() {
 
 	// Build function name map from already-extracted nodes
 	for _, n := range e.nodes {
-		if n.Type == graph.NodeFunction && n.FilePath == e.filePath {
+		if (n.Type == graph.NodeFunction || n.Type == graph.NodeTestFunction) && n.FilePath == e.filePath {
 			e.funcNameMap[n.Name] = n.ID
 		}
 	}
@@ -977,6 +987,19 @@ func (e *extractor) buildCallMaps() {
 	}
 }
 
+// enclosingFuncNodeID returns the graph node ID for the given function declaration.
+func (e *extractor) enclosingFuncNodeID(fn *ast.FuncDecl) string {
+	if fn.Recv != nil && len(fn.Recv.List) > 0 {
+		recvType := receiverTypeName(fn.Recv.List[0].Type)
+		return graph.NewNodeID(string(graph.NodeMethod), e.filePath, recvType+"."+fn.Name.Name)
+	}
+	nodeType := graph.NodeFunction
+	if e.isTestFile && isTestFuncName(fn.Name.Name) {
+		nodeType = graph.NodeTestFunction
+	}
+	return graph.NewNodeID(string(nodeType), e.filePath, fn.Name.Name)
+}
+
 // extractFunctionCalls walks all function/method bodies and creates EdgeCalls for
 // detected call expressions: same-file calls and import-qualified calls.
 func (e *extractor) extractFunctionCalls() {
@@ -986,12 +1009,15 @@ func (e *extractor) extractFunctionCalls() {
 			continue
 		}
 
-		var enclosingNodeID string
+		enclosingNodeID := e.enclosingFuncNodeID(fn)
+
+		// Determine receiver parameter name and type for chained field access resolution.
+		var recvParamName, recvTypeName_ string
 		if fn.Recv != nil && len(fn.Recv.List) > 0 {
-			recvType := receiverTypeName(fn.Recv.List[0].Type)
-			enclosingNodeID = graph.NewNodeID(string(graph.NodeMethod), e.filePath, recvType+"."+fn.Name.Name)
-		} else {
-			enclosingNodeID = graph.NewNodeID(string(graph.NodeFunction), e.filePath, fn.Name.Name)
+			recvTypeName_ = receiverTypeName(fn.Recv.List[0].Type)
+			if len(fn.Recv.List[0].Names) > 0 {
+				recvParamName = fn.Recv.List[0].Names[0].Name
+			}
 		}
 
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
@@ -1000,11 +1026,42 @@ func (e *extractor) extractFunctionCalls() {
 				return true
 			}
 
-			switch fn := call.Fun.(type) {
+			switch funExpr := call.Fun.(type) {
 			case *ast.SelectorExpr:
+				callee := funExpr.Sel.Name
+
+				// Check for chained access: receiver.field.Method()
+				if innerSel, ok := funExpr.X.(*ast.SelectorExpr); ok {
+					if ident, ok := innerSel.X.(*ast.Ident); ok {
+						fieldName := innerSel.Sel.Name
+						// If receiver matches the enclosing method's receiver param,
+						// try resolving through struct field types.
+						if recvParamName != "" && ident.Name == recvParamName {
+							if fieldTypes, ok := e.structFieldTypes[recvTypeName_]; ok {
+								if fieldTypeStr, ok := fieldTypes[fieldName]; ok {
+									pkg := extractPackagePrefix(fieldTypeStr)
+									if pkg != "" {
+										if depID, ok := e.importAliasMap[pkg]; ok {
+											e.edges = append(e.edges, &graph.Edge{
+												ID:       edgeID(enclosingNodeID, depID, string(graph.EdgeCalls)+":"+callee),
+												Type:     graph.EdgeCalls,
+												SourceID: enclosingNodeID,
+												TargetID: depID,
+												Properties: map[string]string{
+													"callee": callee,
+												},
+											})
+											return true
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+
 				// pkg.Func() or receiver.Method()
-				if ident, ok := fn.X.(*ast.Ident); ok {
-					callee := fn.Sel.Name
+				if ident, ok := funExpr.X.(*ast.Ident); ok {
 					// Check if it's an import-qualified call
 					if depID, ok := e.importAliasMap[ident.Name]; ok {
 						e.edges = append(e.edges, &graph.Edge{
@@ -1020,7 +1077,7 @@ func (e *extractor) extractFunctionCalls() {
 				}
 			case *ast.Ident:
 				// Direct call: helper()
-				name := fn.Name
+				name := funExpr.Name
 				if goBuiltins[name] {
 					return true
 				}
@@ -1142,4 +1199,33 @@ func implementsAll(structMethods, ifaceMethods map[string]bool) bool {
 		}
 	}
 	return true
+}
+
+// isTestFuncName returns true if name matches Go test function patterns
+// (Test*, Benchmark*, Example*, Fuzz*).
+func isTestFuncName(name string) bool {
+	for _, prefix := range testFuncPrefixes {
+		if strings.HasPrefix(name, prefix) && len(name) > len(prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractPackagePrefix strips pointer/slice prefixes and returns the package
+// part before ".". For example: "*graph.Store" -> "graph", "[]config.Item" -> "config",
+// "string" -> "".
+func extractPackagePrefix(typeStr string) string {
+	// Strip pointer and slice prefixes.
+	for strings.HasPrefix(typeStr, "*") || strings.HasPrefix(typeStr, "[]") {
+		if strings.HasPrefix(typeStr, "*") {
+			typeStr = typeStr[1:]
+		} else {
+			typeStr = typeStr[2:]
+		}
+	}
+	if idx := strings.Index(typeStr, "."); idx >= 0 {
+		return typeStr[:idx]
+	}
+	return ""
 }

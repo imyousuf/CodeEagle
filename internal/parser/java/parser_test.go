@@ -455,6 +455,166 @@ func TestExtractFunctionCalls(t *testing.T) {
 	}
 }
 
+func TestTestFileDetection(t *testing.T) {
+	source := `package com.example.demo;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import static org.junit.jupiter.api.Assertions.*;
+
+public class UserServiceTest {
+
+    @Test
+    public void testCreateUser() {
+        UserService svc = new UserService();
+        assertNotNull(svc.create("test"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Alice", "Bob"})
+    public void testCreateUserWithName(String name) {
+        UserService svc = new UserService();
+        assertNotNull(svc.create(name));
+    }
+
+    @RepeatedTest(3)
+    public void testRepeated() {
+        assertTrue(true);
+    }
+
+    // This is a helper, not a test method.
+    private UserService createService() {
+        return new UserService();
+    }
+}
+`
+	p := NewParser()
+	result, err := p.ParseFile("src/test/java/com/example/demo/UserServiceTest.java", []byte(source))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	// Verify file node is NodeTestFile.
+	var testFileNodes []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeTestFile {
+			testFileNodes = append(testFileNodes, n)
+		}
+	}
+	if len(testFileNodes) != 1 {
+		t.Errorf("TestFile count = %d, want 1", len(testFileNodes))
+	}
+
+	// Verify NodeFile is NOT present.
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeFile {
+			t.Error("expected NodeTestFile, not NodeFile for test file")
+		}
+	}
+
+	// Verify test functions are extracted.
+	var testFuncs []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeTestFunction {
+			testFuncs = append(testFuncs, n)
+		}
+	}
+
+	if len(testFuncs) != 3 {
+		t.Errorf("TestFunction count = %d, want 3", len(testFuncs))
+		for _, tf := range testFuncs {
+			t.Logf("  test func: %s (annotations=%s)", tf.Name, tf.Properties["annotations"])
+		}
+	}
+
+	// Verify specific test methods are NodeTestFunction.
+	nodeByName := indexByName(result.Nodes)
+	for _, name := range []string{"testCreateUser", "testCreateUserWithName", "testRepeated"} {
+		n, ok := nodeByName[name]
+		if !ok {
+			t.Errorf("expected method %s", name)
+			continue
+		}
+		if n.Type != graph.NodeTestFunction {
+			t.Errorf("%s should be TestFunction, got %s", name, n.Type)
+		}
+	}
+
+	// Verify helper method is still NodeMethod.
+	if n, ok := nodeByName["createService"]; ok {
+		if n.Type != graph.NodeMethod {
+			t.Errorf("createService should be Method (helper), got %s", n.Type)
+		}
+	} else {
+		t.Error("expected createService helper method")
+	}
+
+	// Verify Contains edges exist for test functions.
+	testContainsCount := 0
+	for _, e := range result.Edges {
+		if e.Type == graph.EdgeContains {
+			for _, tf := range testFuncs {
+				if e.TargetID == tf.ID {
+					testContainsCount++
+				}
+			}
+		}
+	}
+	if testContainsCount != 3 {
+		t.Errorf("Contains edges for test functions = %d, want 3", testContainsCount)
+	}
+}
+
+func TestNonTestFileHasNoTestNodes(t *testing.T) {
+	// Parsing a non-test file should NOT produce TestFile or TestFunction nodes,
+	// even if the source contains @Test annotations.
+	source := `package com.example.demo;
+
+import org.junit.jupiter.api.Test;
+
+public class UserService {
+    @Test
+    public void testMethod() {}
+}
+`
+	p := NewParser()
+	result, err := p.ParseFile("src/main/java/com/example/demo/UserService.java", []byte(source))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeTestFile {
+			t.Error("non-test file should not have NodeTestFile")
+		}
+		if n.Type == graph.NodeTestFunction {
+			t.Error("non-test file should not have NodeTestFunction")
+		}
+	}
+}
+
+func TestJavaTestFilenamePatterns(t *testing.T) {
+	tests := []struct {
+		filename string
+		isTest   bool
+	}{
+		{"UserServiceTest.java", true},
+		{"UserServiceTests.java", true},
+		{"TestUserService.java", true},
+		{"UserServiceIT.java", true},
+		{"UserService.java", false},
+		{"TestData.txt", false},
+		{"MyTest.java", true},
+	}
+	for _, tc := range tests {
+		got := isTestFilename(tc.filename)
+		if got != tc.isTest {
+			t.Errorf("isTestFilename(%q) = %v, want %v", tc.filename, got, tc.isTest)
+		}
+	}
+}
+
 // Helpers
 
 func assertCount(t *testing.T, counts map[graph.NodeType]int, nt graph.NodeType, want int) {

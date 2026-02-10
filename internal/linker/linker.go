@@ -33,6 +33,49 @@ func NewLinker(store graph.Store, llmClient llm.Client, logFn func(format string
 	}
 }
 
+// Phase represents a named linker phase.
+type Phase struct {
+	Name string
+	Fn   func(ctx context.Context) (int, error)
+}
+
+// Phases returns all linker phases in execution order (excluding LLM phases).
+func (l *Linker) Phases() []Phase {
+	return []Phase{
+		{Name: "services", Fn: l.linkServices},
+		{Name: "endpoints", Fn: l.linkEndpoints},
+		{Name: "api_calls", Fn: l.linkAPICalls},
+		{Name: "dependencies", Fn: l.linkDependencies},
+		{Name: "imports", Fn: l.linkImports},
+		{Name: "implements", Fn: l.linkImplements},
+		{Name: "tests", Fn: l.linkTests},
+	}
+}
+
+// NewPhases returns only the newly added phases (implements + tests).
+func (l *Linker) NewPhases() []Phase {
+	return []Phase{
+		{Name: "implements", Fn: l.linkImplements},
+		{Name: "tests", Fn: l.linkTests},
+	}
+}
+
+// RunPhases executes the given phases in order and returns per-phase counts.
+func (l *Linker) RunPhases(ctx context.Context, phases []Phase) (map[string]int, error) {
+	results := make(map[string]int, len(phases))
+	for _, phase := range phases {
+		count, err := phase.Fn(ctx)
+		if err != nil {
+			return results, fmt.Errorf("phase %s: %w", phase.Name, err)
+		}
+		results[phase.Name] = count
+		if l.verbose {
+			l.log("  Phase %s: linked %d", phase.Name, count)
+		}
+	}
+	return results, nil
+}
+
 // RunAll executes all linking phases in order.
 func (l *Linker) RunAll(ctx context.Context) error {
 	if l.verbose {
@@ -82,6 +125,24 @@ func (l *Linker) RunAll(ctx context.Context) error {
 	}
 	if l.verbose {
 		l.log("  Linked %d imports to manifest dependencies", importCount)
+	}
+
+	// 4.6. Resolve cross-file implements relationships.
+	implCount, err := l.linkImplements(ctx)
+	if err != nil {
+		return fmt.Errorf("link implements: %w", err)
+	}
+	if l.verbose {
+		l.log("  Linked %d cross-file implements", implCount)
+	}
+
+	// 4.7. Link test files/functions to source entities.
+	testCount, err := l.linkTests(ctx)
+	if err != nil {
+		return fmt.Errorf("link tests: %w", err)
+	}
+	if l.verbose {
+		l.log("  Linked %d test coverage edges", testCount)
 	}
 
 	// 5. LLM-assisted analysis for unresolved calls (optional).

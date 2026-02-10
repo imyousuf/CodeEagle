@@ -946,6 +946,313 @@ func TestNormalizePythonPkg(t *testing.T) {
 	}
 }
 
+func TestLinkGoImplements(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	// Create a Go interface with methods.
+	ifaceID := graph.NewNodeID("Interface", "pkg/graph/graph.go", "Store")
+	addNodes(t, store,
+		&graph.Node{
+			ID: ifaceID, Type: graph.NodeInterface, Name: "Store",
+			FilePath: "pkg/graph/graph.go",
+			Language: "go",
+			Properties: map[string]string{
+				"methods": "AddNode,GetNode,Close",
+			},
+		},
+	)
+
+	// Create a Go struct with matching methods in a different file.
+	structID := graph.NewNodeID("Struct", "internal/embedded/store.go", "EmbeddedStore")
+	addNodes(t, store,
+		&graph.Node{
+			ID: structID, Type: graph.NodeStruct, Name: "EmbeddedStore",
+			FilePath: "internal/embedded/store.go",
+			Language: "go",
+		},
+		&graph.Node{
+			ID:   graph.NewNodeID("Method", "internal/embedded/store.go", "EmbeddedStore.AddNode"),
+			Type: graph.NodeMethod, Name: "AddNode",
+			FilePath:   "internal/embedded/store.go",
+			Language:   "go",
+			Properties: map[string]string{"receiver": "EmbeddedStore"},
+		},
+		&graph.Node{
+			ID:   graph.NewNodeID("Method", "internal/embedded/store.go", "EmbeddedStore.GetNode"),
+			Type: graph.NodeMethod, Name: "GetNode",
+			FilePath:   "internal/embedded/store.go",
+			Language:   "go",
+			Properties: map[string]string{"receiver": "EmbeddedStore"},
+		},
+		&graph.Node{
+			ID:   graph.NewNodeID("Method", "internal/embedded/store.go", "EmbeddedStore.Close"),
+			Type: graph.NodeMethod, Name: "Close",
+			FilePath:   "internal/embedded/store.go",
+			Language:   "go",
+			Properties: map[string]string{"receiver": "EmbeddedStore"},
+		},
+	)
+
+	linker := NewLinker(store, nil, nil, false)
+	count, err := linker.linkImplements(ctx)
+	if err != nil {
+		t.Fatalf("linkImplements: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("linkImplements returned %d, want 1", count)
+	}
+
+	// Verify EdgeImplements was created.
+	edges, err := store.GetEdges(ctx, structID, graph.EdgeImplements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 1 {
+		t.Errorf("got %d EdgeImplements, want 1", len(edges))
+	}
+	if len(edges) > 0 && edges[0].TargetID != ifaceID {
+		t.Errorf("EdgeImplements target = %s, want %s", edges[0].TargetID, ifaceID)
+	}
+}
+
+func TestLinkGoImplementsPartialMatch(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	// Interface with 3 methods, struct only has 2.
+	ifaceID := graph.NewNodeID("Interface", "pkg/iface.go", "Full")
+	addNodes(t, store,
+		&graph.Node{
+			ID: ifaceID, Type: graph.NodeInterface, Name: "Full",
+			FilePath: "pkg/iface.go", Language: "go",
+			Properties: map[string]string{"methods": "A,B,C"},
+		},
+		&graph.Node{
+			ID:   graph.NewNodeID("Struct", "impl/s.go", "Partial"),
+			Type: graph.NodeStruct, Name: "Partial",
+			FilePath: "impl/s.go", Language: "go",
+		},
+		&graph.Node{
+			ID:   graph.NewNodeID("Method", "impl/s.go", "Partial.A"),
+			Type: graph.NodeMethod, Name: "A",
+			FilePath: "impl/s.go", Language: "go",
+			Properties: map[string]string{"receiver": "Partial"},
+		},
+		&graph.Node{
+			ID:   graph.NewNodeID("Method", "impl/s.go", "Partial.B"),
+			Type: graph.NodeMethod, Name: "B",
+			FilePath: "impl/s.go", Language: "go",
+			Properties: map[string]string{"receiver": "Partial"},
+		},
+	)
+
+	linker := NewLinker(store, nil, nil, false)
+	count, err := linker.linkImplements(ctx)
+	if err != nil {
+		t.Fatalf("linkImplements: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("linkImplements returned %d, want 0 (partial match)", count)
+	}
+}
+
+func TestLinkPythonProtocol(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	protoID := graph.NewNodeID("Interface", "mylib/protocols.py", "Serializable")
+	classID := graph.NewNodeID("Class", "mylib/impl.py", "JsonSerializer")
+
+	addNodes(t, store,
+		&graph.Node{
+			ID: protoID, Type: graph.NodeInterface, Name: "Serializable",
+			FilePath: "mylib/protocols.py", Language: "python",
+			Properties: map[string]string{
+				"protocol": "true",
+				"methods":  "serialize,deserialize",
+			},
+		},
+		&graph.Node{
+			ID: classID, Type: graph.NodeClass, Name: "JsonSerializer",
+			FilePath: "mylib/impl.py", Language: "python",
+			Properties: map[string]string{
+				"bases": "Serializable",
+			},
+		},
+	)
+
+	linker := NewLinker(store, nil, nil, false)
+	count, err := linker.linkImplements(ctx)
+	if err != nil {
+		t.Fatalf("linkImplements: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("linkImplements returned %d, want 1", count)
+	}
+
+	edges, err := store.GetEdges(ctx, classID, graph.EdgeImplements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 1 {
+		t.Errorf("got %d EdgeImplements, want 1", len(edges))
+	}
+}
+
+func TestLinkTestFiles(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	srcID := graph.NewNodeID("File", "pkg/handler.go", "pkg/handler.go")
+	testID := graph.NewNodeID("TestFile", "pkg/handler_test.go", "pkg/handler_test.go")
+
+	addNodes(t, store,
+		&graph.Node{
+			ID: srcID, Type: graph.NodeFile, Name: "pkg/handler.go",
+			FilePath: "pkg/handler.go", Language: "go",
+		},
+		&graph.Node{
+			ID: testID, Type: graph.NodeTestFile, Name: "pkg/handler_test.go",
+			FilePath: "pkg/handler_test.go", Language: "go",
+		},
+	)
+
+	linker := NewLinker(store, nil, nil, false)
+	count, err := linker.linkTests(ctx)
+	if err != nil {
+		t.Fatalf("linkTests: %v", err)
+	}
+	if count < 1 {
+		t.Errorf("linkTests returned %d, want >= 1", count)
+	}
+
+	edges, err := store.GetEdges(ctx, testID, graph.EdgeTests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 1 {
+		t.Errorf("got %d EdgeTests from test file, want 1", len(edges))
+	}
+}
+
+func TestLinkTestFunctions(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	funcID := graph.NewNodeID("Function", "pkg/handler.go", "ParseFile")
+	testFuncID := graph.NewNodeID("TestFunction", "pkg/handler_test.go", "TestParseFile")
+
+	addNodes(t, store,
+		&graph.Node{
+			ID: funcID, Type: graph.NodeFunction, Name: "ParseFile",
+			FilePath: "pkg/handler.go", Language: "go",
+			Package: "handler",
+		},
+		&graph.Node{
+			ID: testFuncID, Type: graph.NodeTestFunction, Name: "TestParseFile",
+			FilePath: "pkg/handler_test.go", Language: "go",
+			Package: "handler",
+		},
+	)
+
+	linker := NewLinker(store, nil, nil, false)
+	count, err := linker.linkTests(ctx)
+	if err != nil {
+		t.Fatalf("linkTests: %v", err)
+	}
+	if count < 1 {
+		t.Errorf("linkTests returned %d, want >= 1", count)
+	}
+}
+
+func TestDeriveSourceFilePaths(t *testing.T) {
+	tests := []struct {
+		testPath string
+		language string
+		want     []string
+	}{
+		{"pkg/handler_test.go", "go", []string{"pkg/handler.go"}},
+		{"tests/test_handlers.py", "python", []string{"tests/handlers.py"}},
+		{"tests/handlers_test.py", "python", []string{"tests/handlers.py"}},
+		{"src/utils.test.ts", "typescript", []string{"src/utils.ts"}},
+		{"src/utils.spec.ts", "typescript", []string{"src/utils.ts"}},
+		{"src/utils.test.js", "javascript", []string{"src/utils.js"}},
+		{"src/FooTest.java", "java", []string{"src/Foo.java"}},
+		{"src/FooTests.java", "java", []string{"src/Foo.java"}},
+		{"src/TestFoo.java", "java", []string{"src/Foo.java"}},
+	}
+	for _, tt := range tests {
+		got := deriveSourceFilePaths(tt.testPath, tt.language)
+		if len(got) == 0 {
+			t.Errorf("deriveSourceFilePaths(%q, %q) returned empty", tt.testPath, tt.language)
+			continue
+		}
+		if got[0] != tt.want[0] {
+			t.Errorf("deriveSourceFilePaths(%q, %q)[0] = %q, want %q", tt.testPath, tt.language, got[0], tt.want[0])
+		}
+	}
+}
+
+func TestDeriveSourceFuncNames(t *testing.T) {
+	tests := []struct {
+		name     string
+		language string
+		want     string // first candidate
+	}{
+		{"TestParseFile", "go", "ParseFile"},
+		{"TestFoo_Bar", "go", "Foo"},
+		{"BenchmarkSort", "go", "Sort"},
+		{"test_process_user", "python", "process_user"},
+		{"testProcessUser", "java", "processUser"},
+	}
+	for _, tt := range tests {
+		got := deriveSourceFuncNames(tt.name, tt.language)
+		if len(got) == 0 {
+			t.Errorf("deriveSourceFuncNames(%q, %q) returned empty", tt.name, tt.language)
+			continue
+		}
+		if got[0] != tt.want {
+			t.Errorf("deriveSourceFuncNames(%q, %q)[0] = %q, want %q", tt.name, tt.language, got[0], tt.want)
+		}
+	}
+}
+
+func TestRunPhases(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	linker := NewLinker(store, nil, nil, false)
+	phases := linker.NewPhases()
+
+	results, err := linker.RunPhases(ctx, phases)
+	if err != nil {
+		t.Fatalf("RunPhases: %v", err)
+	}
+
+	if _, ok := results["implements"]; !ok {
+		t.Error("missing implements phase result")
+	}
+	if _, ok := results["tests"]; !ok {
+		t.Error("missing tests phase result")
+	}
+}
+
+func TestPhasesCount(t *testing.T) {
+	store := newTestStore(t)
+	linker := NewLinker(store, nil, nil, false)
+
+	allPhases := linker.Phases()
+	if len(allPhases) != 7 {
+		t.Errorf("Phases() returned %d, want 7", len(allPhases))
+	}
+
+	newPhases := linker.NewPhases()
+	if len(newPhases) != 2 {
+		t.Errorf("NewPhases() returned %d, want 2", len(newPhases))
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstr(s, substr))
 }

@@ -3,6 +3,7 @@ package javascript
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
@@ -64,6 +65,7 @@ type extractor struct {
 
 	fileNodeID   string
 	moduleNodeID string
+	isTestFile   bool
 
 	// Lookup maps for function call graph extraction, built by buildCallMaps().
 	importNames      map[string]string            // imported module simple name → dep node ID
@@ -75,19 +77,38 @@ func (e *extractor) extract() {
 	e.extractFileNode()
 	e.extractModuleNode()
 	e.walkChildren(e.root)
+	if e.isTestFile {
+		e.extractTestFunctions(e.root)
+	}
 	e.buildCallMaps()
 	e.walkAllNodes(e.root)
 }
 
 func (e *extractor) extractFileNode() {
-	e.fileNodeID = graph.NewNodeID(string(graph.NodeFile), e.filePath, e.filePath)
+	base := filepath.Base(e.filePath)
+	e.isTestFile = isTestFilename(base)
+
+	fileType := graph.NodeFile
+	if e.isTestFile {
+		fileType = graph.NodeTestFile
+	}
+
+	e.fileNodeID = graph.NewNodeID(string(fileType), e.filePath, e.filePath)
 	e.nodes = append(e.nodes, &graph.Node{
 		ID:       e.fileNodeID,
-		Type:     graph.NodeFile,
+		Type:     fileType,
 		Name:     e.filePath,
 		FilePath: e.filePath,
 		Language: string(parser.LangJavaScript),
 	})
+}
+
+// isTestFilename returns true if the filename matches JavaScript test file patterns.
+func isTestFilename(base string) bool {
+	return strings.HasSuffix(base, ".test.js") ||
+		strings.HasSuffix(base, ".spec.js") ||
+		strings.HasSuffix(base, ".test.jsx") ||
+		strings.HasSuffix(base, ".spec.jsx")
 }
 
 func (e *extractor) extractModuleNode() {
@@ -476,6 +497,68 @@ func (e *extractor) extractRequireModulePath(node *sitter.Node) string {
 	for i := 0; i < int(args.ChildCount()); i++ {
 		child := args.Child(i)
 		if child.Type() == "string" {
+			return stripQuotes(e.nodeText(child))
+		}
+	}
+	return ""
+}
+
+// Test function detection
+
+// jsTestCallNames is the set of function names that define test cases in JS/TS test frameworks.
+var jsTestCallNames = map[string]bool{
+	"describe": true, "it": true, "test": true,
+}
+
+// extractTestFunctions walks the AST to find describe/it/test call expressions
+// in test files and creates NodeTestFunction nodes for them.
+func (e *extractor) extractTestFunctions(node *sitter.Node) {
+	if node.Type() == "call_expression" {
+		fnNode := e.findChildByFieldName(node, "function")
+		if fnNode != nil && fnNode.Type() == "identifier" {
+			fnName := e.nodeText(fnNode)
+			if jsTestCallNames[fnName] {
+				args := e.findChildByFieldName(node, "arguments")
+				if args != nil {
+					testName := e.extractFirstStringArg(args)
+					if testName != "" {
+						qualifiedName := fnName + ":" + testName
+						testFuncID := graph.NewNodeID(string(graph.NodeTestFunction), e.filePath, qualifiedName)
+						e.nodes = append(e.nodes, &graph.Node{
+							ID:            testFuncID,
+							Type:          graph.NodeTestFunction,
+							Name:          testName,
+							QualifiedName: e.filePath + "." + qualifiedName,
+							FilePath:      e.filePath,
+							Line:          startLine(node),
+							EndLine:       endLine(node),
+							Language:      string(parser.LangJavaScript),
+							Properties: map[string]string{
+								"test_type": fnName,
+							},
+						})
+						e.edges = append(e.edges, &graph.Edge{
+							ID:       edgeID(e.moduleNodeID, testFuncID, string(graph.EdgeContains)),
+							Type:     graph.EdgeContains,
+							SourceID: e.moduleNodeID,
+							TargetID: testFuncID,
+						})
+					}
+				}
+			}
+		}
+	}
+	for i := 0; i < int(node.ChildCount()); i++ {
+		e.extractTestFunctions(node.Child(i))
+	}
+}
+
+// extractFirstStringArg returns the text of the first string or template_string
+// argument in an arguments node, with quotes stripped.
+func (e *extractor) extractFirstStringArg(argsNode *sitter.Node) string {
+	for i := 0; i < int(argsNode.ChildCount()); i++ {
+		child := argsNode.Child(i)
+		if child.Type() == "string" || child.Type() == "template_string" {
 			return stripQuotes(e.nodeText(child))
 		}
 	}
@@ -875,7 +958,7 @@ func (e *extractor) buildCallMaps() {
 					e.importNames[simpleName] = n.ID
 				}
 			}
-		case graph.NodeFunction:
+		case graph.NodeFunction, graph.NodeTestFunction:
 			e.funcNames[n.Name] = n.ID
 		case graph.NodeMethod:
 			if n.Properties != nil && n.Properties["receiver"] != "" {
