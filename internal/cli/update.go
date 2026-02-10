@@ -199,11 +199,48 @@ type githubRelease struct {
 }
 
 // getLatestReleaseTag fetches the latest release tag from GitHub.
+// Tries /releases/latest first (stable only); if that returns 404,
+// falls back to listing all releases and picking the most recent one
+// (which may be a pre-release).
 func getLatestReleaseTag() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Try the stable-only endpoint first.
 	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", githubRepo)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", fmt.Sprintf("codeeagle/%s", Version))
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		var release githubRelease
+		if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+			return "", err
+		}
+		return release.TagName, nil
+	}
+
+	// No stable release found — fall back to listing all releases.
+	if resp.StatusCode == http.StatusNotFound {
+		return getLatestReleaseTagFallback(ctx)
+	}
+
+	return "", fmt.Errorf("GitHub API returned %s", resp.Status)
+}
+
+// getLatestReleaseTagFallback lists all releases (including pre-releases)
+// and returns the tag of the most recent one.
+func getLatestReleaseTagFallback(ctx context.Context) (string, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=1", githubRepo)
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return "", err
@@ -221,12 +258,15 @@ func getLatestReleaseTag() (string, error) {
 		return "", fmt.Errorf("GitHub API returned %s", resp.Status)
 	}
 
-	var release githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+	var releases []githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
 		return "", err
 	}
+	if len(releases) == 0 {
+		return "", fmt.Errorf("no releases found")
+	}
 
-	return release.TagName, nil
+	return releases[0].TagName, nil
 }
 
 // getDevReleaseInfo fetches the dev release info from GitHub.
