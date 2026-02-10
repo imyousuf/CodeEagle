@@ -25,6 +25,7 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/parser/manifest"
 	"github.com/imyousuf/CodeEagle/internal/parser/markdown"
 	"github.com/imyousuf/CodeEagle/internal/parser/python"
+	rustparser "github.com/imyousuf/CodeEagle/internal/parser/rust"
 	"github.com/imyousuf/CodeEagle/internal/parser/shell"
 	"github.com/imyousuf/CodeEagle/internal/parser/terraform"
 	"github.com/imyousuf/CodeEagle/internal/parser/typescript"
@@ -108,6 +109,7 @@ target branch for import.`,
 			registry.Register(shell.NewParser())
 			registry.Register(terraform.NewParser())
 			registry.Register(yamlparser.NewParser())
+			registry.Register(rustparser.NewParser())
 			registry.Register(manifest.NewParser())
 
 			// Build watcher config for the matcher.

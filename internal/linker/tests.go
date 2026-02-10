@@ -289,6 +289,14 @@ func isTestFilePath(filePath, language string) bool {
 		return strings.HasSuffix(base, ".java") &&
 			(strings.HasSuffix(name, "Test") || strings.HasSuffix(name, "Tests") ||
 				strings.HasPrefix(name, "Test") || strings.HasSuffix(name, "IT"))
+	case "rust":
+		// Files in a tests/ directory are integration tests
+		parts := strings.Split(filepath.ToSlash(filePath), "/")
+		for _, p := range parts {
+			if p == "tests" {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -309,6 +317,9 @@ func isTestFuncName(name, language, filePath string) bool {
 		return isTestFilePath(filePath, language)
 	case "java":
 		return strings.HasPrefix(name, "test")
+	case "rust":
+		// Rust test functions have #[test] attribute; convention is test_ prefix
+		return strings.HasPrefix(name, "test_") && isTestFilePath(filePath, language)
 	}
 	return false
 }
@@ -327,6 +338,8 @@ func inferLanguageFromPath(filePath string) string {
 		return "javascript"
 	case ".java":
 		return "java"
+	case ".rs":
+		return "rust"
 	}
 	return ""
 }
@@ -400,6 +413,16 @@ func deriveSourceFilePaths(testPath, language string) []string {
 			src := strings.TrimPrefix(name, "Test") + ".java"
 			candidates = append(candidates, filepath.Join(dir, src))
 		}
+	case "rust":
+		// tests/test_foo.rs -> src/foo.rs
+		name := strings.TrimSuffix(base, ".rs")
+		if strings.HasPrefix(name, "test_") {
+			src := strings.TrimPrefix(name, "test_") + ".rs"
+			// Look in src/ directory relative to tests/
+			parentDir := filepath.Dir(dir)
+			candidates = append(candidates, filepath.Join(parentDir, "src", src))
+			candidates = append(candidates, filepath.Join(dir, src))
+		}
 	}
 
 	return candidates
@@ -453,6 +476,11 @@ func deriveSourceFuncNames(testName, language string) []string {
 				candidates = append(candidates, lower)
 				candidates = append(candidates, rest) // Also try unchanged
 			}
+		}
+	case "rust":
+		// test_process_user -> process_user
+		if strings.HasPrefix(testName, "test_") {
+			candidates = append(candidates, strings.TrimPrefix(testName, "test_"))
 		}
 	}
 
