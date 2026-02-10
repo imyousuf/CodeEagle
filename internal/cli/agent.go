@@ -141,6 +141,9 @@ falls back to single-turn keyword-based context selection.`,
 			if verbose {
 				logger := agentLogger()
 				planner.SetVerbose(true, logger)
+				// For API providers: tool calls happen in-process, log directly.
+				// For Claude CLI: setClientVerbose triggers --log file + tailing.
+				planner.SetToolLogger(logger)
 				setClientVerbose(client, logger)
 			}
 

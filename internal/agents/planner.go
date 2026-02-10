@@ -62,10 +62,15 @@ func NewPlanner(client llm.Client, ctxBuilder *ContextBuilder, repoPaths ...stri
 	}
 }
 
-// SetVerbose enables or disables verbose logging on the planner and its tool registry.
+// SetVerbose enables or disables verbose logging on the planner.
 func (p *Planner) SetVerbose(verbose bool, logger func(format string, args ...any)) {
 	p.BaseAgent.SetVerbose(verbose, logger)
-	p.registry.SetVerbose(verbose, logger)
+}
+
+// SetToolLogger sets the logger on the planner's tool registry.
+// Tool calls are always logged when a logger is set.
+func (p *Planner) SetToolLogger(logger func(format string, args ...any)) {
+	p.registry.SetLogger(logger)
 }
 
 // SetMaxIterations sets the maximum number of agentic loop iterations.

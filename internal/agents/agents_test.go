@@ -715,9 +715,11 @@ func TestPlannerVerboseToolLogging(t *testing.T) {
 	planner := NewPlanner(mock, ctxBuilder)
 
 	var logs []string
-	planner.SetVerbose(true, func(format string, args ...any) {
+	logger := func(format string, args ...any) {
 		logs = append(logs, fmt.Sprintf(format, args...))
-	})
+	}
+	planner.SetVerbose(true, logger)
+	planner.SetToolLogger(logger)
 
 	resp, err := planner.Ask(context.Background(), "What is the project overview?")
 	if err != nil {

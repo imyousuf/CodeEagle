@@ -115,17 +115,14 @@ func (c *claudeCLIClient) Provider() string {
 // The full agentic loop happens inside the CLI; the returned response
 // contains only the final text (no pending tool calls).
 //
-// When verbose is enabled, a temp log file is passed to the MCP subprocess
-// via --log. A goroutine tails this file in real time, forwarding tool call
-// lines to the verbose logger.
+// A temp log file is always passed to the MCP subprocess via --log so that
+// tool calls are unconditionally logged. When verbose is enabled, a goroutine
+// tails this file in real time, forwarding lines to the verbose logger.
 func (c *claudeCLIClient) ChatWithTools(ctx context.Context, systemPrompt string, messages []llm.Message, tools []llm.Tool) (*llm.Response, error) {
 	prompt := buildPrompt(systemPrompt, messages)
 
-	// Generate a shared log path for verbose mode.
-	var toolLogPath string
-	if c.verbose && c.log != nil {
-		toolLogPath = newMCPLogPath()
-	}
+	// Always create a log file for the MCP subprocess to write tool calls to.
+	toolLogPath := newMCPLogPath()
 
 	mcpConfig, cleanupFn, err := c.buildMCPConfig(toolLogPath)
 	if err != nil {
@@ -154,17 +151,31 @@ func (c *claudeCLIClient) ChatWithTools(ctx context.Context, systemPrompt string
 
 	cmd := exec.CommandContext(timeoutCtx, c.executable, args...)
 
-	// When verbose, tail the MCP tool log file in real time.
-	var logCleanup func()
-	if toolLogPath != "" {
-		logCleanup = c.tailToolLog(timeoutCtx, toolLogPath)
+	// Create the log file so the subprocess can write to it immediately.
+	if f, err := os.Create(toolLogPath); err == nil {
+		f.Close()
+	}
+
+	// Only tail the log file when verbose mode is active.
+	var logDone chan struct{}
+	if c.verbose && c.log != nil {
+		logDone = make(chan struct{})
+		go func() {
+			defer close(logDone)
+			c.tailFile(timeoutCtx, toolLogPath)
+		}()
 	}
 
 	output, err := cmd.Output()
 
-	if logCleanup != nil {
-		logCleanup()
+	// Wait for tailer to flush remaining lines, then clean up the log file.
+	if logDone != nil {
+		select {
+		case <-logDone:
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
+	os.Remove(toolLogPath)
 
 	if err != nil {
 		if timeoutCtx.Err() == context.DeadlineExceeded {
@@ -177,33 +188,6 @@ func (c *claudeCLIClient) ChatWithTools(ctx context.Context, systemPrompt string
 	}
 
 	return parseClaudeResponse(output)
-}
-
-// tailToolLog starts a goroutine that tails the MCP tool log file, forwarding
-// each line to the verbose logger. Returns a cleanup function that stops tailing
-// and removes the log file.
-func (c *claudeCLIClient) tailToolLog(ctx context.Context, logPath string) func() {
-	// Create the file so the tailer can open it immediately.
-	f, err := os.Create(logPath)
-	if err != nil {
-		return func() {}
-	}
-	f.Close()
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		c.tailFile(ctx, logPath)
-	}()
-
-	return func() {
-		// Give tailer a moment to flush remaining lines.
-		select {
-		case <-done:
-		case <-time.After(200 * time.Millisecond):
-		}
-		os.Remove(logPath)
-	}
 }
 
 // tailFile reads lines from a file as they appear, forwarding to the logger.

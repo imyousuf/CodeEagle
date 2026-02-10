@@ -151,12 +151,12 @@ func TestToLLMTools(t *testing.T) {
 	}
 }
 
-func TestRegistryVerboseLogging(t *testing.T) {
+func TestRegistryLogging(t *testing.T) {
 	r := NewRegistry()
 	r.Register(&mockTool{name: "search_nodes", result: "found 3", success: true})
 
 	var logs []string
-	r.SetVerbose(true, func(format string, args ...any) {
+	r.SetLogger(func(format string, args ...any) {
 		logs = append(logs, fmt.Sprintf(format, args...))
 	})
 
@@ -177,12 +177,12 @@ func TestRegistryVerboseLogging(t *testing.T) {
 	}
 }
 
-func TestRegistryVerboseLoggingFailedTool(t *testing.T) {
+func TestRegistryLoggingFailedTool(t *testing.T) {
 	r := NewRegistry()
 	r.Register(&mockTool{name: "failing_tool", result: "error", success: false})
 
 	var logs []string
-	r.SetVerbose(true, func(format string, args ...any) {
+	r.SetLogger(func(format string, args ...any) {
 		logs = append(logs, fmt.Sprintf(format, args...))
 	})
 
@@ -202,21 +202,16 @@ func TestRegistryVerboseLoggingFailedTool(t *testing.T) {
 	}
 }
 
-func TestRegistryVerboseDisabled(t *testing.T) {
+func TestRegistryNoLogger(t *testing.T) {
 	r := NewRegistry()
 	r.Register(&mockTool{name: "quiet_tool", result: "ok", success: true})
 
-	var logs []string
-	r.SetVerbose(false, func(format string, args ...any) {
-		logs = append(logs, fmt.Sprintf(format, args...))
-	})
-
-	_, _, err := r.Execute(context.Background(), "quiet_tool", nil)
+	// No logger set — Execute should not panic.
+	result, success, err := r.Execute(context.Background(), "quiet_tool", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	if len(logs) != 0 {
-		t.Errorf("expected no logs when verbose=false, got %d: %v", len(logs), logs)
+	if !success || result != "ok" {
+		t.Errorf("unexpected result: %q, success=%v", result, success)
 	}
 }
