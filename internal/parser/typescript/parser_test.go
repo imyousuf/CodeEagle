@@ -318,6 +318,570 @@ export class MyService {
 	}
 }
 
+func TestParseExpressRoutes(t *testing.T) {
+	source := `
+import express from 'express';
+import { getUsers, createUser } from './handlers';
+
+const router = express.Router();
+router.get('/users', getUsers);
+router.post('/users', createUser);
+router.put('/users/:id', updateUser);
+router.delete('/users/:id', deleteUser);
+router.patch('/users/:id', (req: Request, res: Response) => {
+  res.json({ patched: true });
+});
+app.get('/health', (req: Request, res: Response) => {
+  res.json({ status: 'ok' });
+});
+`
+	p := NewParser()
+	result, err := p.ParseFile("routes.ts", []byte(source))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	// Collect API endpoint nodes.
+	var endpoints []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeAPIEndpoint {
+			endpoints = append(endpoints, n)
+		}
+	}
+
+	if len(endpoints) != 6 {
+		t.Errorf("got %d API endpoints, want 6", len(endpoints))
+		for _, ep := range endpoints {
+			t.Logf("  endpoint: %s", ep.Name)
+		}
+	}
+
+	// Verify specific endpoints.
+	nodeByName := indexByName(result.Nodes)
+	expectedEndpoints := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{"GET /users", "GET", "/users"},
+		{"POST /users", "POST", "/users"},
+		{"PUT /users/:id", "PUT", "/users/:id"},
+		{"DELETE /users/:id", "DELETE", "/users/:id"},
+		{"PATCH /users/:id", "PATCH", "/users/:id"},
+		{"GET /health", "GET", "/health"},
+	}
+
+	for _, exp := range expectedEndpoints {
+		n, ok := nodeByName[exp.name]
+		if !ok {
+			t.Errorf("expected endpoint %q not found", exp.name)
+			continue
+		}
+		if n.Properties["http_method"] != exp.method {
+			t.Errorf("%s: http_method = %q, want %q", exp.name, n.Properties["http_method"], exp.method)
+		}
+		if n.Properties["path"] != exp.path {
+			t.Errorf("%s: path = %q, want %q", exp.name, n.Properties["path"], exp.path)
+		}
+		if n.Properties["framework"] != "express" {
+			t.Errorf("%s: framework = %q, want %q", exp.name, n.Properties["framework"], "express")
+		}
+	}
+
+	// Verify handler names.
+	if n, ok := nodeByName["GET /users"]; ok {
+		if n.Properties["handler"] != "getUsers" {
+			t.Errorf("GET /users handler = %q, want %q", n.Properties["handler"], "getUsers")
+		}
+	}
+	if n, ok := nodeByName["PATCH /users/:id"]; ok {
+		if n.Properties["handler"] != "anonymous" {
+			t.Errorf("PATCH /users/:id handler = %q, want %q", n.Properties["handler"], "anonymous")
+		}
+	}
+
+	// Verify Exposes edges exist.
+	exposesCount := 0
+	for _, e := range result.Edges {
+		if e.Type == graph.EdgeExposes {
+			exposesCount++
+		}
+	}
+	if exposesCount != 6 {
+		t.Errorf("Exposes edges = %d, want 6", exposesCount)
+	}
+}
+
+func TestParseExpressUseMount(t *testing.T) {
+	source := `
+import express from 'express';
+const app = express();
+const router = express.Router();
+app.use('/api/v1', router);
+app.use('/admin', adminRouter);
+`
+	p := NewParser()
+	result, err := p.ParseFile("app.ts", []byte(source))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	// Collect router mount nodes.
+	var mounts []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeVariable && n.Properties["kind"] == "router_mount" {
+			mounts = append(mounts, n)
+		}
+	}
+
+	if len(mounts) != 2 {
+		t.Errorf("got %d router mounts, want 2", len(mounts))
+		for _, m := range mounts {
+			t.Logf("  mount: %s prefix=%s", m.Name, m.Properties["prefix"])
+		}
+	}
+
+	nodeByName := indexByName(result.Nodes)
+
+	if n, ok := nodeByName["mount /api/v1"]; ok {
+		if n.Properties["prefix"] != "/api/v1" {
+			t.Errorf("mount prefix = %q, want %q", n.Properties["prefix"], "/api/v1")
+		}
+		if n.Properties["handler"] != "router" {
+			t.Errorf("mount handler = %q, want %q", n.Properties["handler"], "router")
+		}
+	} else {
+		t.Error("expected mount /api/v1 node")
+	}
+
+	if n, ok := nodeByName["mount /admin"]; ok {
+		if n.Properties["prefix"] != "/admin" {
+			t.Errorf("mount prefix = %q, want %q", n.Properties["prefix"], "/admin")
+		}
+		if n.Properties["handler"] != "adminRouter" {
+			t.Errorf("mount handler = %q, want %q", n.Properties["handler"], "adminRouter")
+		}
+	} else {
+		t.Error("expected mount /admin node")
+	}
+}
+
+func TestParseExpressRoutesFromFile(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not determine test file path")
+	}
+	testdataPath := filepath.Join(filepath.Dir(thisFile), "testdata", "express_routes.ts")
+
+	content, err := os.ReadFile(testdataPath)
+	if err != nil {
+		t.Skipf("testdata/express_routes.ts not found: %v", err)
+	}
+
+	p := NewParser()
+	result, err := p.ParseFile(testdataPath, content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	// Count API endpoints.
+	endpointCount := 0
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeAPIEndpoint {
+			endpointCount++
+		}
+	}
+	// 5 router routes + 1 app.get = 6
+	if endpointCount != 6 {
+		t.Errorf("endpoint count = %d, want 6", endpointCount)
+	}
+
+	// Count router mounts.
+	mountCount := 0
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeVariable && n.Properties["kind"] == "router_mount" {
+			mountCount++
+		}
+	}
+	if mountCount != 1 {
+		t.Errorf("router mount count = %d, want 1", mountCount)
+	}
+}
+
+func TestDetectFetchCalls(t *testing.T) {
+	source := `
+async function loadUsers(): Promise<void> {
+  const resp = await fetch('/api/users');
+  const data = await resp.json();
+}
+
+const fetchPosts = async () => {
+  return fetch('/api/posts');
+};
+`
+	p := NewParser()
+	result, err := p.ParseFile("fetch.ts", []byte(source))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	var apiCalls []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeDependency && n.Properties["kind"] == "api_call" {
+			apiCalls = append(apiCalls, n)
+		}
+	}
+
+	if len(apiCalls) != 2 {
+		t.Errorf("got %d api_call nodes, want 2", len(apiCalls))
+		for _, c := range apiCalls {
+			t.Logf("  call: %s framework=%s", c.Name, c.Properties["framework"])
+		}
+	}
+
+	nodeByName := indexByName(result.Nodes)
+	if n, ok := nodeByName["UNKNOWN /api/users"]; ok {
+		if n.Properties["framework"] != "fetch" {
+			t.Errorf("framework = %q, want %q", n.Properties["framework"], "fetch")
+		}
+		if n.Properties["http_method"] != "UNKNOWN" {
+			t.Errorf("http_method = %q, want %q", n.Properties["http_method"], "UNKNOWN")
+		}
+	} else {
+		t.Error("expected UNKNOWN /api/users node")
+	}
+
+	// Verify EdgeCalls edges exist.
+	callsCount := 0
+	for _, e := range result.Edges {
+		if e.Type == graph.EdgeCalls {
+			callsCount++
+		}
+	}
+	if callsCount != 2 {
+		t.Errorf("Calls edges = %d, want 2", callsCount)
+	}
+}
+
+func TestDetectAxiosCalls(t *testing.T) {
+	source := `
+import axios from 'axios';
+
+async function getUser(id: string): Promise<User> {
+  const resp = await axios.get('/api/users/' + id);
+  return resp.data;
+}
+
+async function createUser(data: User): Promise<void> {
+  await axios.post('/api/users');
+}
+
+async function quickFetch(): Promise<void> {
+  await axios('/api/config');
+}
+`
+	p := NewParser()
+	result, err := p.ParseFile("axios.ts", []byte(source))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	var apiCalls []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeDependency && n.Properties["kind"] == "api_call" {
+			apiCalls = append(apiCalls, n)
+		}
+	}
+
+	if len(apiCalls) != 3 {
+		t.Errorf("got %d api_call nodes, want 3", len(apiCalls))
+		for _, c := range apiCalls {
+			t.Logf("  call: %s method=%s framework=%s", c.Name, c.Properties["http_method"], c.Properties["framework"])
+		}
+	}
+
+	nodeByName := indexByName(result.Nodes)
+
+	// axios.get
+	if n, ok := nodeByName["GET /api/users/' + id"]; !ok {
+		// The string concatenation may be parsed as just a string literal.
+		// Check for any GET endpoint.
+		found := false
+		for _, n := range apiCalls {
+			if n.Properties["http_method"] == "GET" && n.Properties["framework"] == "axios" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("expected axios GET api_call")
+		}
+	} else {
+		if n.Properties["framework"] != "axios" {
+			t.Errorf("framework = %q, want %q", n.Properties["framework"], "axios")
+		}
+	}
+
+	// axios.post
+	if n, ok := nodeByName["POST /api/users"]; ok {
+		if n.Properties["framework"] != "axios" {
+			t.Errorf("framework = %q, want %q", n.Properties["framework"], "axios")
+		}
+		if n.Properties["http_method"] != "POST" {
+			t.Errorf("http_method = %q, want %q", n.Properties["http_method"], "POST")
+		}
+	} else {
+		t.Error("expected POST /api/users node")
+	}
+
+	// axios("/path") direct call
+	if n, ok := nodeByName["UNKNOWN /api/config"]; ok {
+		if n.Properties["framework"] != "axios" {
+			t.Errorf("framework = %q, want %q", n.Properties["framework"], "axios")
+		}
+	} else {
+		t.Error("expected UNKNOWN /api/config node")
+	}
+}
+
+func TestDetectTemplateLiteralURLs(t *testing.T) {
+	source := "async function getItem(id: string): Promise<void> {\n  await fetch(`/api/items/${id}/details`);\n}\n"
+
+	p := NewParser()
+	result, err := p.ParseFile("template.ts", []byte(source))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	var apiCalls []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeDependency && n.Properties["kind"] == "api_call" {
+			apiCalls = append(apiCalls, n)
+		}
+	}
+
+	if len(apiCalls) != 1 {
+		t.Errorf("got %d api_call nodes, want 1", len(apiCalls))
+		return
+	}
+
+	call := apiCalls[0]
+	if call.Properties["path"] != "/api/items/*/details" {
+		t.Errorf("path = %q, want %q", call.Properties["path"], "/api/items/*/details")
+	}
+	if call.Properties["framework"] != "fetch" {
+		t.Errorf("framework = %q, want %q", call.Properties["framework"], "fetch")
+	}
+}
+
+func TestDetectSWRCalls(t *testing.T) {
+	source := `
+function useUsers() {
+  const { data } = useSWR('/api/users');
+  return data;
+}
+`
+	p := NewParser()
+	result, err := p.ParseFile("swr.ts", []byte(source))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	var apiCalls []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeDependency && n.Properties["kind"] == "api_call" {
+			apiCalls = append(apiCalls, n)
+		}
+	}
+
+	if len(apiCalls) != 1 {
+		t.Errorf("got %d api_call nodes, want 1", len(apiCalls))
+		return
+	}
+
+	call := apiCalls[0]
+	if call.Properties["framework"] != "swr" {
+		t.Errorf("framework = %q, want %q", call.Properties["framework"], "swr")
+	}
+	if call.Properties["http_method"] != "GET" {
+		t.Errorf("http_method = %q, want %q", call.Properties["http_method"], "GET")
+	}
+	if call.Properties["path"] != "/api/users" {
+		t.Errorf("path = %q, want %q", call.Properties["path"], "/api/users")
+	}
+}
+
+func TestDetectHTTPClientCalls(t *testing.T) {
+	source := `
+class ApiService {
+  async getData(): Promise<void> {
+    await httpClient.get('/api/data');
+  }
+}
+`
+	p := NewParser()
+	result, err := p.ParseFile("client.ts", []byte(source))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	var apiCalls []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeDependency && n.Properties["kind"] == "api_call" {
+			apiCalls = append(apiCalls, n)
+		}
+	}
+
+	if len(apiCalls) != 1 {
+		t.Errorf("got %d api_call nodes, want 1", len(apiCalls))
+		return
+	}
+
+	call := apiCalls[0]
+	if call.Properties["framework"] != "http_client" {
+		t.Errorf("framework = %q, want %q", call.Properties["framework"], "http_client")
+	}
+	if call.Properties["http_method"] != "GET" {
+		t.Errorf("http_method = %q, want %q", call.Properties["http_method"], "GET")
+	}
+
+	// Verify the call is linked to the method via EdgeCalls.
+	callsCount := 0
+	for _, e := range result.Edges {
+		if e.Type == graph.EdgeCalls {
+			callsCount++
+		}
+	}
+	if callsCount != 1 {
+		t.Errorf("Calls edges = %d, want 1", callsCount)
+	}
+}
+
+func TestExtractFunctionCalls(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not determine test file path")
+	}
+	testdataPath := filepath.Join(filepath.Dir(thisFile), "testdata", "calls.ts")
+
+	content, err := os.ReadFile(testdataPath)
+	if err != nil {
+		t.Fatalf("could not read testdata/calls.ts: %v", err)
+	}
+
+	p := NewParser()
+	result, err := p.ParseFile(testdataPath, content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	// Collect all EdgeCalls edges.
+	var callEdges []*graph.Edge
+	for _, e := range result.Edges {
+		if e.Type == graph.EdgeCalls {
+			callEdges = append(callEdges, e)
+		}
+	}
+
+	// Build node ID lookup for verification.
+	nodeByName := indexByName(result.Nodes)
+
+	// Expected calls:
+	// 1. processData -> helper (same-file function call)
+	// 2. processData -> ./utils import (format call)
+	// 3. processData -> axios import (axios.get is api_call, handled by HTTP client check)
+	// 4. DataService.process -> DataService.validate (this.validate call)
+
+	// The axios.get('/api/data') call should produce an api_call dep, not a general function call.
+	var apiCalls []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeDependency && n.Properties["kind"] == "api_call" {
+			apiCalls = append(apiCalls, n)
+		}
+	}
+	if len(apiCalls) != 1 {
+		t.Errorf("got %d api_call nodes, want 1", len(apiCalls))
+		for _, c := range apiCalls {
+			t.Logf("  api_call: %s framework=%s", c.Name, c.Properties["framework"])
+		}
+	}
+
+	// Verify processData -> helper call.
+	helperNode := nodeByName["helper"]
+	processDataNode := nodeByName["processData"]
+	if helperNode == nil || processDataNode == nil {
+		t.Fatal("expected helper and processData function nodes")
+	}
+	foundHelperCall := false
+	for _, e := range callEdges {
+		if e.SourceID == processDataNode.ID && e.TargetID == helperNode.ID {
+			foundHelperCall = true
+			break
+		}
+	}
+	if !foundHelperCall {
+		t.Error("expected EdgeCalls from processData -> helper")
+	}
+
+	// Verify processData -> ./utils import (format call).
+	utilsImport := nodeByName["./utils"]
+	if utilsImport == nil {
+		t.Fatal("expected ./utils import node")
+	}
+	foundFormatCall := false
+	for _, e := range callEdges {
+		if e.SourceID == processDataNode.ID && e.TargetID == utilsImport.ID {
+			if e.Properties != nil && e.Properties["callee"] == "format" {
+				foundFormatCall = true
+			}
+			break
+		}
+	}
+	if !foundFormatCall {
+		t.Error("expected EdgeCalls from processData -> ./utils import (format)")
+	}
+
+	// Verify DataService.process -> DataService.validate (this.validate).
+	validateNode := nodeByName["validate"]
+	processNode := nodeByName["process"]
+	if validateNode == nil || processNode == nil {
+		t.Fatal("expected validate and process method nodes")
+	}
+	foundValidateCall := false
+	for _, e := range callEdges {
+		if e.SourceID == processNode.ID && e.TargetID == validateNode.ID {
+			foundValidateCall = true
+			break
+		}
+	}
+	if !foundValidateCall {
+		t.Error("expected EdgeCalls from DataService.process -> DataService.validate")
+	}
+
+	// Count total non-api_call EdgeCalls (general function calls).
+	generalCalls := 0
+	for _, e := range callEdges {
+		// Check if target is an api_call dep.
+		isAPICall := false
+		for _, n := range result.Nodes {
+			if n.ID == e.TargetID && n.Type == graph.NodeDependency && n.Properties["kind"] == "api_call" {
+				isAPICall = true
+				break
+			}
+		}
+		if !isAPICall {
+			generalCalls++
+		}
+	}
+	// Expected: processData->helper, processData->./utils(format), DataService.process->DataService.validate = 3
+	if generalCalls != 3 {
+		t.Errorf("general function call edges = %d, want 3", generalCalls)
+		for _, e := range callEdges {
+			t.Logf("  call edge: source=%s target=%s props=%v", e.SourceID, e.TargetID, e.Properties)
+		}
+	}
+}
+
 // helpers
 
 func assertCount(t *testing.T, counts map[graph.NodeType]int, nt graph.NodeType, want int) {

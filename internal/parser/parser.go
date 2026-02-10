@@ -17,6 +17,7 @@ const (
 	LangShell      Language = "shell"
 	LangTerraform  Language = "terraform"
 	LangYAML       Language = "yaml"
+	LangManifest   Language = "manifest"
 )
 
 // FileExtensions maps each language to its recognized file extensions.
@@ -32,6 +33,7 @@ var FileExtensions = map[Language][]string{
 	LangShell:      {".sh", ".bash"},
 	LangTerraform:  {".tf", ".tfvars"},
 	LangYAML:       {".yml", ".yaml"},
+	LangManifest:   {".toml"},
 }
 
 // ParseResult holds the extracted nodes and edges from parsing a file.

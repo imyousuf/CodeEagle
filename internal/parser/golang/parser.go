@@ -64,6 +64,11 @@ type extractor struct {
 	// Track interfaces and struct methods for Implements edge detection.
 	interfaces    map[string]map[string]bool // interface name -> set of method names
 	structMethods map[string]map[string]bool // struct name -> set of method names
+
+	// Lookup maps for function call extraction, built by buildCallMaps().
+	importAliasMap    map[string]string            // import alias → dep node ID
+	funcNameMap       map[string]string            // function name → node ID
+	methodsByReceiver map[string]map[string]string // receiver type → method name → node ID
 }
 
 func (e *extractor) extract() {
@@ -74,7 +79,11 @@ func (e *extractor) extract() {
 	e.extractPackage()
 	e.extractImports()
 	e.extractDeclarations()
+	e.extractHTTPRoutes()
+	e.extractHTTPClientCalls()
 	e.extractImplementsEdges()
+	e.buildCallMaps()
+	e.extractFunctionCalls()
 }
 
 func (e *extractor) extractFileNode() {
@@ -129,6 +138,9 @@ func (e *extractor) extractImports() {
 			Line:     e.pos(imp.Pos()),
 			Language: string(parser.LangGo),
 			Package:  e.file.Name.Name,
+			Properties: map[string]string{
+				"kind": "import",
+			},
 		})
 
 		e.edges = append(e.edges, &graph.Edge{
@@ -412,6 +424,309 @@ func (e *extractor) extractValueSpec(vs *ast.ValueSpec, decl *ast.GenDecl) {
 	}
 }
 
+// httpRouteMethod maps capitalized Gin-style method names to HTTP verbs.
+var ginMethods = map[string]bool{
+	"GET":    true,
+	"POST":   true,
+	"PUT":    true,
+	"PATCH":  true,
+	"DELETE": true,
+	"Handle": true,
+	"Any":    true,
+}
+
+// routeInfo holds a detected HTTP route.
+type routeInfo struct {
+	method    string // HTTP method (GET, POST, etc.)
+	path      string // Route path
+	framework string // "gin", "net/http", "gorilla/mux"
+	handler   string // Handler function/identifier name
+	line      int    // Source line
+}
+
+func (e *extractor) extractHTTPRoutes() {
+	for _, decl := range e.file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+
+		// Determine the enclosing function node ID for Exposes edges.
+		var enclosingNodeID string
+		if fn.Recv != nil && len(fn.Recv.List) > 0 {
+			recvType := receiverTypeName(fn.Recv.List[0].Type)
+			enclosingNodeID = graph.NewNodeID(string(graph.NodeMethod), e.filePath, recvType+"."+fn.Name.Name)
+		} else {
+			enclosingNodeID = graph.NewNodeID(string(graph.NodeFunction), e.filePath, fn.Name.Name)
+		}
+
+		// Collect group prefix assignments: variable name -> prefix path.
+		groupPrefixes := make(map[string]string)
+		e.collectGroupPrefixes(fn.Body, groupPrefixes)
+
+		// Track inner calls consumed by chained .Methods() to avoid duplicates.
+		consumedCalls := make(map[*ast.CallExpr]bool)
+
+		// First pass: find .Methods() chains and mark inner HandleFunc calls as consumed.
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "Methods" {
+				return true
+			}
+			if innerCall, ok := sel.X.(*ast.CallExpr); ok {
+				consumedCalls[innerCall] = true
+			}
+			return true
+		})
+
+		// Second pass: match all route registrations.
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if consumedCalls[call] {
+				return true
+			}
+
+			routes := e.matchRouteCall(call, groupPrefixes)
+			for _, r := range routes {
+				e.addRouteNode(r, enclosingNodeID)
+			}
+
+			return true
+		})
+	}
+}
+
+// collectGroupPrefixes scans for Gin router group assignments like:
+//
+//	v1 := r.Group("/api/v1")
+//	api := router.Group("/api")
+func (e *extractor) collectGroupPrefixes(body *ast.BlockStmt, prefixes map[string]string) {
+	for _, stmt := range body.List {
+		assign, ok := stmt.(*ast.AssignStmt)
+		if !ok || len(assign.Lhs) == 0 || len(assign.Rhs) == 0 {
+			continue
+		}
+		call, ok := assign.Rhs[0].(*ast.CallExpr)
+		if !ok {
+			continue
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Group" {
+			continue
+		}
+		if len(call.Args) < 1 {
+			continue
+		}
+		pathLit, ok := call.Args[0].(*ast.BasicLit)
+		if !ok || pathLit.Kind != token.STRING {
+			continue
+		}
+		prefix := strings.Trim(pathLit.Value, `"`)
+
+		// Check if the receiver itself is a known group variable.
+		if recvIdent, ok := sel.X.(*ast.Ident); ok {
+			if parentPrefix, exists := prefixes[recvIdent.Name]; exists {
+				prefix = strings.TrimRight(parentPrefix, "/") + prefix
+			}
+		}
+
+		// Store for each LHS identifier.
+		for _, lhs := range assign.Lhs {
+			if ident, ok := lhs.(*ast.Ident); ok {
+				prefixes[ident.Name] = prefix
+			}
+		}
+	}
+}
+
+// matchRouteCall attempts to match a call expression as an HTTP route registration.
+// Returns nil if it doesn't match.
+func (e *extractor) matchRouteCall(call *ast.CallExpr, groupPrefixes map[string]string) []routeInfo {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil
+	}
+
+	methodName := sel.Sel.Name
+
+	// Case 1: Gin routes — r.GET("/path", handler)
+	if ginMethods[methodName] {
+		return e.matchGinRoute(call, sel, methodName, groupPrefixes)
+	}
+
+	// Case 2: net/http or gorilla/mux — mux.HandleFunc("/path", handler) or http.Handle("/path", handler)
+	if methodName == "HandleFunc" || methodName == "Handle" {
+		return e.matchHandleFuncRoute(call, sel)
+	}
+
+	// Case 3: gorilla/mux chained — r.HandleFunc("/path", handler).Methods("GET")
+	// This is handled when we see the outer Methods() call.
+	if methodName == "Methods" {
+		return e.matchGorillaMethodsChain(call, sel, groupPrefixes)
+	}
+
+	return nil
+}
+
+func (e *extractor) matchGinRoute(call *ast.CallExpr, sel *ast.SelectorExpr, methodName string, groupPrefixes map[string]string) []routeInfo {
+	if len(call.Args) < 1 {
+		return nil
+	}
+
+	pathLit, ok := call.Args[0].(*ast.BasicLit)
+	if !ok || pathLit.Kind != token.STRING {
+		return nil
+	}
+	path := strings.Trim(pathLit.Value, `"`)
+
+	// Check if receiver is a group variable with a known prefix.
+	if recvIdent, ok := sel.X.(*ast.Ident); ok {
+		if prefix, exists := groupPrefixes[recvIdent.Name]; exists {
+			path = strings.TrimRight(prefix, "/") + path
+		}
+	}
+
+	httpMethod := methodName
+	if methodName == "Handle" || methodName == "Any" {
+		httpMethod = methodName
+	}
+
+	handler := e.extractHandlerName(call, 1)
+
+	return []routeInfo{{
+		method:    httpMethod,
+		path:      path,
+		framework: "gin",
+		handler:   handler,
+		line:      e.pos(call.Pos()),
+	}}
+}
+
+func (e *extractor) matchHandleFuncRoute(call *ast.CallExpr, sel *ast.SelectorExpr) []routeInfo {
+	if len(call.Args) < 1 {
+		return nil
+	}
+
+	pathLit, ok := call.Args[0].(*ast.BasicLit)
+	if !ok || pathLit.Kind != token.STRING {
+		return nil
+	}
+	path := strings.Trim(pathLit.Value, `"`)
+
+	// Determine framework: if receiver is "http" package selector, it's net/http.
+	// Otherwise, assume gorilla/mux or net/http (both use HandleFunc).
+	framework := "net/http"
+	if recvIdent, ok := sel.X.(*ast.Ident); ok {
+		if recvIdent.Name != "http" {
+			// Could be gorilla/mux or custom mux — mark as net/http for plain HandleFunc.
+			framework = "net/http"
+		}
+	}
+
+	handler := e.extractHandlerName(call, 1)
+
+	return []routeInfo{{
+		method:    "ANY",
+		path:      path,
+		framework: framework,
+		handler:   handler,
+		line:      e.pos(call.Pos()),
+	}}
+}
+
+// matchGorillaMethodsChain handles gorilla/mux chained pattern:
+//
+//	r.HandleFunc("/path", handler).Methods("GET")
+func (e *extractor) matchGorillaMethodsChain(call *ast.CallExpr, sel *ast.SelectorExpr, groupPrefixes map[string]string) []routeInfo {
+	// sel.X should be the HandleFunc call expression.
+	innerCall, ok := sel.X.(*ast.CallExpr)
+	if !ok {
+		return nil
+	}
+	innerSel, ok := innerCall.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil
+	}
+	if innerSel.Sel.Name != "HandleFunc" && innerSel.Sel.Name != "Handle" {
+		return nil
+	}
+	if len(innerCall.Args) < 1 {
+		return nil
+	}
+
+	pathLit, ok := innerCall.Args[0].(*ast.BasicLit)
+	if !ok || pathLit.Kind != token.STRING {
+		return nil
+	}
+	path := strings.Trim(pathLit.Value, `"`)
+
+	// Extract the HTTP method from Methods() args.
+	httpMethod := "ANY"
+	if len(call.Args) >= 1 {
+		if methodLit, ok := call.Args[0].(*ast.BasicLit); ok && methodLit.Kind == token.STRING {
+			httpMethod = strings.Trim(methodLit.Value, `"`)
+		}
+	}
+
+	handler := e.extractHandlerName(innerCall, 1)
+
+	return []routeInfo{{
+		method:    httpMethod,
+		path:      path,
+		framework: "gorilla/mux",
+		handler:   handler,
+		line:      e.pos(innerCall.Pos()),
+	}}
+}
+
+// extractHandlerName extracts the handler function/identifier name from the argIndex-th argument.
+func (e *extractor) extractHandlerName(call *ast.CallExpr, argIndex int) string {
+	if argIndex >= len(call.Args) {
+		return ""
+	}
+	arg := call.Args[argIndex]
+	switch h := arg.(type) {
+	case *ast.Ident:
+		return h.Name
+	case *ast.SelectorExpr:
+		return typeExprString(h)
+	default:
+		return ""
+	}
+}
+
+func (e *extractor) addRouteNode(r routeInfo, enclosingNodeID string) {
+	endpointID := graph.NewNodeID(string(graph.NodeAPIEndpoint), e.filePath, r.method+":"+r.path)
+	e.nodes = append(e.nodes, &graph.Node{
+		ID:       endpointID,
+		Type:     graph.NodeAPIEndpoint,
+		Name:     r.method + " " + r.path,
+		FilePath: e.filePath,
+		Line:     r.line,
+		Language: string(parser.LangGo),
+		Properties: map[string]string{
+			"http_method": r.method,
+			"path":        r.path,
+			"framework":   r.framework,
+			"handler":     r.handler,
+		},
+	})
+
+	e.edges = append(e.edges, &graph.Edge{
+		ID:       edgeID(enclosingNodeID, endpointID, string(graph.EdgeExposes)),
+		Type:     graph.EdgeExposes,
+		SourceID: enclosingNodeID,
+		TargetID: endpointID,
+	})
+}
+
 func (e *extractor) extractImplementsEdges() {
 	for ifaceName, ifaceMethods := range e.interfaces {
 		if len(ifaceMethods) == 0 {
@@ -429,6 +744,300 @@ func (e *extractor) extractImplementsEdges() {
 				})
 			}
 		}
+	}
+}
+
+// Go HTTP client package-level functions.
+var goHTTPPackageFuncs = map[string]string{
+	"Get":      "GET",
+	"Post":     "POST",
+	"Head":     "HEAD",
+	"PostForm": "POST",
+}
+
+// Go HTTP request constructors.
+var goHTTPNewRequestFuncs = map[string]bool{
+	"NewRequest":            true,
+	"NewRequestWithContext": true,
+}
+
+// Go HTTP client method calls that carry a URL argument.
+var goHTTPClientMethodsWithURL = map[string]string{
+	"Get":  "GET",
+	"Post": "POST",
+	"Head": "HEAD",
+}
+
+// extractHTTPClientCalls walks function/method bodies for Go net/http client calls.
+func (e *extractor) extractHTTPClientCalls() {
+	// Build a quick map of import aliases → import path.
+	httpAlias := "" // alias for "net/http"
+	for _, imp := range e.file.Imports {
+		path := strings.Trim(imp.Path.Value, `"`)
+		if path == "net/http" {
+			if imp.Name != nil {
+				httpAlias = imp.Name.Name
+			} else {
+				httpAlias = "http"
+			}
+			break
+		}
+	}
+	if httpAlias == "" {
+		return // "net/http" not imported
+	}
+
+	for _, decl := range e.file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+
+		var enclosingNodeID string
+		if fn.Recv != nil && len(fn.Recv.List) > 0 {
+			recvType := receiverTypeName(fn.Recv.List[0].Type)
+			enclosingNodeID = graph.NewNodeID(string(graph.NodeMethod), e.filePath, recvType+"."+fn.Name.Name)
+		} else {
+			enclosingNodeID = graph.NewNodeID(string(graph.NodeFunction), e.filePath, fn.Name.Name)
+		}
+
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+
+			methodName := sel.Sel.Name
+
+			// Case 1: http.Get(url), http.Post(url, ...), http.Head(url), http.PostForm(url, ...)
+			if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == httpAlias {
+				if httpMethod, ok := goHTTPPackageFuncs[methodName]; ok {
+					path := e.extractStringArg(call, 0)
+					if path != "" {
+						e.addHTTPClientCallNode(httpMethod, path, "net/http", enclosingNodeID, e.pos(call.Pos()))
+					}
+					return true
+				}
+
+				// Case 2: http.NewRequest("METHOD", url, ...) or http.NewRequestWithContext(ctx, "METHOD", url, ...)
+				if goHTTPNewRequestFuncs[methodName] {
+					methodArgIdx := 0
+					urlArgIdx := 1
+					if methodName == "NewRequestWithContext" {
+						methodArgIdx = 1
+						urlArgIdx = 2
+					}
+					httpMethod := e.extractStringArg(call, methodArgIdx)
+					path := e.extractStringArg(call, urlArgIdx)
+					if httpMethod == "" {
+						httpMethod = "UNKNOWN"
+					}
+					if path != "" {
+						e.addHTTPClientCallNode(httpMethod, path, "net/http", enclosingNodeID, e.pos(call.Pos()))
+					}
+					return true
+				}
+			}
+
+			// Case 3: client.Get(url), client.Post(url, ...), client.Head(url)
+			if httpMethod, ok := goHTTPClientMethodsWithURL[methodName]; ok {
+				path := e.extractStringArg(call, 0)
+				if path != "" {
+					e.addHTTPClientCallNode(httpMethod, path, "net/http", enclosingNodeID, e.pos(call.Pos()))
+				}
+				return true
+			}
+
+			// Case 4: client.Do(req) — method is on the request, mark as UNKNOWN
+			if methodName == "Do" {
+				e.addHTTPClientCallNode("UNKNOWN", "UNKNOWN", "net/http", enclosingNodeID, e.pos(call.Pos()))
+			}
+
+			return true
+		})
+	}
+}
+
+func (e *extractor) extractStringArg(call *ast.CallExpr, idx int) string {
+	if idx >= len(call.Args) {
+		return ""
+	}
+	arg := call.Args[idx]
+
+	switch a := arg.(type) {
+	case *ast.BasicLit:
+		if a.Kind == token.STRING {
+			return strings.Trim(a.Value, `"`)
+		}
+	case *ast.BinaryExpr:
+		// String concatenation: extract left-most literal + wildcard
+		return e.extractConcatStringArg(a)
+	}
+	return ""
+}
+
+func (e *extractor) extractConcatStringArg(expr *ast.BinaryExpr) string {
+	if expr.Op != token.ADD {
+		return ""
+	}
+	// Get the left-most string literal
+	left := ""
+	switch l := expr.X.(type) {
+	case *ast.BasicLit:
+		if l.Kind == token.STRING {
+			left = strings.Trim(l.Value, `"`)
+		}
+	case *ast.BinaryExpr:
+		left = e.extractConcatStringArg(l)
+	}
+	if left == "" {
+		return ""
+	}
+	return left + "*"
+}
+
+func (e *extractor) addHTTPClientCallNode(httpMethod, path, framework, enclosingNodeID string, line int) {
+	depID := graph.NewNodeID(string(graph.NodeDependency), e.filePath, "api_call:"+httpMethod+":"+path+":"+fmt.Sprintf("%d", line))
+
+	e.nodes = append(e.nodes, &graph.Node{
+		ID:       depID,
+		Type:     graph.NodeDependency,
+		Name:     httpMethod + " " + path,
+		FilePath: e.filePath,
+		Line:     line,
+		Language: string(parser.LangGo),
+		Properties: map[string]string{
+			"kind":        "api_call",
+			"http_method": httpMethod,
+			"path":        path,
+			"framework":   framework,
+		},
+	})
+
+	e.edges = append(e.edges, &graph.Edge{
+		ID:       edgeID(enclosingNodeID, depID, string(graph.EdgeCalls)),
+		Type:     graph.EdgeCalls,
+		SourceID: enclosingNodeID,
+		TargetID: depID,
+	})
+}
+
+// Go builtins to skip during function call extraction.
+var goBuiltins = map[string]bool{
+	"make": true, "len": true, "cap": true, "append": true, "copy": true,
+	"delete": true, "close": true, "new": true, "panic": true, "recover": true,
+	"print": true, "println": true, "error": true, "complex": true, "real": true,
+	"imag": true, "clear": true, "min": true, "max": true,
+}
+
+// buildCallMaps builds lookup maps for resolving function call targets.
+func (e *extractor) buildCallMaps() {
+	e.importAliasMap = make(map[string]string) // alias → dep node ID
+	e.funcNameMap = make(map[string]string)    // func name → node ID
+
+	// Build import alias map
+	for _, imp := range e.file.Imports {
+		path := strings.Trim(imp.Path.Value, `"`)
+		depID := graph.NewNodeID(string(graph.NodeDependency), e.filePath, path)
+
+		if imp.Name != nil {
+			// Explicit alias
+			e.importAliasMap[imp.Name.Name] = depID
+		} else {
+			// Default: last component of path
+			parts := strings.Split(path, "/")
+			e.importAliasMap[parts[len(parts)-1]] = depID
+		}
+	}
+
+	// Build function name map from already-extracted nodes
+	for _, n := range e.nodes {
+		if n.Type == graph.NodeFunction && n.FilePath == e.filePath {
+			e.funcNameMap[n.Name] = n.ID
+		}
+	}
+
+	// Build method-by-receiver map
+	e.methodsByReceiver = make(map[string]map[string]string) // recvType → methodName → nodeID
+	for _, n := range e.nodes {
+		if n.Type == graph.NodeMethod && n.FilePath == e.filePath {
+			recv := n.Properties["receiver"]
+			if recv != "" {
+				if e.methodsByReceiver[recv] == nil {
+					e.methodsByReceiver[recv] = make(map[string]string)
+				}
+				e.methodsByReceiver[recv][n.Name] = n.ID
+			}
+		}
+	}
+}
+
+// extractFunctionCalls walks all function/method bodies and creates EdgeCalls for
+// detected call expressions: same-file calls and import-qualified calls.
+func (e *extractor) extractFunctionCalls() {
+	for _, decl := range e.file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+
+		var enclosingNodeID string
+		if fn.Recv != nil && len(fn.Recv.List) > 0 {
+			recvType := receiverTypeName(fn.Recv.List[0].Type)
+			enclosingNodeID = graph.NewNodeID(string(graph.NodeMethod), e.filePath, recvType+"."+fn.Name.Name)
+		} else {
+			enclosingNodeID = graph.NewNodeID(string(graph.NodeFunction), e.filePath, fn.Name.Name)
+		}
+
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+
+			switch fn := call.Fun.(type) {
+			case *ast.SelectorExpr:
+				// pkg.Func() or receiver.Method()
+				if ident, ok := fn.X.(*ast.Ident); ok {
+					callee := fn.Sel.Name
+					// Check if it's an import-qualified call
+					if depID, ok := e.importAliasMap[ident.Name]; ok {
+						e.edges = append(e.edges, &graph.Edge{
+							ID:       edgeID(enclosingNodeID, depID, string(graph.EdgeCalls)+":"+callee),
+							Type:     graph.EdgeCalls,
+							SourceID: enclosingNodeID,
+							TargetID: depID,
+							Properties: map[string]string{
+								"callee": callee,
+							},
+						})
+					}
+				}
+			case *ast.Ident:
+				// Direct call: helper()
+				name := fn.Name
+				if goBuiltins[name] {
+					return true
+				}
+				if targetID, ok := e.funcNameMap[name]; ok {
+					if targetID != enclosingNodeID { // skip self-recursion noise
+						e.edges = append(e.edges, &graph.Edge{
+							ID:       edgeID(enclosingNodeID, targetID, string(graph.EdgeCalls)),
+							Type:     graph.EdgeCalls,
+							SourceID: enclosingNodeID,
+							TargetID: targetID,
+						})
+					}
+				}
+			}
+
+			return true
+		})
 	}
 }
 

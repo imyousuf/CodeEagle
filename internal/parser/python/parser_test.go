@@ -290,6 +290,496 @@ func TestParseSampleFixture(t *testing.T) {
 	}
 }
 
+const fastAPISource = `"""A FastAPI application."""
+
+from fastapi import APIRouter, FastAPI
+
+app = FastAPI()
+router = APIRouter()
+
+
+@router.get("/instances")
+async def list_instances():
+    """List all instances."""
+    return []
+
+
+@router.get("/instances/{instance_id}")
+async def get_instance(instance_id: str):
+    """Get a specific instance."""
+    return {"id": instance_id}
+
+
+@router.post("/instances")
+async def create_instance(data):
+    """Create a new instance."""
+    return {"id": "new"}
+
+
+@router.put("/instances/{instance_id}")
+async def update_instance(instance_id: str, data):
+    """Update an instance."""
+    return {"id": instance_id}
+
+
+@router.delete("/instances/{instance_id}")
+async def delete_instance(instance_id: str):
+    """Delete an instance."""
+    return {"deleted": True}
+
+
+@router.patch("/instances/{instance_id}/status")
+async def patch_instance_status(instance_id: str):
+    """Patch instance status."""
+    return {"patched": True}
+
+
+app.include_router(router, prefix="/api/v1")
+`
+
+func TestParseFastAPIEndpoints(t *testing.T) {
+	p := NewParser()
+	result, err := p.ParseFile("app/routes.py", []byte(fastAPISource))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	// Collect API endpoints
+	var endpoints []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeAPIEndpoint {
+			endpoints = append(endpoints, n)
+		}
+	}
+
+	if len(endpoints) != 6 {
+		t.Fatalf("expected 6 API endpoints, got %d", len(endpoints))
+	}
+
+	// Verify endpoint properties
+	endpointsByPath := make(map[string]*graph.Node)
+	for _, ep := range endpoints {
+		endpointsByPath[ep.Properties["http_method"]+":"+ep.Properties["path"]] = ep
+	}
+
+	expectedEndpoints := []struct {
+		method  string
+		path    string
+		handler string
+	}{
+		{"GET", "/instances", "list_instances"},
+		{"GET", "/instances/{instance_id}", "get_instance"},
+		{"POST", "/instances", "create_instance"},
+		{"PUT", "/instances/{instance_id}", "update_instance"},
+		{"DELETE", "/instances/{instance_id}", "delete_instance"},
+		{"PATCH", "/instances/{instance_id}/status", "patch_instance_status"},
+	}
+
+	for _, exp := range expectedEndpoints {
+		key := exp.method + ":" + exp.path
+		ep, ok := endpointsByPath[key]
+		if !ok {
+			t.Errorf("missing endpoint %s", key)
+			continue
+		}
+		if ep.Properties["framework"] != "fastapi" {
+			t.Errorf("endpoint %s: framework = %q, want %q", key, ep.Properties["framework"], "fastapi")
+		}
+		if ep.Properties["handler"] != exp.handler {
+			t.Errorf("endpoint %s: handler = %q, want %q", key, ep.Properties["handler"], exp.handler)
+		}
+	}
+
+	// Verify EdgeExposes edges exist
+	exposesCount := 0
+	for _, edge := range result.Edges {
+		if edge.Type == graph.EdgeExposes {
+			exposesCount++
+		}
+	}
+	if exposesCount != 6 {
+		t.Errorf("expected 6 EdgeExposes edges, got %d", exposesCount)
+	}
+}
+
+const flaskSource = `"""A Flask application."""
+
+from flask import Flask, Blueprint
+
+app = Flask(__name__)
+bp = Blueprint("users", __name__)
+
+
+@app.route("/health")
+def health_check():
+    """Health check endpoint."""
+    return {"status": "ok"}
+
+
+@bp.route("/users")
+def list_users():
+    """List users."""
+    return []
+`
+
+func TestParseFlaskEndpoints(t *testing.T) {
+	p := NewParser()
+	result, err := p.ParseFile("app/flask_routes.py", []byte(flaskSource))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	var endpoints []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeAPIEndpoint {
+			endpoints = append(endpoints, n)
+		}
+	}
+
+	if len(endpoints) != 2 {
+		t.Fatalf("expected 2 Flask endpoints, got %d", len(endpoints))
+	}
+
+	endpointsByPath := make(map[string]*graph.Node)
+	for _, ep := range endpoints {
+		endpointsByPath[ep.Properties["path"]] = ep
+	}
+
+	if ep, ok := endpointsByPath["/health"]; ok {
+		if ep.Properties["framework"] != "flask" {
+			t.Errorf("/health: framework = %q, want %q", ep.Properties["framework"], "flask")
+		}
+		if ep.Properties["handler"] != "health_check" {
+			t.Errorf("/health: handler = %q, want %q", ep.Properties["handler"], "health_check")
+		}
+	} else {
+		t.Error("missing /health endpoint")
+	}
+
+	if ep, ok := endpointsByPath["/users"]; ok {
+		if ep.Properties["framework"] != "flask" {
+			t.Errorf("/users: framework = %q, want %q", ep.Properties["framework"], "flask")
+		}
+	} else {
+		t.Error("missing /users endpoint")
+	}
+}
+
+func TestParseIncludeRouter(t *testing.T) {
+	p := NewParser()
+	result, err := p.ParseFile("app/routes.py", []byte(fastAPISource))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	// Find router_mount variable
+	var routerMount *graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeVariable && n.Properties != nil && n.Properties["kind"] == "router_mount" {
+			routerMount = n
+			break
+		}
+	}
+
+	if routerMount == nil {
+		t.Fatal("expected router_mount variable node")
+	}
+	if routerMount.Properties["prefix"] != "/api/v1" {
+		t.Errorf("router_mount prefix = %q, want %q", routerMount.Properties["prefix"], "/api/v1")
+	}
+	if routerMount.Properties["router"] != "router" {
+		t.Errorf("router_mount router = %q, want %q", routerMount.Properties["router"], "router")
+	}
+}
+
+const httpClientSource = `"""Python code with HTTP client calls."""
+
+import requests
+import httpx
+
+
+def fetch_instances():
+    response = requests.get("/api/v1/instances")
+    return response.json()
+
+
+def create_instance(name):
+    response = requests.post("/api/v1/instances", json={"name": name})
+    return response.json()
+
+
+def update_instance(instance_id, data):
+    response = requests.put("/api/v1/instances/123", json=data)
+    return response.json()
+
+
+def delete_instance(instance_id):
+    response = requests.delete("/api/v1/instances/456")
+    return response.status_code
+`
+
+func TestDetectRequestsCalls(t *testing.T) {
+	p := NewParser()
+	result, err := p.ParseFile("services/client.py", []byte(httpClientSource))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	// Collect api_call dependencies
+	var apiCalls []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeDependency && n.Properties != nil && n.Properties["kind"] == "api_call" {
+			apiCalls = append(apiCalls, n)
+		}
+	}
+
+	if len(apiCalls) < 4 {
+		t.Fatalf("expected at least 4 api_call dependencies, got %d", len(apiCalls))
+	}
+
+	// Verify methods and paths are extracted
+	foundMethods := make(map[string]bool)
+	for _, call := range apiCalls {
+		method := call.Properties["http_method"]
+		foundMethods[method] = true
+		if call.Properties["framework"] != "requests" {
+			t.Errorf("api_call framework = %q, want %q", call.Properties["framework"], "requests")
+		}
+	}
+
+	for _, method := range []string{"GET", "POST", "PUT", "DELETE"} {
+		if !foundMethods[method] {
+			t.Errorf("missing api_call with method %s", method)
+		}
+	}
+
+	// Verify EdgeCalls edges exist
+	callsCount := 0
+	for _, edge := range result.Edges {
+		if edge.Type == graph.EdgeCalls {
+			callsCount++
+		}
+	}
+	if callsCount < 4 {
+		t.Errorf("expected at least 4 EdgeCalls edges, got %d", callsCount)
+	}
+}
+
+const httpxSource = `"""Httpx client calls."""
+
+import httpx
+
+
+async def async_fetch(instance_id):
+    async with httpx.AsyncClient() as client:
+        response = await client.get("/api/v1/agents")
+        return response.json()
+`
+
+func TestDetectHttpxCalls(t *testing.T) {
+	p := NewParser()
+	result, err := p.ParseFile("services/async_client.py", []byte(httpxSource))
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	var apiCalls []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeDependency && n.Properties != nil && n.Properties["kind"] == "api_call" {
+			apiCalls = append(apiCalls, n)
+		}
+	}
+
+	if len(apiCalls) < 1 {
+		t.Fatalf("expected at least 1 api_call dependency, got %d", len(apiCalls))
+	}
+
+	found := false
+	for _, call := range apiCalls {
+		if call.Properties["http_method"] == "GET" && call.Properties["path"] == "/api/v1/agents" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected api_call for GET /api/v1/agents")
+	}
+}
+
+func TestParseFastAPIFixture(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not determine test file path")
+	}
+	fixturePath := filepath.Join(filepath.Dir(thisFile), "testdata", "fastapi_app.py")
+
+	content, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Skipf("testdata/fastapi_app.py not found: %v", err)
+	}
+
+	p := NewParser()
+	result, err := p.ParseFile(fixturePath, content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	var endpoints []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeAPIEndpoint {
+			endpoints = append(endpoints, n)
+		}
+	}
+
+	if len(endpoints) != 6 {
+		t.Errorf("expected 6 API endpoints from fixture, got %d", len(endpoints))
+	}
+
+	// Check router mount
+	var routerMount *graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeVariable && n.Properties != nil && n.Properties["kind"] == "router_mount" {
+			routerMount = n
+			break
+		}
+	}
+	if routerMount == nil {
+		t.Error("expected router_mount variable node from fixture")
+	}
+}
+
+func TestParseHTTPClientFixture(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not determine test file path")
+	}
+	fixturePath := filepath.Join(filepath.Dir(thisFile), "testdata", "http_clients.py")
+
+	content, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Skipf("testdata/http_clients.py not found: %v", err)
+	}
+
+	p := NewParser()
+	result, err := p.ParseFile(fixturePath, content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	var apiCalls []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeDependency && n.Properties != nil && n.Properties["kind"] == "api_call" {
+			apiCalls = append(apiCalls, n)
+		}
+	}
+
+	if len(apiCalls) < 3 {
+		t.Errorf("expected at least 3 api_call dependencies from fixture, got %d", len(apiCalls))
+	}
+}
+
+func TestExtractFunctionCalls(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not determine test file path")
+	}
+	fixturePath := filepath.Join(filepath.Dir(thisFile), "testdata", "calls.py")
+
+	content, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("testdata/calls.py not found: %v", err)
+	}
+
+	p := NewParser()
+	result, err := p.ParseFile(fixturePath, content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	// Build edge lookup: sourceID+targetID → edge
+	type edgeKey struct {
+		sourceID string
+		targetID string
+		edgeType graph.EdgeType
+	}
+	edgeMap := make(map[edgeKey]*graph.Edge)
+	for _, edge := range result.Edges {
+		edgeMap[edgeKey{edge.SourceID, edge.TargetID, edge.Type}] = edge
+	}
+
+	// Build node lookup by name and type
+	nodeByNameType := make(map[string]*graph.Node)
+	for _, n := range result.Nodes {
+		key := string(n.Type) + ":" + n.Name
+		nodeByNameType[key] = n
+	}
+
+	// Helper to get a node ID
+	getNodeID := func(nodeType, name string) string {
+		if n, ok := nodeByNameType[nodeType+":"+name]; ok {
+			return n.ID
+		}
+		t.Fatalf("missing node %s:%s", nodeType, name)
+		return ""
+	}
+
+	processDataID := getNodeID("Function", "process_data")
+	helperID := getNodeID("Function", "helper")
+	osDepID := getNodeID("Dependency", "os")
+	jsonDepID := getNodeID("Dependency", "json")
+	datetimeDepID := getNodeID("Dependency", "datetime")
+	processMethodID := getNodeID("Method", "process")
+	validateMethodID := getNodeID("Method", "validate")
+
+	// 1. process_data → helper (same-file call)
+	if _, ok := edgeMap[edgeKey{processDataID, helperID, graph.EdgeCalls}]; !ok {
+		t.Error("missing EdgeCalls: process_data → helper (same-file call)")
+	}
+
+	// 2. process_data → os import dep (import-qualified: os.path.join)
+	if _, ok := edgeMap[edgeKey{processDataID, osDepID, graph.EdgeCalls}]; !ok {
+		t.Error("missing EdgeCalls: process_data → os (import-qualified call)")
+	}
+
+	// 3. process_data → json import dep (import-qualified: json.dumps)
+	if e, ok := edgeMap[edgeKey{processDataID, jsonDepID, graph.EdgeCalls}]; !ok {
+		t.Error("missing EdgeCalls: process_data → json (import-qualified call)")
+	} else if e.Properties["callee"] != "dumps" {
+		t.Errorf("process_data → json callee = %q, want %q", e.Properties["callee"], "dumps")
+	}
+
+	// 4. process_data → datetime import dep (import-qualified: datetime.now)
+	if _, ok := edgeMap[edgeKey{processDataID, datetimeDepID, graph.EdgeCalls}]; !ok {
+		t.Error("missing EdgeCalls: process_data → datetime (import-qualified call)")
+	}
+
+	// 5. DataProcessor.process → DataProcessor.validate (self call)
+	if e, ok := edgeMap[edgeKey{processMethodID, validateMethodID, graph.EdgeCalls}]; !ok {
+		t.Error("missing EdgeCalls: DataProcessor.process → DataProcessor.validate (self call)")
+	} else if e.Properties["callee"] != "validate" {
+		t.Errorf("process → validate callee = %q, want %q", e.Properties["callee"], "validate")
+	}
+
+	// 6. DataProcessor.process → json import dep (import-qualified: json.loads)
+	if e, ok := edgeMap[edgeKey{processMethodID, jsonDepID, graph.EdgeCalls}]; !ok {
+		t.Error("missing EdgeCalls: DataProcessor.process → json (import-qualified call)")
+	} else if e.Properties["callee"] != "loads" {
+		t.Errorf("process → json callee = %q, want %q", e.Properties["callee"], "loads")
+	}
+
+	// 7. Verify builtins like len() do NOT generate EdgeCalls
+	// len() is called in validate() - make sure no EdgeCalls points to a "len" node
+	for _, edge := range result.Edges {
+		if edge.Type == graph.EdgeCalls {
+			for _, n := range result.Nodes {
+				if n.ID == edge.TargetID && n.Name == "len" {
+					t.Error("builtin len() should NOT generate EdgeCalls")
+				}
+			}
+		}
+	}
+}
+
 // Helpers
 
 func assertCount(t *testing.T, counts map[graph.NodeType]int, nt graph.NodeType, want int) {

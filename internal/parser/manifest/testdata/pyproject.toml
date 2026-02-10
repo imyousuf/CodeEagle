@@ -1,0 +1,21 @@
+[project]
+name = "email-receiver"
+version = "1.2.3"
+description = "Email processing service"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn==0.23.2",
+    "llm-framework==0.2.46",
+    "pydantic~=2.0",
+    "boto3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff==0.1.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.backends._legacy:_Backend"

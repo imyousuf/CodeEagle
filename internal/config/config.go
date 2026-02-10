@@ -93,6 +93,8 @@ type AgentsConfig struct {
 	Location string `mapstructure:"location"`
 	// AutoSummarize enables LLM-based summarization after indexing.
 	AutoSummarize bool `mapstructure:"auto_summarize"`
+	// AutoLink enables LLM-assisted cross-service edge detection after static linking.
+	AutoLink bool `mapstructure:"auto_link"`
 	// CredentialsFile is the path to a GCP service account credentials JSON file (for Vertex AI).
 	CredentialsFile string `mapstructure:"credentials_file"`
 }

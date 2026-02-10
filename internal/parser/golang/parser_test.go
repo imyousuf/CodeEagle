@@ -274,6 +274,443 @@ func TestParseSampleFixture(t *testing.T) {
 	}
 }
 
+func TestParseGinRoutes(t *testing.T) {
+	content := []byte(`package main
+
+import "github.com/gin-gonic/gin"
+
+func healthCheck(c *gin.Context) {}
+func createUser(c *gin.Context)  {}
+func updateUser(c *gin.Context)  {}
+func deleteUser(c *gin.Context)  {}
+
+func SetupRoutes(r *gin.Engine) {
+	r.GET("/health", healthCheck)
+	r.POST("/users", createUser)
+	r.PUT("/users/:id", updateUser)
+	r.DELETE("/users/:id", deleteUser)
+}
+`)
+
+	p := NewParser()
+	result, err := p.ParseFile("routes.go", content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	endpoints := filterNodesByType(result.Nodes, graph.NodeAPIEndpoint)
+	if len(endpoints) != 4 {
+		t.Fatalf("expected 4 API endpoints, got %d", len(endpoints))
+	}
+
+	wantRoutes := map[string]string{
+		"GET /health":       "gin",
+		"POST /users":       "gin",
+		"PUT /users/:id":    "gin",
+		"DELETE /users/:id": "gin",
+	}
+
+	for _, ep := range endpoints {
+		fw, ok := wantRoutes[ep.Name]
+		if !ok {
+			t.Errorf("unexpected endpoint %q", ep.Name)
+			continue
+		}
+		if ep.Properties["framework"] != fw {
+			t.Errorf("endpoint %q framework = %q, want %q", ep.Name, ep.Properties["framework"], fw)
+		}
+		delete(wantRoutes, ep.Name)
+	}
+	for name := range wantRoutes {
+		t.Errorf("missing endpoint %q", name)
+	}
+
+	// Verify Exposes edges exist.
+	exposesCount := 0
+	for _, e := range result.Edges {
+		if e.Type == graph.EdgeExposes {
+			exposesCount++
+		}
+	}
+	if exposesCount != 4 {
+		t.Errorf("Exposes edge count = %d, want 4", exposesCount)
+	}
+}
+
+func TestParseNetHTTPRoutes(t *testing.T) {
+	content := []byte(`package main
+
+import "net/http"
+
+func dataHandler(w http.ResponseWriter, r *http.Request) {}
+func statusHandler(w http.ResponseWriter, r *http.Request) {}
+
+func SetupHTTP() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/data", dataHandler)
+	http.HandleFunc("/status", statusHandler)
+}
+`)
+
+	p := NewParser()
+	result, err := p.ParseFile("httpsetup.go", content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	endpoints := filterNodesByType(result.Nodes, graph.NodeAPIEndpoint)
+	if len(endpoints) != 2 {
+		t.Fatalf("expected 2 API endpoints, got %d", len(endpoints))
+	}
+
+	wantPaths := map[string]bool{
+		"ANY /api/data": true,
+		"ANY /status":   true,
+	}
+
+	for _, ep := range endpoints {
+		if !wantPaths[ep.Name] {
+			t.Errorf("unexpected endpoint %q", ep.Name)
+		}
+		if ep.Properties["framework"] != "net/http" {
+			t.Errorf("endpoint %q framework = %q, want %q", ep.Name, ep.Properties["framework"], "net/http")
+		}
+		delete(wantPaths, ep.Name)
+	}
+	for name := range wantPaths {
+		t.Errorf("missing endpoint %q", name)
+	}
+}
+
+func TestParseGinRouterGroups(t *testing.T) {
+	content := []byte(`package main
+
+import "github.com/gin-gonic/gin"
+
+func listUsers(c *gin.Context)  {}
+func createUser(c *gin.Context) {}
+func listItems(c *gin.Context)  {}
+func createItem(c *gin.Context) {}
+
+func SetupGrouped(router *gin.Engine) {
+	api := router.Group("/api/v1")
+	api.GET("/users", listUsers)
+	api.POST("/users", createUser)
+
+	items := api.Group("/items")
+	items.GET("/", listItems)
+	items.POST("/", createItem)
+}
+`)
+
+	p := NewParser()
+	result, err := p.ParseFile("grouped.go", content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	endpoints := filterNodesByType(result.Nodes, graph.NodeAPIEndpoint)
+	if len(endpoints) != 4 {
+		t.Fatalf("expected 4 API endpoints, got %d", len(endpoints))
+	}
+
+	wantRoutes := map[string]string{
+		"GET /api/v1/users":   "gin",
+		"POST /api/v1/users":  "gin",
+		"GET /api/v1/items/":  "gin",
+		"POST /api/v1/items/": "gin",
+	}
+
+	for _, ep := range endpoints {
+		fw, ok := wantRoutes[ep.Name]
+		if !ok {
+			t.Errorf("unexpected endpoint %q", ep.Name)
+			continue
+		}
+		if ep.Properties["framework"] != fw {
+			t.Errorf("endpoint %q framework = %q, want %q", ep.Name, ep.Properties["framework"], fw)
+		}
+		if ep.Properties["path"] == "" {
+			t.Errorf("endpoint %q missing path property", ep.Name)
+		}
+		delete(wantRoutes, ep.Name)
+	}
+	for name := range wantRoutes {
+		t.Errorf("missing endpoint %q", name)
+	}
+}
+
+func TestParseGorillaRoutes(t *testing.T) {
+	content := []byte(`package main
+
+import (
+	"net/http"
+	"github.com/gorilla/mux"
+)
+
+func getUsers(w http.ResponseWriter, r *http.Request)  {}
+func createUser(w http.ResponseWriter, r *http.Request) {}
+
+func SetupMux() {
+	r := mux.NewRouter()
+	r.HandleFunc("/api/users", getUsers).Methods("GET")
+	r.HandleFunc("/api/users", createUser).Methods("POST")
+}
+`)
+
+	p := NewParser()
+	result, err := p.ParseFile("gorilla.go", content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	endpoints := filterNodesByType(result.Nodes, graph.NodeAPIEndpoint)
+	if len(endpoints) != 2 {
+		t.Fatalf("expected 2 API endpoints, got %d", len(endpoints))
+	}
+
+	wantRoutes := map[string]string{
+		"GET /api/users":  "gorilla/mux",
+		"POST /api/users": "gorilla/mux",
+	}
+
+	for _, ep := range endpoints {
+		fw, ok := wantRoutes[ep.Name]
+		if !ok {
+			t.Errorf("unexpected endpoint %q", ep.Name)
+			continue
+		}
+		if ep.Properties["framework"] != fw {
+			t.Errorf("endpoint %q framework = %q, want %q", ep.Name, ep.Properties["framework"], fw)
+		}
+		delete(wantRoutes, ep.Name)
+	}
+	for name := range wantRoutes {
+		t.Errorf("missing endpoint %q", name)
+	}
+}
+
+func TestParseRouteProperties(t *testing.T) {
+	content := []byte(`package main
+
+import "github.com/gin-gonic/gin"
+
+func getUser(c *gin.Context) {}
+
+func Setup(r *gin.Engine) {
+	r.GET("/users/:id", getUser)
+}
+`)
+
+	p := NewParser()
+	result, err := p.ParseFile("props.go", content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	endpoints := filterNodesByType(result.Nodes, graph.NodeAPIEndpoint)
+	if len(endpoints) != 1 {
+		t.Fatalf("expected 1 API endpoint, got %d", len(endpoints))
+	}
+
+	ep := endpoints[0]
+	if ep.Properties["http_method"] != "GET" {
+		t.Errorf("http_method = %q, want GET", ep.Properties["http_method"])
+	}
+	if ep.Properties["path"] != "/users/:id" {
+		t.Errorf("path = %q, want /users/:id", ep.Properties["path"])
+	}
+	if ep.Properties["framework"] != "gin" {
+		t.Errorf("framework = %q, want gin", ep.Properties["framework"])
+	}
+	if ep.Properties["handler"] != "getUser" {
+		t.Errorf("handler = %q, want getUser", ep.Properties["handler"])
+	}
+	if ep.Line == 0 {
+		t.Error("endpoint line should be > 0")
+	}
+}
+
+func TestExtractHTTPClientCalls(t *testing.T) {
+	content, err := os.ReadFile("testdata/http_client.go")
+	if err != nil {
+		t.Fatalf("reading testdata: %v", err)
+	}
+
+	p := NewParser()
+	result, err := p.ParseFile("testdata/http_client.go", content)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+
+	// Collect api_call dependency nodes.
+	var apiCalls []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeDependency && n.Properties["kind"] == "api_call" {
+			apiCalls = append(apiCalls, n)
+		}
+	}
+
+	if len(apiCalls) < 6 {
+		t.Errorf("expected at least 6 api_call deps, got %d", len(apiCalls))
+		for _, n := range apiCalls {
+			t.Logf("  %s: method=%s path=%s framework=%s", n.Name, n.Properties["http_method"], n.Properties["path"], n.Properties["framework"])
+		}
+	}
+
+	// Verify specific calls.
+	found := map[string]bool{}
+	for _, n := range apiCalls {
+		key := n.Properties["http_method"] + ":" + n.Properties["path"]
+		found[key] = true
+		if n.Properties["framework"] != "net/http" {
+			t.Errorf("api_call %q framework = %q, want net/http", n.Name, n.Properties["framework"])
+		}
+	}
+
+	wantCalls := []string{
+		"GET:/api/users/*",
+		"POST:/api/users",
+		"HEAD:/health",
+		"POST:/api/login",
+		"PUT:/api/users/123",
+		"GET:/api/items",
+		"POST:/api/items",
+	}
+	for _, want := range wantCalls {
+		if !found[want] {
+			t.Errorf("missing api_call: %s", want)
+		}
+	}
+
+	// Verify EdgeCalls exist.
+	callEdges := 0
+	for _, e := range result.Edges {
+		if e.Type == graph.EdgeCalls {
+			callEdges++
+		}
+	}
+	if callEdges < 6 {
+		t.Errorf("EdgeCalls count = %d, want at least 6", callEdges)
+	}
+}
+
+func TestExtractFunctionCalls(t *testing.T) {
+	content, err := os.ReadFile("testdata/calls.go")
+	if err != nil {
+		t.Fatalf("reading testdata: %v", err)
+	}
+
+	p := NewParser()
+	result, err := p.ParseFile("testdata/calls.go", content)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+
+	// Collect EdgeCalls edges.
+	type callEdge struct {
+		sourceID string
+		targetID string
+		callee   string
+	}
+	var calls []callEdge
+	for _, e := range result.Edges {
+		if e.Type == graph.EdgeCalls {
+			calls = append(calls, callEdge{
+				sourceID: e.SourceID,
+				targetID: e.TargetID,
+				callee:   e.Properties["callee"],
+			})
+		}
+	}
+
+	// Build ID maps for verification.
+	funcID := func(name string) string {
+		return graph.NewNodeID(string(graph.NodeFunction), "testdata/calls.go", name)
+	}
+	methodID := func(recv, name string) string {
+		return graph.NewNodeID(string(graph.NodeMethod), "testdata/calls.go", recv+"."+name)
+	}
+	depID := func(path string) string {
+		return graph.NewNodeID(string(graph.NodeDependency), "testdata/calls.go", path)
+	}
+
+	// Check same-file calls
+	hasEdge := func(src, tgt, callee string) bool {
+		for _, c := range calls {
+			if c.sourceID == src && c.targetID == tgt {
+				if callee == "" || c.callee == callee {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	// processData → helper (same-file)
+	if !hasEdge(funcID("processData"), funcID("helper"), "") {
+		t.Error("missing call edge: processData → helper")
+	}
+
+	// processData → formatOutput (same-file)
+	if !hasEdge(funcID("processData"), funcID("formatOutput"), "") {
+		t.Error("missing call edge: processData → formatOutput")
+	}
+
+	// processData → json import (json.Marshal)
+	if !hasEdge(funcID("processData"), depID("encoding/json"), "Marshal") {
+		t.Error("missing call edge: processData → encoding/json (Marshal)")
+	}
+
+	// processData → fmt import (fmt.Println)
+	if !hasEdge(funcID("processData"), depID("fmt"), "Println") {
+		t.Error("missing call edge: processData → fmt (Println)")
+	}
+
+	// processData → os import (os.Exit)
+	if !hasEdge(funcID("processData"), depID("os"), "Exit") {
+		t.Error("missing call edge: processData → os (Exit)")
+	}
+
+	// Processor.Process → formatOutput (cross-type same-file)
+	if !hasEdge(methodID("Processor", "Process"), funcID("formatOutput"), "") {
+		t.Error("missing call edge: Processor.Process → formatOutput")
+	}
+
+	// Verify builtins are NOT present (len is used in validate)
+	for _, c := range calls {
+		if c.callee == "len" || c.callee == "make" || c.callee == "append" {
+			t.Errorf("builtin %q should not create EdgeCalls", c.callee)
+		}
+	}
+}
+
+func TestImportNodesHaveKindImport(t *testing.T) {
+	p := NewParser()
+	result, err := p.ParseFile("testpkg/example.go", []byte(testSource))
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeDependency {
+			if n.Properties == nil || n.Properties["kind"] != "import" {
+				t.Errorf("import dep %q missing kind=import property", n.Name)
+			}
+		}
+	}
+}
+
+func filterNodesByType(nodes []*graph.Node, nt graph.NodeType) []*graph.Node {
+	var result []*graph.Node
+	for _, n := range nodes {
+		if n.Type == nt {
+			result = append(result, n)
+		}
+	}
+	return result
+}
+
 // helpers
 
 func assertCount(t *testing.T, counts map[graph.NodeType]int, nt graph.NodeType, want int) {

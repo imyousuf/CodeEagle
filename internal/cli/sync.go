@@ -11,6 +11,7 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/indexer"
+	"github.com/imyousuf/CodeEagle/internal/linker"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 
 	// Register LLM providers so their init() functions run.
@@ -21,6 +22,7 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/parser/java"
 	"github.com/imyousuf/CodeEagle/internal/parser/javascript"
 	makefileparser "github.com/imyousuf/CodeEagle/internal/parser/makefile"
+	"github.com/imyousuf/CodeEagle/internal/parser/manifest"
 	"github.com/imyousuf/CodeEagle/internal/parser/markdown"
 	"github.com/imyousuf/CodeEagle/internal/parser/python"
 	"github.com/imyousuf/CodeEagle/internal/parser/shell"
@@ -106,6 +108,7 @@ target branch for import.`,
 			registry.Register(shell.NewParser())
 			registry.Register(terraform.NewParser())
 			registry.Register(yamlparser.NewParser())
+			registry.Register(manifest.NewParser())
 
 			// Build watcher config for the matcher.
 			var paths []string
@@ -117,12 +120,12 @@ target branch for import.`,
 				ExcludePatterns: cfg.Watch.Exclude,
 			}
 
-			// Create LLM client if auto-summarize is enabled.
+			// Create LLM client if auto-summarize or auto-link is enabled.
 			var llmClient llm.Client
-			if cfg.Agents.AutoSummarize {
+			if cfg.Agents.AutoSummarize || cfg.Agents.AutoLink {
 				c, err := createLLMClient(cfg)
 				if err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: auto-summarize enabled but LLM client creation failed: %v\n", err)
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: LLM client creation failed: %v\n", err)
 				} else {
 					llmClient = c
 					defer llmClient.Close()
@@ -156,6 +159,18 @@ target branch for import.`,
 				idx.RunSummarization(ctx(cmd))
 			} else if verbose {
 				fmt.Fprintf(out, "No files changed, skipping LLM summarization.\n")
+			}
+
+			// Run cross-service linker on full sync or when files changed.
+			if idx.HasChanges() || full {
+				var linkerLLM llm.Client
+				if cfg.Agents.AutoLink {
+					linkerLLM = llmClient
+				}
+				lnk := linker.NewLinker(store, linkerLLM, logFn, verbose)
+				if err := lnk.RunAll(ctx(cmd)); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: linker failed: %v\n", err)
+				}
 			}
 
 			// Cleanup stale branches.

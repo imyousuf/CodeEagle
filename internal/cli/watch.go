@@ -12,12 +12,14 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
 	"github.com/imyousuf/CodeEagle/internal/indexer"
+	"github.com/imyousuf/CodeEagle/internal/linker"
 	"github.com/imyousuf/CodeEagle/internal/parser"
 	"github.com/imyousuf/CodeEagle/internal/parser/golang"
 	htmlparser "github.com/imyousuf/CodeEagle/internal/parser/html"
 	"github.com/imyousuf/CodeEagle/internal/parser/java"
 	"github.com/imyousuf/CodeEagle/internal/parser/javascript"
 	makefileparser "github.com/imyousuf/CodeEagle/internal/parser/makefile"
+	"github.com/imyousuf/CodeEagle/internal/parser/manifest"
 	"github.com/imyousuf/CodeEagle/internal/parser/markdown"
 	"github.com/imyousuf/CodeEagle/internal/parser/python"
 	"github.com/imyousuf/CodeEagle/internal/parser/shell"
@@ -93,6 +95,7 @@ func newWatchCmd() *cobra.Command {
 			registry.Register(shell.NewParser())
 			registry.Register(terraform.NewParser())
 			registry.Register(yamlparser.NewParser())
+			registry.Register(manifest.NewParser())
 
 			// Build watcher config from project config.
 			var paths []string
@@ -104,17 +107,24 @@ func newWatchCmd() *cobra.Command {
 				ExcludePatterns: cfg.Watch.Exclude,
 			}
 
-			// Create LLM client if auto-summarize is enabled.
+			// Create LLM client if auto-summarize or auto-link is enabled.
 			var llmClient llm.Client
-			if cfg.Agents.AutoSummarize {
+			if cfg.Agents.AutoSummarize || cfg.Agents.AutoLink {
 				c, err := createLLMClient(cfg)
 				if err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: auto-summarize enabled but LLM client creation failed: %v\n", err)
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: LLM client creation failed: %v\n", err)
 				} else {
 					llmClient = c
 					defer llmClient.Close()
 				}
 			}
+
+			// Build linker as post-index hook.
+			var linkerLLM llm.Client
+			if cfg.Agents.AutoLink {
+				linkerLLM = llmClient
+			}
+			lnk := linker.NewLinker(store, linkerLLM, logFn, verbose)
 
 			// Create indexer.
 			idx := indexer.NewIndexer(indexer.IndexerConfig{
@@ -126,6 +136,7 @@ func newWatchCmd() *cobra.Command {
 				Logger:         logFn,
 				LLMClient:      llmClient,
 				AutoSummarize:  cfg.Agents.AutoSummarize,
+				PostIndexHook:  lnk.RunAll,
 			})
 
 			// Set up signal handling.

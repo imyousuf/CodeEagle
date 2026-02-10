@@ -292,6 +292,169 @@ func TestParseSampleFixture(t *testing.T) {
 	}
 }
 
+func TestExtractHTTPClientCalls(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not determine test file path")
+	}
+	fixturePath := filepath.Join(filepath.Dir(thisFile), "testdata", "http_client.java")
+
+	content, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("could not read testdata/http_client.java: %v", err)
+	}
+
+	p := NewParser()
+	result, err := p.ParseFile(fixturePath, content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	// Collect api_call dependency nodes
+	var apiCalls []*graph.Node
+	for _, n := range result.Nodes {
+		if n.Type == graph.NodeDependency && n.Properties != nil && n.Properties["kind"] == "api_call" {
+			apiCalls = append(apiCalls, n)
+		}
+	}
+
+	if len(apiCalls) < 3 {
+		t.Fatalf("expected at least 3 api_call dependencies, got %d", len(apiCalls))
+	}
+
+	// Verify HTTP methods are extracted
+	foundMethods := make(map[string]bool)
+	for _, call := range apiCalls {
+		method := call.Properties["http_method"]
+		foundMethods[method] = true
+		if call.Properties["framework"] != "spring-resttemplate" {
+			t.Errorf("api_call framework = %q, want %q", call.Properties["framework"], "spring-resttemplate")
+		}
+	}
+
+	for _, method := range []string{"GET", "POST", "DELETE"} {
+		if !foundMethods[method] {
+			t.Errorf("missing api_call with HTTP method %s", method)
+		}
+	}
+
+	// Verify paths contain /api/users
+	for _, call := range apiCalls {
+		if !strings.Contains(call.Properties["path"], "/api/users") {
+			t.Errorf("api_call path = %q, expected to contain /api/users", call.Properties["path"])
+		}
+	}
+
+	// Verify EdgeCalls edges from methods to api_call deps
+	callsCount := 0
+	for _, edge := range result.Edges {
+		if edge.Type == graph.EdgeCalls {
+			callsCount++
+		}
+	}
+	if callsCount < 3 {
+		t.Errorf("expected at least 3 EdgeCalls edges, got %d", callsCount)
+	}
+}
+
+func TestExtractFunctionCalls(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not determine test file path")
+	}
+	fixturePath := filepath.Join(filepath.Dir(thisFile), "testdata", "calls.java")
+
+	content, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("could not read testdata/calls.java: %v", err)
+	}
+
+	p := NewParser()
+	result, err := p.ParseFile(fixturePath, content)
+	if err != nil {
+		t.Fatalf("ParseFile returned error: %v", err)
+	}
+
+	// Build a set of EdgeCalls edges with their properties
+	type callEdge struct {
+		sourceID string
+		targetID string
+		callee   string
+	}
+	var calls []callEdge
+	for _, edge := range result.Edges {
+		if edge.Type == graph.EdgeCalls {
+			callee := ""
+			if edge.Properties != nil {
+				callee = edge.Properties["callee"]
+			}
+			calls = append(calls, callEdge{
+				sourceID: edge.SourceID,
+				targetID: edge.TargetID,
+				callee:   callee,
+			})
+		}
+	}
+
+	// Build node ID lookup
+	nodeIDMap := make(map[string]*graph.Node)
+	for _, n := range result.Nodes {
+		nodeIDMap[n.ID] = n
+	}
+
+	// Verify: processUser calls validate (same-class)
+	processUserID := graph.NewNodeID(string(graph.NodeMethod), fixturePath, "UserService.processUser")
+	validateID := graph.NewNodeID(string(graph.NodeMethod), fixturePath, "UserService.validate")
+	handleRequestID := graph.NewNodeID(string(graph.NodeMethod), fixturePath, "UserService.handleRequest")
+
+	foundProcessUserValidate := false
+	foundProcessUserStringUtils := false
+	foundProcessUserUser := false
+	foundHandleRequestValidate := false
+	foundHandleRequestProcessUser := false
+
+	for _, c := range calls {
+		if c.sourceID == processUserID && c.targetID == validateID && c.callee == "validate" {
+			foundProcessUserValidate = true
+		}
+		if c.sourceID == processUserID && c.callee == "capitalize" {
+			foundProcessUserStringUtils = true
+		}
+		if c.sourceID == processUserID && c.callee == "create" {
+			foundProcessUserUser = true
+		}
+		if c.sourceID == handleRequestID && c.targetID == validateID && c.callee == "validate" {
+			foundHandleRequestValidate = true
+		}
+		if c.sourceID == handleRequestID && c.targetID == processUserID && c.callee == "processUser" {
+			foundHandleRequestProcessUser = true
+		}
+	}
+
+	if !foundProcessUserValidate {
+		t.Error("expected EdgeCalls: processUser -> validate (same-class)")
+	}
+	if !foundProcessUserStringUtils {
+		t.Error("expected EdgeCalls: processUser -> StringUtils import (capitalize)")
+	}
+	if !foundProcessUserUser {
+		t.Error("expected EdgeCalls: processUser -> User import (create)")
+	}
+	if !foundHandleRequestValidate {
+		t.Error("expected EdgeCalls: handleRequest -> validate (this-qualified)")
+	}
+	if !foundHandleRequestProcessUser {
+		t.Error("expected EdgeCalls: handleRequest -> processUser (same-class)")
+	}
+
+	// Verify builtins are NOT generating calls (e.g., getName)
+	for _, c := range calls {
+		if c.callee == "getName" {
+			t.Error("builtin getName should not generate an EdgeCalls edge")
+		}
+	}
+}
+
 // Helpers
 
 func assertCount(t *testing.T, counts map[graph.NodeType]int, nt graph.NodeType, want int) {

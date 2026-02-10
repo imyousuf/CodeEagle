@@ -64,12 +64,19 @@ type extractor struct {
 
 	fileNodeID   string
 	moduleNodeID string
+
+	// Lookup maps for function call graph extraction, built by buildCallMaps().
+	importNames      map[string]string            // imported module simple name → dep node ID
+	funcNames        map[string]string            // function name → node ID
+	classMethodNames map[string]map[string]string // className → methodName → node ID
 }
 
 func (e *extractor) extract() {
 	e.extractFileNode()
 	e.extractModuleNode()
 	e.walkChildren(e.root)
+	e.buildCallMaps()
+	e.walkAllNodes(e.root)
 }
 
 func (e *extractor) extractFileNode() {
@@ -149,6 +156,9 @@ func (e *extractor) extractImport(node *sitter.Node) {
 		FilePath: e.filePath,
 		Line:     startLine(node),
 		Language: string(parser.LangTypeScript),
+		Properties: map[string]string{
+			"kind": "import",
+		},
 	})
 	e.edges = append(e.edges, &graph.Edge{
 		ID:       edgeID(e.moduleNodeID, depID, string(graph.EdgeImports)),
@@ -627,6 +637,589 @@ func (e *extractor) extractNamespace(node *sitter.Node, exported bool) {
 		SourceID: e.moduleNodeID,
 		TargetID: nsID,
 	})
+}
+
+// Express route detection
+
+var expressHTTPMethods = map[string]bool{
+	"get": true, "post": true, "put": true, "patch": true, "delete": true, "all": true,
+}
+
+func (e *extractor) walkAllNodes(node *sitter.Node) {
+	e.checkForExpressRoute(node)
+	if !e.checkForHTTPClientCall(node) {
+		e.checkForFunctionCall(node)
+	}
+	for i := 0; i < int(node.ChildCount()); i++ {
+		e.walkAllNodes(node.Child(i))
+	}
+}
+
+func (e *extractor) checkForExpressRoute(node *sitter.Node) {
+	if node.Type() != "call_expression" {
+		return
+	}
+
+	// Look for member_expression as the function: router.get, app.post, etc.
+	fnNode := e.findChildByFieldName(node, "function")
+	if fnNode == nil || fnNode.Type() != "member_expression" {
+		return
+	}
+
+	objectNode := e.findChildByFieldName(fnNode, "object")
+	propertyNode := e.findChildByFieldName(fnNode, "property")
+	if objectNode == nil || propertyNode == nil {
+		return
+	}
+
+	methodName := e.nodeText(propertyNode)
+	args := e.findChildByFieldName(node, "arguments")
+	if args == nil {
+		return
+	}
+
+	// Collect argument nodes (skip punctuation).
+	var argNodes []*sitter.Node
+	for i := 0; i < int(args.ChildCount()); i++ {
+		child := args.Child(i)
+		if child.Type() != "(" && child.Type() != ")" && child.Type() != "," {
+			argNodes = append(argNodes, child)
+		}
+	}
+
+	if len(argNodes) == 0 {
+		return
+	}
+
+	// Check for app.use("/prefix", router) — router mount pattern.
+	if methodName == "use" && len(argNodes) >= 2 {
+		firstArg := argNodes[0]
+		if firstArg.Type() == "string" || firstArg.Type() == "template_string" {
+			path := stripQuotes(e.nodeText(firstArg))
+			secondArg := argNodes[1]
+			handlerName := e.nodeText(secondArg)
+			varID := graph.NewNodeID(string(graph.NodeVariable), e.filePath, "mount:"+path)
+			e.nodes = append(e.nodes, &graph.Node{
+				ID:       varID,
+				Type:     graph.NodeVariable,
+				Name:     "mount " + path,
+				FilePath: e.filePath,
+				Line:     startLine(node),
+				Language: string(parser.LangTypeScript),
+				Properties: map[string]string{
+					"kind":    "router_mount",
+					"prefix":  path,
+					"handler": handlerName,
+				},
+			})
+			e.edges = append(e.edges, &graph.Edge{
+				ID:       edgeID(e.moduleNodeID, varID, string(graph.EdgeContains)),
+				Type:     graph.EdgeContains,
+				SourceID: e.moduleNodeID,
+				TargetID: varID,
+			})
+			return
+		}
+	}
+
+	// Check for route definitions: router.get("/path", handler).
+	if !expressHTTPMethods[methodName] {
+		return
+	}
+
+	firstArg := argNodes[0]
+	if firstArg.Type() != "string" && firstArg.Type() != "template_string" {
+		return
+	}
+	path := stripQuotes(e.nodeText(firstArg))
+
+	// Determine handler name from the last non-path argument.
+	handlerName := ""
+	if len(argNodes) >= 2 {
+		lastArg := argNodes[len(argNodes)-1]
+		switch lastArg.Type() {
+		case "identifier":
+			handlerName = e.nodeText(lastArg)
+		case "member_expression":
+			handlerName = e.nodeText(lastArg)
+		default:
+			handlerName = "anonymous"
+		}
+	}
+
+	httpMethod := strings.ToUpper(methodName)
+	endpointID := graph.NewNodeID(string(graph.NodeAPIEndpoint), e.filePath, httpMethod+":"+path)
+	e.nodes = append(e.nodes, &graph.Node{
+		ID:       endpointID,
+		Type:     graph.NodeAPIEndpoint,
+		Name:     httpMethod + " " + path,
+		FilePath: e.filePath,
+		Line:     startLine(node),
+		Language: string(parser.LangTypeScript),
+		Properties: map[string]string{
+			"http_method": httpMethod,
+			"path":        path,
+			"framework":   "express",
+			"handler":     handlerName,
+		},
+	})
+	e.edges = append(e.edges, &graph.Edge{
+		ID:       edgeID(e.moduleNodeID, endpointID, string(graph.EdgeExposes)),
+		Type:     graph.EdgeExposes,
+		SourceID: e.moduleNodeID,
+		TargetID: endpointID,
+	})
+}
+
+// HTTP client call detection
+
+// axiosMethodNames maps axios method names to HTTP methods.
+var axiosMethodNames = map[string]string{
+	"get": "GET", "post": "POST", "put": "PUT", "patch": "PATCH",
+	"delete": "DELETE", "head": "HEAD", "options": "OPTIONS",
+}
+
+func (e *extractor) checkForHTTPClientCall(node *sitter.Node) bool {
+	if node.Type() != "call_expression" {
+		return false
+	}
+
+	fnNode := e.findChildByFieldName(node, "function")
+	if fnNode == nil {
+		return false
+	}
+
+	args := e.findChildByFieldName(node, "arguments")
+	if args == nil {
+		return false
+	}
+
+	var argNodes []*sitter.Node
+	for i := 0; i < int(args.ChildCount()); i++ {
+		child := args.Child(i)
+		if child.Type() != "(" && child.Type() != ")" && child.Type() != "," {
+			argNodes = append(argNodes, child)
+		}
+	}
+	if len(argNodes) == 0 {
+		return false
+	}
+
+	var httpMethod, path, framework string
+
+	switch fnNode.Type() {
+	case "identifier":
+		fnName := e.nodeText(fnNode)
+		switch fnName {
+		case "fetch":
+			framework = "fetch"
+			httpMethod = "UNKNOWN"
+			path = e.extractURLFromArg(argNodes[0])
+		case "useSWR", "useQuery":
+			framework = "swr"
+			httpMethod = "GET"
+			path = e.extractURLFromArg(argNodes[0])
+		default:
+			// Direct call like axios("/path") — check if it matches known client names.
+			if fnName == "axios" {
+				framework = "axios"
+				httpMethod = "UNKNOWN"
+				path = e.extractURLFromArg(argNodes[0])
+			}
+		}
+	case "member_expression":
+		objectNode := e.findChildByFieldName(fnNode, "object")
+		propertyNode := e.findChildByFieldName(fnNode, "property")
+		if objectNode == nil || propertyNode == nil {
+			return false
+		}
+		objName := e.nodeText(objectNode)
+		methodName := e.nodeText(propertyNode)
+
+		// axios.get, axios.post, etc.
+		if objName == "axios" {
+			if method, ok := axiosMethodNames[methodName]; ok {
+				framework = "axios"
+				httpMethod = method
+				path = e.extractURLFromArg(argNodes[0])
+			}
+		}
+		// http.get, httpClient.get, client.get, api.get, etc.
+		if framework == "" {
+			if method, ok := axiosMethodNames[methodName]; ok {
+				// Heuristic: if the object looks like an HTTP client variable.
+				lower := strings.ToLower(objName)
+				if strings.Contains(lower, "http") || strings.Contains(lower, "client") ||
+					strings.Contains(lower, "api") || strings.Contains(lower, "axios") {
+					framework = "http_client"
+					httpMethod = method
+					path = e.extractURLFromArg(argNodes[0])
+				}
+			}
+		}
+	}
+
+	if framework == "" || path == "" {
+		return false
+	}
+
+	depID := graph.NewNodeID(string(graph.NodeDependency), e.filePath, framework+":"+httpMethod+":"+path)
+	e.nodes = append(e.nodes, &graph.Node{
+		ID:       depID,
+		Type:     graph.NodeDependency,
+		Name:     httpMethod + " " + path,
+		FilePath: e.filePath,
+		Line:     startLine(node),
+		Language: string(parser.LangTypeScript),
+		Properties: map[string]string{
+			"kind":        "api_call",
+			"http_method": httpMethod,
+			"path":        path,
+			"framework":   framework,
+		},
+	})
+
+	// Find containing function and create EdgeCalls.
+	containerID := e.findContainingFunctionID(node)
+	if containerID != "" {
+		e.edges = append(e.edges, &graph.Edge{
+			ID:       edgeID(containerID, depID, string(graph.EdgeCalls)),
+			Type:     graph.EdgeCalls,
+			SourceID: containerID,
+			TargetID: depID,
+		})
+	} else {
+		// Module-level call.
+		e.edges = append(e.edges, &graph.Edge{
+			ID:       edgeID(e.moduleNodeID, depID, string(graph.EdgeCalls)),
+			Type:     graph.EdgeCalls,
+			SourceID: e.moduleNodeID,
+			TargetID: depID,
+		})
+	}
+	return true
+}
+
+func (e *extractor) extractURLFromArg(arg *sitter.Node) string {
+	switch arg.Type() {
+	case "string":
+		return stripQuotes(e.nodeText(arg))
+	case "template_string":
+		return e.extractTemplateLiteralPath(arg)
+	case "binary_expression":
+		// Handle string concatenation like '/api/users/' + id.
+		// Extract the left-most string literal and append * for dynamic parts.
+		return e.extractConcatPath(arg)
+	}
+	return ""
+}
+
+// extractConcatPath extracts a URL path from a binary expression (string concatenation).
+// It walks the left side to find string literals and treats the rest as wildcards.
+// Returns "" if no string literal is found (e.g., variable + variable).
+func (e *extractor) extractConcatPath(node *sitter.Node) string {
+	if node.Type() == "string" {
+		return stripQuotes(e.nodeText(node))
+	}
+	if node.Type() != "binary_expression" {
+		// Non-string, non-binary node (variable, member access, etc.) — no path info.
+		return ""
+	}
+	left := e.findChildByFieldName(node, "left")
+	if left == nil && node.ChildCount() > 0 {
+		left = node.Child(0)
+	}
+	if left == nil {
+		return ""
+	}
+	leftPath := e.extractConcatPath(left)
+	if leftPath == "" {
+		return ""
+	}
+	return leftPath + "*"
+}
+
+func (e *extractor) extractTemplateLiteralPath(node *sitter.Node) string {
+	// Walk template string children: template_substitution nodes become "*".
+	var parts []string
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		switch child.Type() {
+		case "string_fragment":
+			parts = append(parts, e.nodeText(child))
+		case "template_substitution":
+			parts = append(parts, "*")
+		case "`":
+			// Skip backtick delimiters.
+		default:
+			parts = append(parts, e.nodeText(child))
+		}
+	}
+	return strings.Join(parts, "")
+}
+
+func (e *extractor) findContainingFunctionID(node *sitter.Node) string {
+	current := node.Parent()
+	for current != nil {
+		switch current.Type() {
+		case "function_declaration":
+			nameNode := e.findChildByFieldName(current, "name")
+			if nameNode != nil {
+				name := e.nodeText(nameNode)
+				return graph.NewNodeID(string(graph.NodeFunction), e.filePath, name)
+			}
+		case "method_definition":
+			nameNode := e.findChildByFieldName(current, "name")
+			if nameNode != nil {
+				methodName := e.nodeText(nameNode)
+				// Find the class name by looking for the class_declaration ancestor.
+				className := e.findAncestorClassName(current)
+				if className != "" {
+					return graph.NewNodeID(string(graph.NodeMethod), e.filePath, className+"."+methodName)
+				}
+			}
+		case "arrow_function", "function":
+			// Check if this is assigned to a variable (const foo = () => ...).
+			parent := current.Parent()
+			if parent != nil && parent.Type() == "variable_declarator" {
+				nameNode := e.findChildByFieldName(parent, "name")
+				if nameNode != nil {
+					name := e.nodeText(nameNode)
+					return graph.NewNodeID(string(graph.NodeFunction), e.filePath, name)
+				}
+			}
+		}
+		current = current.Parent()
+	}
+	return ""
+}
+
+func (e *extractor) findAncestorClassName(node *sitter.Node) string {
+	current := node.Parent()
+	for current != nil {
+		if current.Type() == "class_declaration" || current.Type() == "abstract_class_declaration" {
+			nameNode := e.findChildByFieldName(current, "name")
+			if nameNode != nil {
+				return e.nodeText(nameNode)
+			}
+		}
+		current = current.Parent()
+	}
+	return ""
+}
+
+// Function call graph extraction
+
+// tsBuiltins is the set of built-in names to skip when resolving function calls.
+var tsBuiltins = map[string]bool{
+	"console": true, "setTimeout": true, "setInterval": true, "clearTimeout": true,
+	"clearInterval": true, "parseInt": true, "parseFloat": true, "isNaN": true,
+	"isFinite": true, "Array": true, "Object": true, "String": true, "Number": true,
+	"Boolean": true, "JSON": true, "Math": true, "Date": true, "Promise": true,
+	"Error": true, "RegExp": true, "Map": true, "Set": true, "Symbol": true,
+	"require": true, "undefined": true, "NaN": true, "Infinity": true,
+}
+
+func (e *extractor) buildCallMaps() {
+	e.importNames = make(map[string]string)
+	e.funcNames = make(map[string]string)
+	e.classMethodNames = make(map[string]map[string]string)
+
+	// Build a map from module path to dependency node ID.
+	depByModule := make(map[string]string)
+	for _, n := range e.nodes {
+		switch n.Type {
+		case graph.NodeDependency:
+			if n.Properties["kind"] == "import" {
+				depByModule[n.Name] = n.ID
+				// Store full module path as key.
+				e.importNames[n.Name] = n.ID
+				// Also store the last path component for matching.
+				simpleName := lastPathComponent(n.Name)
+				if simpleName != n.Name {
+					e.importNames[simpleName] = n.ID
+				}
+			}
+		case graph.NodeFunction:
+			e.funcNames[n.Name] = n.ID
+		case graph.NodeMethod:
+			if n.Properties != nil && n.Properties["receiver"] != "" {
+				className := n.Properties["receiver"]
+				if e.classMethodNames[className] == nil {
+					e.classMethodNames[className] = make(map[string]string)
+				}
+				e.classMethodNames[className][n.Name] = n.ID
+			}
+		}
+	}
+
+	// Walk AST import statements to map local binding names to dependency node IDs.
+	e.extractImportBindings(e.root, depByModule)
+}
+
+// extractImportBindings walks import_statement nodes and maps each imported local
+// name (default import, named import specifier, namespace import) to the dep node ID.
+func (e *extractor) extractImportBindings(node *sitter.Node, depByModule map[string]string) {
+	if node.Type() == "import_statement" {
+		source := e.findChildByType(node, "string")
+		if source == nil {
+			return
+		}
+		modulePath := stripQuotes(e.nodeText(source))
+		depID, ok := depByModule[modulePath]
+		if !ok {
+			return
+		}
+		// Walk children to find import clause / specifiers.
+		for i := 0; i < int(node.ChildCount()); i++ {
+			child := node.Child(i)
+			switch child.Type() {
+			case "import_clause":
+				e.extractImportClauseBindings(child, depID)
+			}
+		}
+		return
+	}
+	for i := 0; i < int(node.ChildCount()); i++ {
+		e.extractImportBindings(node.Child(i), depByModule)
+	}
+}
+
+func (e *extractor) extractImportClauseBindings(node *sitter.Node, depID string) {
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		switch child.Type() {
+		case "identifier":
+			// Default import: import axios from 'axios'
+			e.importNames[e.nodeText(child)] = depID
+		case "named_imports":
+			// Named imports: import { format, parse } from './utils'
+			for j := 0; j < int(child.ChildCount()); j++ {
+				spec := child.Child(j)
+				if spec.Type() == "import_specifier" {
+					// The local name is the "name" field, or if aliased, the "alias" field.
+					alias := e.findChildByFieldName(spec, "alias")
+					if alias != nil {
+						e.importNames[e.nodeText(alias)] = depID
+					} else {
+						nameNode := e.findChildByFieldName(spec, "name")
+						if nameNode != nil {
+							e.importNames[e.nodeText(nameNode)] = depID
+						}
+					}
+				}
+			}
+		case "namespace_import":
+			// Namespace import: import * as utils from './utils'
+			for j := 0; j < int(child.ChildCount()); j++ {
+				gc := child.Child(j)
+				if gc.Type() == "identifier" {
+					e.importNames[e.nodeText(gc)] = depID
+				}
+			}
+		}
+	}
+}
+
+func (e *extractor) checkForFunctionCall(node *sitter.Node) {
+	if node.Type() != "call_expression" {
+		return
+	}
+
+	fnNode := e.findChildByFieldName(node, "function")
+	if fnNode == nil {
+		return
+	}
+
+	callerID := e.findContainingFunctionID(node)
+	if callerID == "" {
+		callerID = e.moduleNodeID
+	}
+
+	switch fnNode.Type() {
+	case "identifier":
+		name := e.nodeText(fnNode)
+		if tsBuiltins[name] {
+			return
+		}
+		// Match against same-file functions.
+		if targetID, ok := e.funcNames[name]; ok {
+			e.edges = append(e.edges, &graph.Edge{
+				ID:       edgeID(callerID, targetID, string(graph.EdgeCalls)),
+				Type:     graph.EdgeCalls,
+				SourceID: callerID,
+				TargetID: targetID,
+			})
+			return
+		}
+		// Match against imports (e.g., named import used as direct call).
+		if targetID, ok := e.importNames[name]; ok {
+			e.edges = append(e.edges, &graph.Edge{
+				ID:       edgeID(callerID, targetID, string(graph.EdgeCalls)),
+				Type:     graph.EdgeCalls,
+				SourceID: callerID,
+				TargetID: targetID,
+				Properties: map[string]string{
+					"callee": name,
+				},
+			})
+		}
+
+	case "member_expression":
+		objectNode := e.findChildByFieldName(fnNode, "object")
+		propertyNode := e.findChildByFieldName(fnNode, "property")
+		if objectNode == nil || propertyNode == nil {
+			return
+		}
+		objName := e.nodeText(objectNode)
+		methodName := e.nodeText(propertyNode)
+
+		if tsBuiltins[objName] {
+			return
+		}
+
+		// this.method() — match against class methods of the enclosing class.
+		if objName == "this" {
+			className := e.findAncestorClassName(node)
+			if className != "" {
+				if methods, ok := e.classMethodNames[className]; ok {
+					if targetID, ok := methods[methodName]; ok {
+						e.edges = append(e.edges, &graph.Edge{
+							ID:       edgeID(callerID, targetID, string(graph.EdgeCalls)),
+							Type:     graph.EdgeCalls,
+							SourceID: callerID,
+							TargetID: targetID,
+						})
+					}
+				}
+			}
+			return
+		}
+
+		// obj.method() — match obj against imports.
+		if targetID, ok := e.importNames[objName]; ok {
+			e.edges = append(e.edges, &graph.Edge{
+				ID:       edgeID(callerID, targetID, string(graph.EdgeCalls)),
+				Type:     graph.EdgeCalls,
+				SourceID: callerID,
+				TargetID: targetID,
+				Properties: map[string]string{
+					"callee": methodName,
+				},
+			})
+		}
+	}
+}
+
+// lastPathComponent extracts the last segment of a module path.
+// e.g., "./utils" -> "utils", "axios" -> "axios", "@scope/pkg" -> "pkg".
+func lastPathComponent(modulePath string) string {
+	for i := len(modulePath) - 1; i >= 0; i-- {
+		if modulePath[i] == '/' {
+			return modulePath[i+1:]
+		}
+	}
+	return modulePath
 }
 
 // Helper functions

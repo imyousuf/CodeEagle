@@ -25,6 +25,7 @@ type IndexerConfig struct {
 	Logger         func(format string, args ...any) // optional logger, defaults to fmt.Fprintf(os.Stderr, ...)
 	LLMClient      llm.Client                       // optional LLM client for auto-summarization
 	AutoSummarize  bool                             // enable post-index LLM summarization
+	PostIndexHook  func(ctx context.Context) error  // optional hook called after initial full index (e.g., linker)
 }
 
 // IndexStats holds statistics about the indexing state.
@@ -47,6 +48,7 @@ type Indexer struct {
 	log           func(format string, args ...any)
 	llmClient     llm.Client
 	autoSummarize bool
+	postIndexHook func(ctx context.Context) error
 
 	mu           sync.Mutex
 	filesIndexed int
@@ -88,6 +90,7 @@ func NewIndexer(cfg IndexerConfig) *Indexer {
 		log:           logFn,
 		llmClient:     cfg.LLMClient,
 		autoSummarize: cfg.AutoSummarize,
+		postIndexHook: cfg.PostIndexHook,
 		changedFiles:  make(map[string]struct{}),
 	}
 }
@@ -278,6 +281,13 @@ func (idx *Indexer) Start(ctx context.Context) error {
 	// Run auto-summarization if configured (full index: all groups).
 	if idx.autoSummarize && idx.llmClient != nil {
 		idx.runSummarization(ctx, nil)
+	}
+
+	// Run post-index hook (e.g., cross-service linker).
+	if idx.postIndexHook != nil {
+		if err := idx.postIndexHook(ctx); err != nil {
+			idx.log("Warning: post-index hook failed: %v", err)
+		}
 	}
 
 	// Start file watcher.
