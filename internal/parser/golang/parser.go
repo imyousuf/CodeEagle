@@ -1030,32 +1030,43 @@ func (e *extractor) extractFunctionCalls() {
 			case *ast.SelectorExpr:
 				callee := funExpr.Sel.Name
 
-				// Check for chained access: receiver.field.Method()
-				if innerSel, ok := funExpr.X.(*ast.SelectorExpr); ok {
-					if ident, ok := innerSel.X.(*ast.Ident); ok {
-						fieldName := innerSel.Sel.Name
-						// If receiver matches the enclosing method's receiver param,
-						// try resolving through struct field types.
-						if recvParamName != "" && ident.Name == recvParamName {
-							if fieldTypes, ok := e.structFieldTypes[recvTypeName_]; ok {
-								if fieldTypeStr, ok := fieldTypes[fieldName]; ok {
-									pkg := extractPackagePrefix(fieldTypeStr)
-									if pkg != "" {
-										if depID, ok := e.importAliasMap[pkg]; ok {
-											e.edges = append(e.edges, &graph.Edge{
-												ID:       edgeID(enclosingNodeID, depID, string(graph.EdgeCalls)+":"+callee),
-												Type:     graph.EdgeCalls,
-												SourceID: enclosingNodeID,
-												TargetID: depID,
-												Properties: map[string]string{
-													"callee": callee,
-												},
-											})
-											return true
-										}
-									}
-								}
-							}
+				// Try to resolve chained field access: receiver.field.Method()
+				// or deeper chains like receiver.field1.field2.Method().
+				if fieldTypeStr, ok := e.resolveFieldChain(funExpr.X, recvParamName, recvTypeName_); ok {
+					typeName := extractTypeName(fieldTypeStr)
+					qualifiedCallee := typeName + "." + callee
+
+					pkg := extractPackagePrefix(fieldTypeStr)
+					if pkg != "" {
+						// Cross-package field type: create edge to the dependency node
+						// with qualified callee (e.g., "Store.QueryNodes").
+						if depID, ok := e.importAliasMap[pkg]; ok {
+							e.edges = append(e.edges, &graph.Edge{
+								ID:       edgeID(enclosingNodeID, depID, string(graph.EdgeCalls)+":"+qualifiedCallee),
+								Type:     graph.EdgeCalls,
+								SourceID: enclosingNodeID,
+								TargetID: depID,
+								Properties: map[string]string{
+									"callee": qualifiedCallee,
+								},
+							})
+							return true
+						}
+					}
+
+					// Local (same-package) field type: try to resolve directly to the method node.
+					if methods, ok := e.methodsByReceiver[typeName]; ok {
+						if methodNodeID, ok := methods[callee]; ok {
+							e.edges = append(e.edges, &graph.Edge{
+								ID:       edgeID(enclosingNodeID, methodNodeID, string(graph.EdgeCalls)),
+								Type:     graph.EdgeCalls,
+								SourceID: enclosingNodeID,
+								TargetID: methodNodeID,
+								Properties: map[string]string{
+									"callee": qualifiedCallee,
+								},
+							})
+							return true
 						}
 					}
 				}
@@ -1096,6 +1107,66 @@ func (e *extractor) extractFunctionCalls() {
 			return true
 		})
 	}
+}
+
+// resolveFieldChain walks a chain of SelectorExpr nodes (e.g., receiver.field1.field2)
+// and resolves the final field's type string through structFieldTypes. It handles
+// chains of arbitrary depth starting from the receiver parameter.
+// Returns the resolved type string and true if successful.
+func (e *extractor) resolveFieldChain(expr ast.Expr, recvParamName, recvTypeName string) (string, bool) {
+	if recvParamName == "" {
+		return "", false
+	}
+
+	// Collect the chain of field names from innermost to outermost.
+	// For "receiver.field1.field2", we collect ["field2", "field1"] and verify
+	// the root ident is the receiver param.
+	var fieldNames []string
+	cur := expr
+	for {
+		sel, ok := cur.(*ast.SelectorExpr)
+		if !ok {
+			break
+		}
+		fieldNames = append(fieldNames, sel.Sel.Name)
+		cur = sel.X
+	}
+
+	ident, ok := cur.(*ast.Ident)
+	if !ok || ident.Name != recvParamName {
+		return "", false
+	}
+
+	// We need at least one field in the chain (receiver.field).
+	if len(fieldNames) == 0 {
+		return "", false
+	}
+
+	// Walk forward through field names (reversed since we collected innermost first).
+	// Start from the receiver's struct type and resolve each field.
+	currentType := recvTypeName
+	for i := len(fieldNames) - 1; i >= 0; i-- {
+		fieldTypes, ok := e.structFieldTypes[currentType]
+		if !ok {
+			return "", false
+		}
+		fieldTypeStr, ok := fieldTypes[fieldNames[i]]
+		if !ok {
+			return "", false
+		}
+		if i == 0 {
+			// Last field in the chain — return its type.
+			return fieldTypeStr, true
+		}
+		// Intermediate field: resolve to its type name for the next lookup.
+		// For cross-package types (e.g., "graph.Store"), we can't resolve further
+		// since we don't have the foreign struct's field types.
+		if extractPackagePrefix(fieldTypeStr) != "" {
+			return "", false
+		}
+		currentType = extractTypeName(fieldTypeStr)
+	}
+	return "", false
 }
 
 // Helper functions
@@ -1216,7 +1287,26 @@ func isTestFuncName(name string) bool {
 // part before ".". For example: "*graph.Store" -> "graph", "[]config.Item" -> "config",
 // "string" -> "".
 func extractPackagePrefix(typeStr string) string {
-	// Strip pointer and slice prefixes.
+	typeStr = stripTypeDecorators(typeStr)
+	if idx := strings.Index(typeStr, "."); idx >= 0 {
+		return typeStr[:idx]
+	}
+	return ""
+}
+
+// extractTypeName strips pointer/slice prefixes and returns the type name
+// after the dot, or the bare name if no dot. For example:
+// "*graph.Store" -> "Store", "[]config.Item" -> "Item", "Store" -> "Store", "string" -> "string".
+func extractTypeName(typeStr string) string {
+	typeStr = stripTypeDecorators(typeStr)
+	if idx := strings.LastIndex(typeStr, "."); idx >= 0 {
+		return typeStr[idx+1:]
+	}
+	return typeStr
+}
+
+// stripTypeDecorators removes pointer (*) and slice ([]) prefixes from a type string.
+func stripTypeDecorators(typeStr string) string {
 	for strings.HasPrefix(typeStr, "*") || strings.HasPrefix(typeStr, "[]") {
 		if strings.HasPrefix(typeStr, "*") {
 			typeStr = typeStr[1:]
@@ -1224,8 +1314,5 @@ func extractPackagePrefix(typeStr string) string {
 			typeStr = typeStr[2:]
 		}
 	}
-	if idx := strings.Index(typeStr, "."); idx >= 0 {
-		return typeStr[:idx]
-	}
-	return ""
+	return typeStr
 }

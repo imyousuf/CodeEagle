@@ -864,21 +864,66 @@ func TestStructFieldTypeResolution(t *testing.T) {
 		return false
 	}
 
-	// l.store.QueryNodes() should resolve through struct field type "graph.Store" -> import "graph" dep
 	graphDepID := depID("github.com/imyousuf/CodeEagle/internal/graph")
-	if !hasEdge(methodID("Linker", "Run"), graphDepID, "QueryNodes") {
-		t.Error("missing call edge: Linker.Run -> graph dep (QueryNodes) via l.store")
-	}
-
-	// l.settings.Validate() should resolve through struct field type "*config.Settings" -> import "config" dep
 	configDepID := depID("github.com/imyousuf/CodeEagle/internal/config")
-	if !hasEdge(methodID("Linker", "Run"), configDepID, "Validate") {
-		t.Error("missing call edge: Linker.Run -> config dep (Validate) via l.settings")
+
+	// --- Cross-package field calls with qualified callee names ---
+
+	// l.store.QueryNodes() -> graph dep with callee "Store.QueryNodes"
+	if !hasEdge(methodID("Linker", "Run"), graphDepID, "Store.QueryNodes") {
+		t.Error("missing call edge: Linker.Run -> graph dep (Store.QueryNodes) via l.store")
 	}
 
-	// l.store.AddNode() in helper()
-	if !hasEdge(methodID("Linker", "helper"), graphDepID, "AddNode") {
-		t.Error("missing call edge: Linker.helper -> graph dep (AddNode) via l.store")
+	// l.settings.Validate() -> config dep with callee "Settings.Validate"
+	if !hasEdge(methodID("Linker", "Run"), configDepID, "Settings.Validate") {
+		t.Error("missing call edge: Linker.Run -> config dep (Settings.Validate) via l.settings")
+	}
+
+	// l.store.AddNode() in helper() -> graph dep with callee "Store.AddNode"
+	if !hasEdge(methodID("Linker", "helper"), graphDepID, "Store.AddNode") {
+		t.Error("missing call edge: Linker.helper -> graph dep (Store.AddNode) via l.store")
+	}
+
+	// --- Local (same-package) field type resolution ---
+
+	// l.logger.Info() should resolve directly to Logger.Info method node
+	if !hasEdge(methodID("Linker", "Run"), methodID("Logger", "Info"), "Logger.Info") {
+		t.Error("missing call edge: Linker.Run -> Logger.Info via l.logger (local type)")
+	}
+
+	// l.logger.Error() in helper() should resolve directly to Logger.Error method node
+	if !hasEdge(methodID("Linker", "helper"), methodID("Logger", "Error"), "Logger.Error") {
+		t.Error("missing call edge: Linker.helper -> Logger.Error via l.logger (local type)")
+	}
+
+	// --- Deep chain resolution (a.b.c.Method) ---
+
+	// l.inner.logger.Info() should resolve through Inner.logger -> Logger.Info
+	if !hasEdge(methodID("Linker", "DeepChain"), methodID("Logger", "Info"), "Logger.Info") {
+		t.Error("missing call edge: Linker.DeepChain -> Logger.Info via l.inner.logger (deep chain)")
+	}
+}
+
+func TestExtractTypeName(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"graph.Store", "Store"},
+		{"*graph.Store", "Store"},
+		{"[]config.Item", "Item"},
+		{"*[]config.Item", "Item"},
+		{"string", "string"},
+		{"Store", "Store"},
+		{"*Store", "Store"},
+		{"**graph.Store", "Store"},
+	}
+
+	for _, tt := range tests {
+		got := extractTypeName(tt.input)
+		if got != tt.want {
+			t.Errorf("extractTypeName(%q) = %q, want %q", tt.input, got, tt.want)
+		}
 	}
 }
 
