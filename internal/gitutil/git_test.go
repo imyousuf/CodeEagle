@@ -1,6 +1,9 @@
 package gitutil
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -8,7 +11,18 @@ import (
 // These tests use the CodeEagle repository itself as the test subject.
 // The repo is expected to be a git repository with "main" as the default branch.
 
-const repoPath = "/media/files/projects/gopath/src/github.com/imyousuf/CodeEagle"
+var repoPath string
+
+func TestMain(m *testing.M) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	out, err := cmd.Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to find repo root: %v\n", err)
+		os.Exit(1)
+	}
+	repoPath = strings.TrimSpace(string(out))
+	os.Exit(m.Run())
+}
 
 func TestRunGit(t *testing.T) {
 	output, err := runGit(repoPath, "rev-parse", "--is-inside-work-tree")
