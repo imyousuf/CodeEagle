@@ -106,13 +106,13 @@ func (p *Planner) SetMaxIterations(n int) {
 // calling, it uses an agentic loop where the LLM iteratively calls tools.
 // Otherwise, it falls back to single-turn keyword-based context selection.
 func (p *Planner) Ask(ctx context.Context, query string) (string, error) {
-	if p.verbose && p.log != nil {
-		p.log("Starting planner query...")
-	}
+	p.logVerbose("[planner] Starting query: %q", query)
 	toolClient, ok := p.llmClient.(llm.ToolCapableClient)
 	if !ok {
+		p.logVerbose("[planner] LLM does not support tools, using single-turn mode")
 		return p.askSingleTurn(ctx, query)
 	}
+	p.logVerbose("[planner] Using agentic loop (max %d iterations, %d tools available)", p.maxIterations, len(p.registry.tools))
 	return p.askAgentic(ctx, query, toolClient)
 }
 
@@ -133,15 +133,16 @@ func (p *Planner) askAgentic(ctx context.Context, query string, toolClient llm.T
 
 	// RAG pre-fetch: inject semantic search context if vector store is available.
 	if p.vectorStore != nil && p.vectorStore.Available() {
+		p.logVerbose("[rag] Searching vector index (%d vectors)...", p.vectorStore.Len())
 		semanticCtx := p.ctxBuilder.BuildSemanticContext(ctx, query, p.vectorStore)
 		if semanticCtx != "" {
-			if p.verbose && p.log != nil {
-				p.log("Injecting semantic search context into agentic prompt")
-			}
+			p.logVerbose("[rag] Injecting semantic search context (%d chars)", len(semanticCtx))
 			messages = append(messages,
 				llm.Message{Role: llm.RoleUser, Content: "Semantically relevant codebase context:\n\n" + semanticCtx},
 				llm.Message{Role: llm.RoleAssistant, Content: "I've reviewed the semantic search results and will use them alongside tool queries."},
 			)
+		} else {
+			p.logVerbose("[rag] No semantic search results found")
 		}
 	}
 
@@ -153,9 +154,7 @@ func (p *Planner) askAgentic(ctx context.Context, query string, toolClient llm.T
 			return "", fmt.Errorf("planner timeout after %d iterations: %w", i, err)
 		}
 
-		if p.verbose && p.log != nil {
-			p.log("Planner iteration %d/%d", i+1, p.maxIterations)
-		}
+		p.logVerbose("[llm] Iteration %d/%d — sending to %s (provider: %s)...", i+1, p.maxIterations, p.llmClient.Model(), p.llmClient.Provider())
 
 		resp, err := toolClient.ChatWithTools(ctx, agenticPlannerSystemPrompt, messages, tools)
 		if err != nil {
@@ -163,8 +162,11 @@ func (p *Planner) askAgentic(ctx context.Context, query string, toolClient llm.T
 		}
 
 		if !resp.HasToolCalls() {
+			p.logVerbose("[llm] Final response received (%d chars, %d iterations)", len(resp.Content), i+1)
 			return resp.Content, nil
 		}
+
+		p.logVerbose("[llm] LLM requested %d tool call(s)", len(resp.ToolCalls))
 
 		// Add assistant message with tool calls.
 		messages = append(messages, llm.Message{
@@ -175,9 +177,13 @@ func (p *Planner) askAgentic(ctx context.Context, query string, toolClient llm.T
 
 		// Execute each tool call and add the results.
 		for _, tc := range resp.ToolCalls {
+			p.logVerbose("[tool] Calling %s(%v)", tc.Name, tc.Arguments)
 			result, _, err := p.registry.Execute(ctx, tc.Name, tc.Arguments)
 			if err != nil {
 				result = fmt.Sprintf("Error: %v", err)
+				p.logVerbose("[tool] %s returned error: %v", tc.Name, err)
+			} else {
+				p.logVerbose("[tool] %s returned %d chars", tc.Name, len(result))
 			}
 			messages = append(messages, llm.Message{
 				Role:       llm.RoleTool,

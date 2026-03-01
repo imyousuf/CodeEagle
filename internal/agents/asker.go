@@ -40,13 +40,12 @@ func NewAsker(client llm.Client, ctxBuilder *ContextBuilder, vs *vectorstore.Vec
 // the LLM. Unlike other agents that use a switch/case, the asker accumulates
 // context from all matching categories.
 func (a *Asker) Ask(ctx context.Context, query string) (string, error) {
-	if a.verbose && a.log != nil {
-		a.log("Starting asker query...")
-	}
+	a.logVerbose("[asker] Starting query: %q", query)
 	lower := strings.ToLower(query)
 	var parts []string
 
 	// Always include overview context for baseline awareness.
+	a.logVerbose("[context] Building overview context...")
 	overview, err := a.ctxBuilder.BuildOverviewContext(ctx)
 	if err != nil {
 		return "", fmt.Errorf("build overview context: %w", err)
@@ -56,11 +55,13 @@ func (a *Asker) Ask(ctx context.Context, query string) (string, error) {
 	// Always include LLM-generated summaries if available.
 	summaryCtx, err := a.ctxBuilder.BuildSummaryContext(ctx)
 	if err == nil && summaryCtx != "" {
+		a.logVerbose("[context] Including LLM-generated summaries")
 		parts = append(parts, summaryCtx)
 	}
 
 	// If query mentions a file path or extension, add file context.
 	if filePath := extractFilePath(query); filePath != "" {
+		a.logVerbose("[context] Detected file path %q, building file context...", filePath)
 		fileCtx, err := a.ctxBuilder.BuildFileContext(ctx, filePath)
 		if err == nil && !strings.Contains(fileCtx, "No indexed symbols found") {
 			parts = append(parts, fileCtx)
@@ -69,6 +70,7 @@ func (a *Asker) Ask(ctx context.Context, query string) (string, error) {
 
 	// If query mentions a service/module name, add service context.
 	if entityName := extractEntityName(query); entityName != "" {
+		a.logVerbose("[context] Detected entity %q, building service context...", entityName)
 		svcCtx, err := a.ctxBuilder.BuildServiceContext(ctx, entityName)
 		if err == nil && !strings.Contains(svcCtx, "No indexed nodes found") {
 			parts = append(parts, svcCtx)
@@ -77,6 +79,7 @@ func (a *Asker) Ask(ctx context.Context, query string) (string, error) {
 
 	// Model/schema/database/entity queries.
 	if containsAny(lower, "model", "schema", "database", "entity") {
+		a.logVerbose("[context] Building model/schema context...")
 		entityName := extractEntityName(query)
 		modelCtx, err := a.ctxBuilder.BuildModelContext(ctx, entityName)
 		if err == nil && !strings.Contains(modelCtx, "No data models found") {
@@ -86,6 +89,7 @@ func (a *Asker) Ask(ctx context.Context, query string) (string, error) {
 
 	// Architecture/pattern/design/structure queries.
 	if containsAny(lower, "architecture", "pattern", "design", "structure") {
+		a.logVerbose("[context] Building architecture context...")
 		archCtx, err := a.ctxBuilder.BuildArchitectureContext(ctx)
 		if err == nil && !strings.Contains(archCtx, "No architectural metadata") {
 			parts = append(parts, archCtx)
@@ -94,6 +98,7 @@ func (a *Asker) Ask(ctx context.Context, query string) (string, error) {
 
 	// Branch/changes/diff/PR queries.
 	if containsAny(lower, "branch", "changes", "diff", "pr") {
+		a.logVerbose("[context] Building branch/diff context...")
 		for _, repoPath := range a.repoPaths {
 			branchCtx, err := a.ctxBuilder.BuildBranchContext(ctx, repoPath)
 			if err == nil {
@@ -105,6 +110,7 @@ func (a *Asker) Ask(ctx context.Context, query string) (string, error) {
 	// Metrics/complexity/coverage/quality queries.
 	if containsAny(lower, "metric", "complexity", "coverage", "quality") {
 		if filePath := extractFilePath(query); filePath != "" {
+			a.logVerbose("[context] Building metrics context for %q...", filePath)
 			metricsCtx, err := a.ctxBuilder.BuildMetricsContext(ctx, filePath)
 			if err == nil && !strings.Contains(metricsCtx, "No indexed symbols found") {
 				parts = append(parts, metricsCtx)
@@ -114,8 +120,10 @@ func (a *Asker) Ask(ctx context.Context, query string) (string, error) {
 
 	// Impact/affect/change/depend queries.
 	if containsAny(lower, "impact", "affect", "depend") {
+		a.logVerbose("[context] Building impact analysis context...")
 		node, err := a.findNodeByQuery(ctx, query)
 		if err == nil && node != nil {
+			a.logVerbose("[context] Found node %q (%s) for impact analysis", node.Name, node.Type)
 			impactCtx, err := a.ctxBuilder.BuildImpactContext(ctx, node.ID)
 			if err == nil {
 				parts = append(parts, impactCtx)
@@ -126,6 +134,7 @@ func (a *Asker) Ask(ctx context.Context, query string) (string, error) {
 	// Guideline/convention/rule queries (guidelines are auto-injected by BaseAgent,
 	// but explicitly adding them as context makes the content visible in the prompt).
 	if containsAny(lower, "guideline", "convention", "rule") {
+		a.logVerbose("[context] Building guideline context...")
 		guideCtx, err := a.ctxBuilder.BuildGuidelineContext(ctx)
 		if err == nil && guideCtx != "" {
 			parts = append(parts, guideCtx)

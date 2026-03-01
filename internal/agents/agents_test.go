@@ -735,10 +735,10 @@ func TestPlannerVerboseToolLogging(t *testing.T) {
 	foundToolStart := false
 	foundToolEnd := false
 	for _, log := range logs {
-		if strings.Contains(log, "Starting planner query") {
+		if strings.Contains(log, "[planner] Starting query") {
 			foundStartup = true
 		}
-		if strings.Contains(log, "Planner iteration 1/") {
+		if strings.Contains(log, "[llm] Iteration 1/") {
 			foundIteration1 = true
 		}
 		if strings.Contains(log, "-> tool: get_graph_overview") {
@@ -785,7 +785,7 @@ func TestBaseAgentSetVerbose(t *testing.T) {
 	}
 	foundProvider := false
 	for _, log := range logs {
-		if strings.Contains(log, "Sending query to LLM") {
+		if strings.Contains(log, "[llm] Sending query to") {
 			foundProvider = true
 		}
 	}

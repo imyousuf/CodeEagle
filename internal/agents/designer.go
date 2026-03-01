@@ -35,13 +35,12 @@ func NewDesigner(client llm.Client, ctxBuilder *ContextBuilder, vs *vectorstore.
 // context when a specific entity is mentioned. For model and architecture
 // queries, it adds specialized context.
 func (d *Designer) Ask(ctx context.Context, query string) (string, error) {
-	if d.verbose && d.log != nil {
-		d.log("Starting designer query...")
-	}
+	d.logVerbose("[designer] Starting query: %q", query)
 	lower := strings.ToLower(query)
 	var parts []string
 
 	// Always include overview context for architectural questions.
+	d.logVerbose("[context] Building overview context...")
 	overview, err := d.ctxBuilder.BuildOverviewContext(ctx)
 	if err != nil {
 		return "", fmt.Errorf("build overview context: %w", err)
@@ -50,6 +49,7 @@ func (d *Designer) Ask(ctx context.Context, query string) (string, error) {
 
 	// Add model context when query mentions data/model/schema.
 	if containsAny(lower, "model", "data", "schema") {
+		d.logVerbose("[context] Building model/schema context...")
 		entityName := extractEntityName(query)
 		modelCtx, err := d.ctxBuilder.BuildModelContext(ctx, entityName)
 		if err == nil && !strings.Contains(modelCtx, "No data models found") {
@@ -59,6 +59,7 @@ func (d *Designer) Ask(ctx context.Context, query string) (string, error) {
 
 	// Add architecture context when query mentions patterns/architecture.
 	if containsAny(lower, "pattern", "architecture", "layer", "structure") {
+		d.logVerbose("[context] Building architecture context...")
 		archCtx, err := d.ctxBuilder.BuildArchitectureContext(ctx)
 		if err == nil && !strings.Contains(archCtx, "No architectural metadata") {
 			parts = append(parts, archCtx)
@@ -68,6 +69,7 @@ func (d *Designer) Ask(ctx context.Context, query string) (string, error) {
 	// Try to add more specific context based on entities mentioned in the query.
 	entityName := extractEntityName(query)
 	if entityName != "" {
+		d.logVerbose("[context] Detected entity %q, building service/file context...", entityName)
 		// Try as service/package first.
 		svcCtx, err := d.ctxBuilder.BuildServiceContext(ctx, entityName)
 		if err == nil && !strings.Contains(svcCtx, "No indexed nodes found") {

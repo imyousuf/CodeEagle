@@ -36,14 +36,13 @@ func NewReviewer(client llm.Client, ctxBuilder *ContextBuilder, vs *vectorstore.
 // Ask sends a review query about specific files or general code conventions
 // to the LLM, enriched with file and metrics context.
 func (r *Reviewer) Ask(ctx context.Context, query string) (string, error) {
-	if r.verbose && r.log != nil {
-		r.log("Starting reviewer query...")
-	}
+	r.logVerbose("[reviewer] Starting query: %q", query)
 	var parts []string
 
 	// Extract file paths or entity names from the query.
 	entityName := extractEntityName(query)
 	if entityName != "" {
+		r.logVerbose("[context] Detected entity %q, building file + metrics context...", entityName)
 		fileCtx, err := r.ctxBuilder.BuildFileContext(ctx, entityName)
 		if err == nil {
 			parts = append(parts, fileCtx)
@@ -56,6 +55,7 @@ func (r *Reviewer) Ask(ctx context.Context, query string) (string, error) {
 
 	// If no specific context was found, add overview.
 	if len(parts) == 0 {
+		r.logVerbose("[context] No specific entity found, building overview context...")
 		overview, err := r.ctxBuilder.BuildOverviewContext(ctx)
 		if err != nil {
 			return "", fmt.Errorf("build overview context: %w", err)
@@ -71,6 +71,7 @@ func (r *Reviewer) Ask(ctx context.Context, query string) (string, error) {
 // for those files, and sends a review-focused prompt to the LLM.
 // If diffRef is empty, it auto-detects the branch diff against the default branch.
 func (r *Reviewer) ReviewDiff(ctx context.Context, diffRef string, repoPaths ...string) (string, error) {
+	r.logVerbose("[reviewer] Starting diff review (ref: %q)", diffRef)
 	// Auto-detect branch diff when no explicit ref is provided.
 	if diffRef == "" && len(repoPaths) > 0 {
 		repoPath := repoPaths[0]
@@ -93,6 +94,7 @@ func (r *Reviewer) ReviewDiff(ctx context.Context, diffRef string, repoPaths ...
 
 	// Parse changed file paths from the diff.
 	changedFiles := parseDiffFiles(diffOutput)
+	r.logVerbose("[context] Found %d changed file(s) in diff", len(changedFiles))
 	if len(changedFiles) == 0 {
 		return "No changed files found in the diff.", nil
 	}
