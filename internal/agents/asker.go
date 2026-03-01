@@ -10,7 +10,13 @@ import (
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 
-const askerSystemPrompt = `You are a knowledgeable codebase assistant. You answer freeform questions about the codebase using a knowledge graph that captures source code entities, relationships, documentation, and code quality metrics. Provide specific, grounded answers referencing files, functions, services, and patterns found in the provided context. If the context does not contain enough information to answer fully, say so clearly.`
+const askerSystemPrompt = `You are a knowledgeable codebase assistant. You answer freeform questions about the codebase using a knowledge graph that captures source code entities, relationships, documentation, and code quality metrics.
+
+CRITICAL RULES:
+- ONLY state facts that are explicitly present in the provided context. Do NOT infer, guess, or fill in details from general knowledge.
+- When referencing files, packages, functions, or methods, use ONLY names that appear in the context. Never invent or assume names.
+- If the context does not contain enough information to answer a specific aspect, say "not shown in the provided context" rather than guessing.
+- Provide specific, grounded answers referencing files, functions, services, and patterns found in the provided context.`
 
 // Asker is the general-purpose Q&A agent that answers freeform questions
 // about the indexed codebase. It uses a richer context selection strategy
