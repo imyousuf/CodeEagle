@@ -10,6 +10,7 @@ import (
 
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
 	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/internal/vectorstore"
 )
 
 // ContextBuilder translates knowledge graph data into formatted text
@@ -946,4 +947,58 @@ func (cb *ContextBuilder) BuildBranchContext(ctx context.Context, repoPath strin
 	}
 
 	return b.String(), nil
+}
+
+// BuildSemanticContext performs a semantic search and formats the results
+// as structured context for agent system prompts. Returns "" if vector
+// search is unavailable or no results are found.
+func (cb *ContextBuilder) BuildSemanticContext(ctx context.Context, query string, vs *vectorstore.VectorStore) string {
+	if vs == nil || !vs.Available() {
+		return ""
+	}
+
+	results, err := vs.Search(ctx, query, 20)
+	if err != nil || len(results) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("## Relevant Codebase Context (via semantic search)\n\n")
+
+	for i, r := range results {
+		if r.Node == nil {
+			continue
+		}
+		n := r.Node
+		fmt.Fprintf(&b, "### %d. [%s] %s (relevance: %.3f)\n", i+1, n.Type, n.Name, r.Score)
+		if n.FilePath != "" {
+			fmt.Fprintf(&b, "File: %s", n.FilePath)
+			if n.Line > 0 {
+				fmt.Fprintf(&b, ":%d", n.Line)
+			}
+			fmt.Fprintln(&b)
+		}
+		if n.Package != "" {
+			fmt.Fprintf(&b, "Package: %s\n", n.Package)
+		}
+
+		// Show the matching chunk text.
+		if r.ChunkText != "" {
+			text := r.ChunkText
+			if len(text) > 800 {
+				text = text[:800] + "..."
+			}
+			fmt.Fprintf(&b, "```\n%s\n```\n", text)
+		}
+
+		// Include 1-hop edges for structural context.
+		edges := getOneHopEdges(ctx, cb.store, n.ID)
+		if edges != "" {
+			fmt.Fprintf(&b, "Relationships:\n%s", edges)
+		}
+
+		fmt.Fprintln(&b)
+	}
+
+	return b.String()
 }

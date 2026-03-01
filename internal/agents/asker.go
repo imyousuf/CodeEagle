@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/internal/vectorstore"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 
@@ -20,12 +21,14 @@ type Asker struct {
 }
 
 // NewAsker creates a new ask agent. Optional repoPaths enable branch-aware context.
-func NewAsker(client llm.Client, ctxBuilder *ContextBuilder, repoPaths ...string) *Asker {
+// If vs is non-nil, RAG-first context injection is enabled.
+func NewAsker(client llm.Client, ctxBuilder *ContextBuilder, vs *vectorstore.VectorStore, repoPaths ...string) *Asker {
 	return &Asker{
 		BaseAgent: BaseAgent{
 			name:         "asker",
 			llmClient:    client,
 			ctxBuilder:   ctxBuilder,
+			vectorStore:  vs,
 			systemPrompt: askerSystemPrompt,
 		},
 		repoPaths: repoPaths,

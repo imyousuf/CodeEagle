@@ -14,7 +14,8 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/linker"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 
-	// Register LLM providers so their init() functions run.
+	// Register LLM and embedding providers so their init() functions run.
+	_ "github.com/imyousuf/CodeEagle/internal/embedding"
 	_ "github.com/imyousuf/CodeEagle/internal/llm"
 	"github.com/imyousuf/CodeEagle/internal/parser"
 	csharpparser "github.com/imyousuf/CodeEagle/internal/parser/csharp"
@@ -176,6 +177,18 @@ target branch for import.`,
 				lnk := linker.NewLinker(store, linkerLLM, logFn, verbose)
 				if err := lnk.RunAll(ctx(cmd)); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: linker failed: %v\n", err)
+				}
+			}
+
+			// Run vector indexing if an embedding provider is available.
+			vs, vecErr := openVectorStore(cfg, store, currentBranch, logFn)
+			if vecErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: vector store: %v\n", vecErr)
+			}
+			if vs != nil {
+				defer vs.Close()
+				if err := syncVectorIndex(vs, cfg, full, logFn); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: vector indexing failed: %v\n", err)
 				}
 			}
 

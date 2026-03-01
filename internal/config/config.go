@@ -99,6 +99,10 @@ type AgentsConfig struct {
 	AutoLink bool `mapstructure:"auto_link" yaml:"auto_link"`
 	// CredentialsFile is the path to a GCP service account credentials JSON file (for Vertex AI).
 	CredentialsFile string `mapstructure:"credentials_file" yaml:"credentials_file,omitempty"`
+	// EmbeddingProvider is the embedding provider ("ollama", "vertex-ai"). Empty means auto-detect.
+	EmbeddingProvider string `mapstructure:"embedding_provider" yaml:"embedding_provider,omitempty"`
+	// EmbeddingModel is the embedding model name. Empty means use provider default.
+	EmbeddingModel string `mapstructure:"embedding_model" yaml:"embedding_model,omitempty"`
 }
 
 // HomeDir returns the path to the user-level CodeEagle directory (~/.CodeEagle/).

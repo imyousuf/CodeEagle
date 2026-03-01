@@ -208,7 +208,7 @@ func TestPlannerAsk(t *testing.T) {
 
 	mock := &mockClient{response: "impact analysis result"}
 	ctxBuilder := NewContextBuilder(store)
-	planner := NewPlanner(mock, ctxBuilder)
+	planner := NewPlanner(mock, ctxBuilder, nil)
 
 	if planner.Name() != "planner" {
 		t.Errorf("expected name 'planner', got %q", planner.Name())
@@ -233,7 +233,7 @@ func TestPlannerAskDependencyQuery(t *testing.T) {
 
 	mock := &mockClient{response: "dependency result"}
 	ctxBuilder := NewContextBuilder(store)
-	planner := NewPlanner(mock, ctxBuilder)
+	planner := NewPlanner(mock, ctxBuilder, nil)
 
 	resp, err := planner.Ask(context.Background(), "What depends on auth service?")
 	if err != nil {
@@ -250,7 +250,7 @@ func TestPlannerAskDefaultQuery(t *testing.T) {
 
 	mock := &mockClient{response: "overview result"}
 	ctxBuilder := NewContextBuilder(store)
-	planner := NewPlanner(mock, ctxBuilder)
+	planner := NewPlanner(mock, ctxBuilder, nil)
 
 	resp, err := planner.Ask(context.Background(), "tell me about this project")
 	if err != nil {
@@ -274,7 +274,7 @@ func TestDesignerAsk(t *testing.T) {
 
 	mock := &mockClient{response: "design analysis"}
 	ctxBuilder := NewContextBuilder(store)
-	designer := NewDesigner(mock, ctxBuilder)
+	designer := NewDesigner(mock, ctxBuilder, nil)
 
 	if designer.Name() != "designer" {
 		t.Errorf("expected name 'designer', got %q", designer.Name())
@@ -302,7 +302,7 @@ func TestReviewerAsk(t *testing.T) {
 
 	mock := &mockClient{response: "review result"}
 	ctxBuilder := NewContextBuilder(store)
-	reviewer := NewReviewer(mock, ctxBuilder)
+	reviewer := NewReviewer(mock, ctxBuilder, nil)
 
 	if reviewer.Name() != "reviewer" {
 		t.Errorf("expected name 'reviewer', got %q", reviewer.Name())
@@ -324,7 +324,7 @@ func TestReviewerAskGenericQuery(t *testing.T) {
 
 	mock := &mockClient{response: "generic review"}
 	ctxBuilder := NewContextBuilder(store)
-	reviewer := NewReviewer(mock, ctxBuilder)
+	reviewer := NewReviewer(mock, ctxBuilder, nil)
 
 	resp, err := reviewer.Ask(context.Background(), "what are the code quality issues")
 	if err != nil {
@@ -348,7 +348,7 @@ func TestReviewerReviewDiff(t *testing.T) {
 
 	mock := &mockClient{response: "diff review result"}
 	ctxBuilder := NewContextBuilder(store)
-	reviewer := NewReviewer(mock, ctxBuilder)
+	reviewer := NewReviewer(mock, ctxBuilder, nil)
 
 	// Replace the git diff runner with a mock.
 	originalRunner := gitDiffRunner
@@ -397,7 +397,7 @@ func TestReviewerReviewDiffNoChanges(t *testing.T) {
 
 	mock := &mockClient{response: "should not be called"}
 	ctxBuilder := NewContextBuilder(store)
-	reviewer := NewReviewer(mock, ctxBuilder)
+	reviewer := NewReviewer(mock, ctxBuilder, nil)
 
 	originalRunner := gitDiffRunner
 	gitDiffRunner = func(_ context.Context, _ string) (string, error) {
@@ -420,7 +420,7 @@ func TestReviewerReviewDiffGitError(t *testing.T) {
 
 	mock := &mockClient{response: "should not be called"}
 	ctxBuilder := NewContextBuilder(store)
-	reviewer := NewReviewer(mock, ctxBuilder)
+	reviewer := NewReviewer(mock, ctxBuilder, nil)
 
 	originalRunner := gitDiffRunner
 	gitDiffRunner = func(_ context.Context, _ string) (string, error) {
@@ -546,7 +546,7 @@ func TestPlannerFallbackToSingleTurn(t *testing.T) {
 
 	mock := &mockClient{response: "single turn response"}
 	ctxBuilder := NewContextBuilder(store)
-	planner := NewPlanner(mock, ctxBuilder)
+	planner := NewPlanner(mock, ctxBuilder, nil)
 
 	// Verify it doesn't implement ToolCapableClient.
 	if llm.SupportsTools(mock) {
@@ -571,7 +571,7 @@ func TestPlannerAgenticNoToolCalls(t *testing.T) {
 		mockClient: mockClient{response: "direct answer"},
 	}
 	ctxBuilder := NewContextBuilder(store)
-	planner := NewPlanner(mock, ctxBuilder)
+	planner := NewPlanner(mock, ctxBuilder, nil)
 
 	if !llm.SupportsTools(mock) {
 		t.Fatal("mockToolClient should support tools")
@@ -605,7 +605,7 @@ func TestPlannerAgenticOneRound(t *testing.T) {
 		},
 	}
 	ctxBuilder := NewContextBuilder(store)
-	planner := NewPlanner(mock, ctxBuilder)
+	planner := NewPlanner(mock, ctxBuilder, nil)
 
 	resp, err := planner.Ask(context.Background(), "What is the project overview?")
 	if err != nil {
@@ -638,7 +638,7 @@ func TestPlannerAgenticMaxIterations(t *testing.T) {
 	}
 
 	ctxBuilder := NewContextBuilder(store)
-	planner := NewPlanner(mock, ctxBuilder)
+	planner := NewPlanner(mock, ctxBuilder, nil)
 	planner.SetMaxIterations(3) // Low limit for test.
 
 	_, err := planner.Ask(context.Background(), "query")
@@ -658,7 +658,7 @@ func TestPlannerAgenticLLMError(t *testing.T) {
 		mockClient: mockClient{err: fmt.Errorf("API timeout")},
 	}
 	ctxBuilder := NewContextBuilder(store)
-	planner := NewPlanner(mock, ctxBuilder)
+	planner := NewPlanner(mock, ctxBuilder, nil)
 
 	_, err := planner.Ask(context.Background(), "query")
 	if err == nil {
@@ -675,7 +675,7 @@ func TestPlannerSetMaxIterations(t *testing.T) {
 
 	mock := &mockClient{response: "ok"}
 	ctxBuilder := NewContextBuilder(store)
-	planner := NewPlanner(mock, ctxBuilder)
+	planner := NewPlanner(mock, ctxBuilder, nil)
 
 	if planner.maxIterations != defaultMaxIterations {
 		t.Errorf("expected default maxIterations=%d, got %d", defaultMaxIterations, planner.maxIterations)
@@ -712,7 +712,7 @@ func TestPlannerVerboseToolLogging(t *testing.T) {
 		},
 	}
 	ctxBuilder := NewContextBuilder(store)
-	planner := NewPlanner(mock, ctxBuilder)
+	planner := NewPlanner(mock, ctxBuilder, nil)
 
 	var logs []string
 	logger := func(format string, args ...any) {
@@ -812,7 +812,7 @@ func TestPlannerAgenticToolError(t *testing.T) {
 		},
 	}
 	ctxBuilder := NewContextBuilder(store)
-	planner := NewPlanner(mock, ctxBuilder)
+	planner := NewPlanner(mock, ctxBuilder, nil)
 
 	resp, err := planner.Ask(context.Background(), "query")
 	if err != nil {

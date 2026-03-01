@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/imyousuf/CodeEagle/internal/vectorstore"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 
@@ -16,12 +17,14 @@ type Designer struct {
 }
 
 // NewDesigner creates a new design agent.
-func NewDesigner(client llm.Client, ctxBuilder *ContextBuilder) *Designer {
+// If vs is non-nil, RAG-first context injection is enabled.
+func NewDesigner(client llm.Client, ctxBuilder *ContextBuilder, vs *vectorstore.VectorStore) *Designer {
 	return &Designer{
 		BaseAgent: BaseAgent{
 			name:         "designer",
 			llmClient:    client,
 			ctxBuilder:   ctxBuilder,
+			vectorStore:  vs,
 			systemPrompt: designerSystemPrompt,
 		},
 	}

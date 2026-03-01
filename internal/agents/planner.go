@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/internal/vectorstore"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 
@@ -39,17 +40,23 @@ type Planner struct {
 	maxIterations int
 }
 
+// PlannerOption is a functional option for NewPlanner.
+type PlannerOption func(*Planner)
+
+// WithVectorStore sets the vector store for the planner, enabling the
+// semantic_search tool and RAG-first context injection.
+func WithVectorStore(vs *vectorstore.VectorStore) PlannerOption {
+	return func(p *Planner) {
+		p.vectorStore = vs
+	}
+}
+
 // NewPlanner creates a new planning agent with tool-use support.
 // If the LLM client supports tools, the planner uses an agentic loop.
 // Otherwise, it falls back to single-turn keyword-based context selection.
 // Optional repoPaths enable branch-aware context.
-func NewPlanner(client llm.Client, ctxBuilder *ContextBuilder, repoPaths ...string) *Planner {
-	registry := NewRegistry()
-	for _, tool := range NewPlannerTools(ctxBuilder) {
-		registry.Register(tool)
-	}
-
-	return &Planner{
+func NewPlanner(client llm.Client, ctxBuilder *ContextBuilder, repoPaths []string, opts ...PlannerOption) *Planner {
+	p := &Planner{
 		BaseAgent: BaseAgent{
 			name:         "planner",
 			llmClient:    client,
@@ -57,9 +64,24 @@ func NewPlanner(client llm.Client, ctxBuilder *ContextBuilder, repoPaths ...stri
 			systemPrompt: plannerSystemPrompt,
 		},
 		repoPaths:     repoPaths,
-		registry:      registry,
 		maxIterations: defaultMaxIterations,
 	}
+
+	for _, opt := range opts {
+		opt(p)
+	}
+
+	// Build tool registry (including semantic_search if vector store is set).
+	registry := NewRegistry()
+	for _, tool := range NewPlannerTools(ctxBuilder) {
+		registry.Register(tool)
+	}
+	if p.vectorStore != nil && p.vectorStore.Available() {
+		registry.Register(&semanticSearchTool{vs: p.vectorStore, store: ctxBuilder.store})
+	}
+	p.registry = registry
+
+	return p
 }
 
 // SetVerbose enables or disables verbose logging on the planner.
@@ -105,6 +127,20 @@ func (p *Planner) askAgentic(ctx context.Context, query string, toolClient llm.T
 			messages = append(messages,
 				llm.Message{Role: llm.RoleUser, Content: "Project guidelines:\n\n" + guidelines},
 				llm.Message{Role: llm.RoleAssistant, Content: "I've noted the project guidelines."},
+			)
+		}
+	}
+
+	// RAG pre-fetch: inject semantic search context if vector store is available.
+	if p.vectorStore != nil && p.vectorStore.Available() {
+		semanticCtx := p.ctxBuilder.BuildSemanticContext(ctx, query, p.vectorStore)
+		if semanticCtx != "" {
+			if p.verbose && p.log != nil {
+				p.log("Injecting semantic search context into agentic prompt")
+			}
+			messages = append(messages,
+				llm.Message{Role: llm.RoleUser, Content: "Semantically relevant codebase context:\n\n" + semanticCtx},
+				llm.Message{Role: llm.RoleAssistant, Content: "I've reviewed the semantic search results and will use them alongside tool queries."},
 			)
 		}
 	}

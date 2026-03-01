@@ -83,6 +83,7 @@ func init() {
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newUpdateCmd())
 	rootCmd.AddCommand(newConfigCmd())
+	rootCmd.AddCommand(newVectorIndexCmd())
 }
 
 // initConfig reads in config file and ENV variables if set.

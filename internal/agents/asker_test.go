@@ -8,7 +8,7 @@ import (
 
 func TestAskerName(t *testing.T) {
 	mock := &mockClient{response: "test"}
-	asker := NewAsker(mock, nil)
+	asker := NewAsker(mock, nil, nil)
 	if asker.Name() != "asker" {
 		t.Errorf("expected name 'asker', got %q", asker.Name())
 	}
@@ -20,7 +20,7 @@ func TestAskerOverviewContext(t *testing.T) {
 
 	mock := &mockClient{response: "overview answer"}
 	ctxBuilder := NewContextBuilder(store)
-	asker := NewAsker(mock, ctxBuilder)
+	asker := NewAsker(mock, ctxBuilder, nil)
 
 	resp, err := asker.Ask(context.Background(), "tell me about this project")
 	if err != nil {
@@ -47,7 +47,7 @@ func TestAskerModelContext(t *testing.T) {
 
 	mock := &mockClient{response: "model answer"}
 	ctxBuilder := NewContextBuilder(store)
-	asker := NewAsker(mock, ctxBuilder)
+	asker := NewAsker(mock, ctxBuilder, nil)
 
 	resp, err := asker.Ask(context.Background(), "tell me about the database models")
 	if err != nil {
@@ -72,7 +72,7 @@ func TestAskerFileContext(t *testing.T) {
 
 	mock := &mockClient{response: "file answer"}
 	ctxBuilder := NewContextBuilder(store)
-	asker := NewAsker(mock, ctxBuilder)
+	asker := NewAsker(mock, ctxBuilder, nil)
 
 	resp, err := asker.Ask(context.Background(), "what is in src/handler.go")
 	if err != nil {
@@ -97,7 +97,7 @@ func TestAskerMultiContext(t *testing.T) {
 
 	mock := &mockClient{response: "multi answer"}
 	ctxBuilder := NewContextBuilder(store)
-	asker := NewAsker(mock, ctxBuilder)
+	asker := NewAsker(mock, ctxBuilder, nil)
 
 	// A query that should trigger both architecture and model context.
 	resp, err := asker.Ask(context.Background(), "describe the architecture and database schema design")
@@ -126,7 +126,7 @@ func TestAskerImpactContext(t *testing.T) {
 
 	mock := &mockClient{response: "impact answer"}
 	ctxBuilder := NewContextBuilder(store)
-	asker := NewAsker(mock, ctxBuilder)
+	asker := NewAsker(mock, ctxBuilder, nil)
 
 	resp, err := asker.Ask(context.Background(), "what would be the impact of changing HandleRequest")
 	if err != nil {
@@ -148,7 +148,7 @@ func TestAskerMetricsContext(t *testing.T) {
 
 	mock := &mockClient{response: "metrics answer"}
 	ctxBuilder := NewContextBuilder(store)
-	asker := NewAsker(mock, ctxBuilder)
+	asker := NewAsker(mock, ctxBuilder, nil)
 
 	resp, err := asker.Ask(context.Background(), "show me the complexity metrics for src/handler.go")
 	if err != nil {

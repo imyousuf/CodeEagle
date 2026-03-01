@@ -3,13 +3,17 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"sort"
 
 	"github.com/spf13/cobra"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
+	"github.com/imyousuf/CodeEagle/internal/embedding"
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
 	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/internal/vectorstore"
 )
 
 func newStatusCmd() *cobra.Command {
@@ -59,6 +63,9 @@ func newStatusCmd() *cobra.Command {
 				fmt.Fprintln(out)
 			}
 
+			// Show vector search status.
+			showVectorStatus(cfg, currentBranch, out)
+
 			// Show git branch info for configured repositories.
 			if len(cfg.Repositories) > 0 {
 				fmt.Fprintf(out, "  Git Status:\n")
@@ -92,6 +99,59 @@ func newStatusCmd() *cobra.Command {
 	}
 
 	return cmd
+}
+
+func showVectorStatus(cfg *config.Config, branch string, out io.Writer) {
+	if cfg.ConfigDir == "" {
+		return
+	}
+
+	idxPath := vectorIndexPath(cfg)
+	dbPath := vectorDBPath(cfg)
+
+	// Check if embedding provider is available.
+	embedder, _ := embedding.DetectProvider(cfg)
+
+	// Check if index file exists.
+	info, err := os.Stat(idxPath)
+	if err != nil {
+		if embedder != nil {
+			fmt.Fprintf(out, "  Vector Search: available (%s/%s) - run 'codeeagle vectorindex' to build\n\n",
+				embedder.Name(), embedder.ModelName())
+		} else {
+			fmt.Fprintf(out, "  Vector Search: disabled (no embedding provider)\n\n")
+		}
+		return
+	}
+
+	// Index exists — try to read metadata.
+	vs, vsErr := vectorstore.New(nil, nil, branch, idxPath, dbPath)
+	if vsErr != nil {
+		fmt.Fprintf(out, "  Vector Search: index exists but cannot open (%v)\n\n", vsErr)
+		return
+	}
+	defer vs.Close()
+
+	meta, _ := vs.LoadMetaOnly()
+
+	if meta != nil {
+		fmt.Fprintf(out, "  Vector Search: enabled (%s/%s, %d-dim)\n", meta.Provider, meta.Model, meta.Dimensions)
+		fmt.Fprintf(out, "    Indexed nodes:  %d\n", meta.NodeCount)
+		fmt.Fprintf(out, "    Index file:     %s (%.1fKB)\n", idxPath, float64(info.Size())/1024)
+		fmt.Fprintf(out, "    Last updated:   %s\n", meta.UpdatedAt.Format("2006-01-02 15:04:05"))
+
+		// Check if current provider matches.
+		if embedder != nil && (meta.Provider != embedder.Name() || meta.Model != embedder.ModelName()) {
+			fmt.Fprintf(out, "    WARNING: index built with %s/%s but current provider is %s/%s\n",
+				meta.Provider, meta.Model, embedder.Name(), embedder.ModelName())
+		} else if embedder == nil {
+			fmt.Fprintf(out, "    WARNING: %s/%s no longer available, vector search disabled\n",
+				meta.Provider, meta.Model)
+		}
+	} else {
+		fmt.Fprintf(out, "  Vector Search: index exists (%s, %.1fKB)\n", idxPath, float64(info.Size())/1024)
+	}
+	fmt.Fprintln(out)
 }
 
 func sortedNodeTypes(m map[graph.NodeType]int64) []graph.NodeType {

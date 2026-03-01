@@ -32,7 +32,8 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/watcher"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 
-	// Register LLM providers so their init() functions run.
+	// Register LLM and embedding providers so their init() functions run.
+	_ "github.com/imyousuf/CodeEagle/internal/embedding"
 	_ "github.com/imyousuf/CodeEagle/internal/llm"
 )
 
@@ -132,6 +133,33 @@ func newWatchCmd() *cobra.Command {
 			}
 			lnk := linker.NewLinker(store, linkerLLM, logFn, verbose)
 
+			// Open vector store if embedding provider is available.
+			vs, vecErr := openVectorStore(cfg, store, currentBranch, logFn)
+			if vecErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: vector store: %v\n", vecErr)
+			}
+			if vs != nil {
+				defer vs.Close()
+				// Load existing index (or build from scratch on first run).
+				if err := syncVectorIndex(vs, cfg, false, logFn); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: initial vector index: %v\n", err)
+				}
+			}
+
+			// Build post-index hook: linker + vector update.
+			postIndexHook := func(hookCtx context.Context) error {
+				if err := lnk.RunAll(hookCtx); err != nil {
+					return err
+				}
+				if vs != nil && vs.Available() {
+					// Save updated vectors after each index round.
+					if err := vs.Save(); err != nil {
+						logFn("Warning: save vector index: %v", err)
+					}
+				}
+				return nil
+			}
+
 			// Create indexer.
 			idx := indexer.NewIndexer(indexer.IndexerConfig{
 				GraphStore:     store,
@@ -142,7 +170,7 @@ func newWatchCmd() *cobra.Command {
 				Logger:         logFn,
 				LLMClient:      llmClient,
 				AutoSummarize:  cfg.Agents.AutoSummarize,
-				PostIndexHook:  lnk.RunAll,
+				PostIndexHook:  postIndexHook,
 			})
 
 			// Set up signal handling.

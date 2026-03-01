@@ -133,7 +133,7 @@ falls back to single-turn keyword-based context selection.`,
 				}
 			}
 
-			store, _, err := openBranchStore(cfg)
+			store, currentBranch, err := openBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -143,7 +143,16 @@ falls back to single-turn keyword-based context selection.`,
 				repoPaths = append(repoPaths, repo.Path)
 			}
 			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
-			planner := agents.NewPlanner(client, ctxBuilder, repoPaths...)
+
+			// Open vector store for RAG-optimized queries.
+			var plannerOpts []agents.PlannerOption
+			vs := openAgentVectorStore(cfg, store, currentBranch)
+			if vs != nil {
+				plannerOpts = append(plannerOpts, agents.WithVectorStore(vs))
+				defer vs.Close()
+			}
+
+			planner := agents.NewPlanner(client, ctxBuilder, repoPaths, plannerOpts...)
 			if verbose {
 				logger := agentLogger()
 				planner.SetVerbose(true, logger)
@@ -198,7 +207,7 @@ func newAgentDesignCmd() *cobra.Command {
 			}
 			defer client.Close()
 
-			store, _, err := openBranchStore(cfg)
+			store, currentBranch, err := openBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -209,7 +218,12 @@ func newAgentDesignCmd() *cobra.Command {
 				repoPaths = append(repoPaths, repo.Path)
 			}
 			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
-			designer := agents.NewDesigner(client, ctxBuilder)
+
+			vs := openAgentVectorStore(cfg, store, currentBranch)
+			if vs != nil {
+				defer vs.Close()
+			}
+			designer := agents.NewDesigner(client, ctxBuilder, vs)
 			if verbose {
 				designer.SetVerbose(true, agentLogger())
 			}
@@ -245,7 +259,7 @@ func newAgentReviewCmd() *cobra.Command {
 			}
 			defer client.Close()
 
-			store, _, err := openBranchStore(cfg)
+			store, currentBranch, err := openBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -256,7 +270,12 @@ func newAgentReviewCmd() *cobra.Command {
 				repoPaths = append(repoPaths, repo.Path)
 			}
 			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
-			reviewer := agents.NewReviewer(client, ctxBuilder)
+
+			vs := openAgentVectorStore(cfg, store, currentBranch)
+			if vs != nil {
+				defer vs.Close()
+			}
+			reviewer := agents.NewReviewer(client, ctxBuilder, vs)
 			if verbose {
 				reviewer.SetVerbose(true, agentLogger())
 			}
@@ -307,7 +326,7 @@ func newAgentAskCmd() *cobra.Command {
 			}
 			defer client.Close()
 
-			store, _, err := openBranchStore(cfg)
+			store, currentBranch, err := openBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -318,7 +337,12 @@ func newAgentAskCmd() *cobra.Command {
 				repoPaths = append(repoPaths, repo.Path)
 			}
 			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
-			asker := agents.NewAsker(client, ctxBuilder, repoPaths...)
+
+			vs := openAgentVectorStore(cfg, store, currentBranch)
+			if vs != nil {
+				defer vs.Close()
+			}
+			asker := agents.NewAsker(client, ctxBuilder, vs, repoPaths...)
 			if verbose {
 				asker.SetVerbose(true, agentLogger())
 			}

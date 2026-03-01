@@ -8,6 +8,7 @@ import (
 
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
 	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/internal/vectorstore"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 
@@ -19,12 +20,14 @@ type Reviewer struct {
 }
 
 // NewReviewer creates a new code review agent.
-func NewReviewer(client llm.Client, ctxBuilder *ContextBuilder) *Reviewer {
+// If vs is non-nil, RAG-first context injection is enabled.
+func NewReviewer(client llm.Client, ctxBuilder *ContextBuilder, vs *vectorstore.VectorStore) *Reviewer {
 	return &Reviewer{
 		BaseAgent: BaseAgent{
 			name:         "reviewer",
 			llmClient:    client,
 			ctxBuilder:   ctxBuilder,
+			vectorStore:  vs,
 			systemPrompt: reviewerSystemPrompt,
 		},
 	}
