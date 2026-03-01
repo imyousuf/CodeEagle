@@ -181,6 +181,9 @@ target branch for import.`,
 			}
 
 			// Run vector indexing if an embedding provider is available.
+			if verbose {
+				logFn("[vector] Detecting embedding provider...")
+			}
 			vs, vecErr := openVectorStore(cfg, store, currentBranch, logFn)
 			if vecErr != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: vector store: %v\n", vecErr)

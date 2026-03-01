@@ -33,11 +33,14 @@ func openVectorStore(cfg *config.Config, store *embedded.BranchStore, branch str
 		return nil, fmt.Errorf("detect embedding provider: %w", err)
 	}
 	if embedder == nil {
+		if verbose && logFn != nil {
+			logFn("[vector] No embedding provider detected, skipping vector search")
+		}
 		return nil, nil
 	}
 
 	if logFn != nil {
-		logFn("Vector search: %s/%s (%d-dim)", embedder.Name(), embedder.ModelName(), embedder.Dimensions())
+		logFn("[vector] Embedding provider: %s/%s (%d-dim)", embedder.Name(), embedder.ModelName(), embedder.Dimensions())
 	}
 
 	vs, err := vectorstore.New(
@@ -69,15 +72,15 @@ func syncVectorIndex(vs *vectorstore.VectorStore, cfg *config.Config, full bool,
 
 	// Check if provider/model changed.
 	if loaded && vs.NeedsReindex() {
-		logFn("Embedding provider/model changed, rebuilding vector index...")
+		logFn("[vector] Embedding provider/model changed, rebuilding vector index...")
 		full = true
 	}
 
 	if full || !loaded {
 		if loaded {
-			logFn("Rebuilding vector index...")
+			logFn("[vector] Rebuilding vector index...")
 		} else {
-			logFn("Building vector index from graph...")
+			logFn("[vector] Building vector index from graph...")
 		}
 		if err := vs.Rebuild(ctx2()); err != nil {
 			return fmt.Errorf("rebuild vector index: %w", err)
@@ -85,12 +88,15 @@ func syncVectorIndex(vs *vectorstore.VectorStore, cfg *config.Config, full bool,
 		if err := vs.Save(); err != nil {
 			return fmt.Errorf("save vector index: %w", err)
 		}
-		logFn("Vector index: %d vectors indexed", vs.Len())
+		logFn("[vector] Indexed %d vectors", vs.Len())
 		return nil
 	}
 
 	// Incremental mode — the caller handles per-file updates.
 	// Just save the current state.
+	if verbose && logFn != nil {
+		logFn("[vector] Index up to date (%d vectors), saving...", vs.Len())
+	}
 	if err := vs.Save(); err != nil {
 		return fmt.Errorf("save vector index: %w", err)
 	}
