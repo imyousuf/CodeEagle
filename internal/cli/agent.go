@@ -85,6 +85,7 @@ func createLLMClient(cfg *config.Config) (llm.Client, error) {
 		Provider:        provider,
 		Model:           model,
 		APIKey:          apiKey,
+		BaseURL:         cfg.Agents.BaseURL,
 		Project:         project,
 		Location:        location,
 		CredentialsFile: cfg.Agents.CredentialsFile,
