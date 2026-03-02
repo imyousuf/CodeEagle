@@ -23,8 +23,8 @@ const (
 	prefixMeta  = "meta:"  // meta:<branch> → VectorIndexMeta JSON
 
 	// HNSW tuning parameters.
-	hnswM       = 16  // max neighbors per node
-	hnswEf      = 40  // search candidates
+	hnswM  = 16 // max neighbors per node
+	hnswEf = 40 // search candidates
 )
 
 // ChunkEntry stores the text and metadata for an indexed chunk.

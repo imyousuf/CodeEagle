@@ -119,11 +119,11 @@ func matchesModelName(pulled, target string) bool {
 // embeddingConfigFromApp builds an embedding Config from the app config.
 func embeddingConfigFromApp(cfg *appconfig.Config) Config {
 	return Config{
-		Provider:      cfg.Agents.EmbeddingProvider,
-		Model:         cfg.Agents.EmbeddingModel,
-		OllamaBaseURL: "", // use default
-		Project:       cfg.Agents.Project,
-		Location:      cfg.Agents.Location,
+		Provider:        cfg.Agents.EmbeddingProvider,
+		Model:           cfg.Agents.EmbeddingModel,
+		OllamaBaseURL:   "", // use default
+		Project:         cfg.Agents.Project,
+		Location:        cfg.Agents.Location,
 		CredentialsFile: cfg.Agents.CredentialsFile,
 	}
 }

@@ -105,6 +105,6 @@ func (v *vertexProvider) EmbedQuery(ctx context.Context, text string) ([]float32
 	return results[0], nil
 }
 
-func (v *vertexProvider) Dimensions() int  { return v.dims }
-func (v *vertexProvider) Name() string     { return "vertex-ai" }
+func (v *vertexProvider) Dimensions() int   { return v.dims }
+func (v *vertexProvider) Name() string      { return "vertex-ai" }
 func (v *vertexProvider) ModelName() string { return v.model }

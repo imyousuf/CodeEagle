@@ -73,7 +73,7 @@ type ollamaToolFunction struct {
 
 // ollamaToolDef describes a tool definition for the Ollama API.
 type ollamaToolDef struct {
-	Type     string              `json:"type"`
+	Type     string             `json:"type"`
 	Function ollamaFunctionDecl `json:"function"`
 }
 

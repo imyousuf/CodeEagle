@@ -49,8 +49,8 @@ func (m *mockEmbedder) EmbedQuery(_ context.Context, text string) ([]float32, er
 	return results[0], nil
 }
 
-func (m *mockEmbedder) Dimensions() int  { return m.dims }
-func (m *mockEmbedder) Name() string     { return "mock" }
+func (m *mockEmbedder) Dimensions() int   { return m.dims }
+func (m *mockEmbedder) Name() string      { return "mock" }
 func (m *mockEmbedder) ModelName() string { return "mock-embed" }
 
 // mockGraphStore is a minimal graph.Store for testing.
@@ -96,8 +96,8 @@ func (s *mockGraphStore) QueryNodes(_ context.Context, filter graph.NodeFilter) 
 	return results, nil
 }
 
-func (s *mockGraphStore) AddEdge(_ context.Context, _ *graph.Edge) error     { return nil }
-func (s *mockGraphStore) DeleteEdge(_ context.Context, _ string) error        { return nil }
+func (s *mockGraphStore) AddEdge(_ context.Context, _ *graph.Edge) error { return nil }
+func (s *mockGraphStore) DeleteEdge(_ context.Context, _ string) error   { return nil }
 func (s *mockGraphStore) GetEdges(_ context.Context, _ string, _ graph.EdgeType) ([]*graph.Edge, error) {
 	return nil, nil
 }
@@ -353,9 +353,9 @@ func TestVectorStoreChunkedDocument(t *testing.T) {
 
 func TestParseChunkKey(t *testing.T) {
 	tests := []struct {
-		key      string
-		wantID   string
-		wantIdx  int
+		key     string
+		wantID  string
+		wantIdx int
 	}{
 		{"abc123:0", "abc123", 0},
 		{"abc123:5", "abc123", 5},

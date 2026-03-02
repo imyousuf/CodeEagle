@@ -40,11 +40,11 @@ type ragJSONResult struct {
 
 func newRagCmd() *cobra.Command {
 	var (
-		limit    int
-		nodeType string
-		jsonOut  bool
+		limit     int
+		nodeType  string
+		jsonOut   bool
 		showEdges bool
-		minScore float64
+		minScore  float64
 	)
 
 	cmd := &cobra.Command{

@@ -119,6 +119,6 @@ func (o *ollamaProvider) embed(ctx context.Context, texts []string) ([][]float32
 	return embedResp.Embeddings, nil
 }
 
-func (o *ollamaProvider) Dimensions() int  { return o.dims }
-func (o *ollamaProvider) Name() string     { return "ollama" }
+func (o *ollamaProvider) Dimensions() int   { return o.dims }
+func (o *ollamaProvider) Name() string      { return "ollama" }
 func (o *ollamaProvider) ModelName() string { return o.model }
