@@ -1,6 +1,6 @@
 {
   "name": "codeeagle",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Codebase knowledge graph and AI-powered code intelligence. Index codebases into a knowledge graph and query symbols, interfaces, dependencies, test coverage, and unused code.",
   "author": {
     "name": "imyousuf",

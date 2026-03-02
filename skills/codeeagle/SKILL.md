@@ -130,14 +130,19 @@ codeeagle query --type TestFunction --language rust
 codeeagle rag "<natural language query>"
 codeeagle rag "authentication middleware" --limit 10
 codeeagle rag "database connection" --type Function,Struct
-codeeagle rag "error handling patterns" --json
-codeeagle rag "API endpoint routing" --edges
+codeeagle rag "error handling patterns" --json --package api
+codeeagle rag "API endpoint routing" --edges --language go
+codeeagle rag "parser" --no-docs
 ```
-Finds code entities semantically related to your query using vector embeddings.
-Faster than AI agents, works by meaning rather than exact name matching.
-Requires a vector index (`codeeagle sync` or `codeeagle vectorindex`).
+Finds code entities semantically related to your query using hybrid ranking:
+vector similarity + keyword matching + graph centrality (well-connected nodes
+rank higher) + code entity boost (functions, structs rank above docs).
+Results are deduplicated by node. Requires a vector index (`codeeagle sync`
+or `codeeagle vectorindex`).
 
-Flags: `--limit N` (max results), `--type T` (filter by node type), `--json`, `--edges` (show relationships), `--min-score S`
+Flags: `--limit N`, `--type T`, `--package P`, `--language L`, `--json`, `--edges`, `--min-score S`, `--no-docs`
+
+Use `--no-docs` to exclude Document/AIGuideline nodes and focus on code entities.
 
 ## AI Agents (slower, prose answers)
 
