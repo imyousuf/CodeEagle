@@ -140,13 +140,71 @@ func TestEmbeddableText(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "doc comment preferred over signature",
+			name: "both doc comment and signature included",
 			node: &graph.Node{
 				Name:       "Run",
 				DocComment: "runs the server",
 				Signature:  "func Run() error",
 			},
-			want: "Run\nruns the server",
+			want: "Run\nruns the server\nfunc Run() error",
+		},
+		{
+			name: "with package and file path",
+			node: &graph.Node{
+				Name:      "NewClient",
+				Package:   "llm",
+				FilePath:  "internal/llm/client.go",
+				Signature: "func NewClient(provider string) (*Client, error)",
+			},
+			want: "NewClient\nPackage: llm\nFile: internal/llm/client.go\nfunc NewClient(provider string) (*Client, error)",
+		},
+		{
+			name: "with qualified name",
+			node: &graph.Node{
+				Name:          "Get",
+				QualifiedName: "Store.Get",
+				Package:       "graph",
+				Signature:     "func (s *Store) Get(id string) (*Node, error)",
+			},
+			want: "Get\nPackage: graph\nQualified: Store.Get\nfunc (s *Store) Get(id string) (*Node, error)",
+		},
+		{
+			name: "with classifier properties",
+			node: &graph.Node{
+				Name:      "UserRepository",
+				Package:   "users",
+				Signature: "type UserRepository struct",
+				Properties: map[string]string{
+					graph.PropArchRole:      "repository",
+					graph.PropDesignPattern: "repository",
+					graph.PropLayerTag:      "data_access",
+				},
+			},
+			want: "UserRepository\nPackage: users\nRole: repository\nPattern: repository\nLayer: data_access\ntype UserRepository struct",
+		},
+		{
+			name: "full enrichment with doc comment and signature",
+			node: &graph.Node{
+				Name:          "RegisterProvider",
+				QualifiedName: "llm.RegisterProvider",
+				Package:       "llm",
+				FilePath:      "pkg/llm/registry.go",
+				DocComment:    "RegisterProvider adds a new LLM provider factory to the registry.",
+				Signature:     "func RegisterProvider(name string, factory ProviderFactory)",
+				Properties: map[string]string{
+					graph.PropArchRole: "factory",
+				},
+			},
+			want: "RegisterProvider\nPackage: llm\nFile: pkg/llm/registry.go\nQualified: llm.RegisterProvider\nRole: factory\nRegisterProvider adds a new LLM provider factory to the registry.\nfunc RegisterProvider(name string, factory ProviderFactory)",
+		},
+		{
+			name: "qualified name same as name is omitted",
+			node: &graph.Node{
+				Name:          "Process",
+				QualifiedName: "Process",
+				Signature:     "func Process() error",
+			},
+			want: "Process\nfunc Process() error",
 		},
 	}
 	for _, tc := range tests {

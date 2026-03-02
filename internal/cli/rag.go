@@ -220,9 +220,10 @@ Examples:
 
 			// Hybrid search: keyword-match nodes from the graph, inject any that
 			// vector search missed, then rerank everything together.
-			keywordNodes := keywordSearch(context.Background(), store, query)
-			results, keywordIDs := injectKeywordResults(results, keywordNodes, typeFilter, noDocs, pkg, language)
-			results = rerankResults(context.Background(), store, results, keywordIDs)
+			// Nodes matching more query keywords get a proportionally higher bonus.
+			keywordNodes, totalKeywords := keywordSearch(context.Background(), store, query)
+			results, keywordCounts := injectKeywordResults(results, keywordNodes, typeFilter, noDocs, pkg, language)
+			results = rerankResults(context.Background(), store, results, keywordCounts, totalKeywords)
 
 			// Apply min score filter (after reranking).
 			if minScore > 0 {
@@ -368,10 +369,19 @@ func deduplicateResults(results []vectorstore.SearchResult) []vectorstore.Search
 	return deduped
 }
 
+// keywordResult holds a keyword-matched node and how many distinct query keywords it matched.
+type keywordResult struct {
+	node       *graph.Node
+	matchCount int
+}
+
 // keywordSearch extracts keywords from the query and finds matching nodes via graph glob search.
-// Returns the full nodes so they can be injected into results if vector search missed them.
-func keywordSearch(ctx context.Context, store graph.Store, query string) map[string]*graph.Node {
-	hits := make(map[string]*graph.Node)
+// It searches both node names (glob) and package names (exact match) so that queries like
+// "LLM provider" find nodes in the "llm" package even when their names are generic.
+// Returns per-node results with match counts and the total number of keywords searched.
+// Nodes matching more keywords rank higher during reranking.
+func keywordSearch(ctx context.Context, store graph.Store, query string) (map[string]*keywordResult, int) {
+	hits := make(map[string]*keywordResult)
 
 	// Extract meaningful keywords (3+ chars, skip common words).
 	words := strings.Fields(strings.ToLower(query))
@@ -381,34 +391,69 @@ func keywordSearch(ctx context.Context, store graph.Store, query string) map[str
 		"are": true, "was": true, "has": true, "not": true, "all": true,
 	}
 
+	var keywords []string
 	for _, w := range words {
-		if len(w) < 3 || skipWords[w] {
-			continue
+		if len(w) >= 3 && !skipWords[w] {
+			keywords = append(keywords, w)
 		}
-		// Try glob pattern: *keyword*
-		pattern := "*" + w + "*"
-		nodes, err := store.QueryNodes(ctx, graph.NodeFilter{NamePattern: pattern})
-		if err != nil {
-			continue
+	}
+
+	for _, w := range keywords {
+		// Collect nodes matching this keyword (deduplicated within the keyword).
+		kwHits := make(map[string]*graph.Node)
+
+		addHits := func(nodes []*graph.Node) {
+			for _, n := range nodes {
+				if n != nil && vectorstore.IsEmbeddable(n.Type) {
+					kwHits[n.ID] = n
+				}
+			}
 		}
-		for _, n := range nodes {
-			if n != nil && vectorstore.IsEmbeddable(n.Type) {
-				hits[n.ID] = n
+
+		// 1. Glob on node Name — case-insensitive via multiple patterns.
+		// Go uses camelCase, so "user" should match "initUserAgent".
+		// filepath.Match is case-sensitive, so we try both lowercase and
+		// title-cased variants (e.g., *user* and *User*).
+		patterns := []string{"*" + w + "*"}
+		titled := strings.ToUpper(w[:1]) + w[1:]
+		if titled != w {
+			patterns = append(patterns, "*"+titled+"*")
+		}
+		for _, pattern := range patterns {
+			nodes, err := store.QueryNodes(ctx, graph.NodeFilter{NamePattern: pattern})
+			if err == nil {
+				addHits(nodes)
+			}
+		}
+
+		// 2. Exact match on Package name (uses idx:pkg: index — fast).
+		// Catches e.g. "llm" → all nodes in package "llm".
+		nodes, err := store.QueryNodes(ctx, graph.NodeFilter{Package: w})
+		if err == nil {
+			addHits(nodes)
+		}
+
+		// Merge this keyword's hits into the overall map, incrementing match counts.
+		for id, n := range kwHits {
+			if existing, ok := hits[id]; ok {
+				existing.matchCount++
+			} else {
+				hits[id] = &keywordResult{node: n, matchCount: 1}
 			}
 		}
 	}
-	return hits
+	return hits, len(keywords)
 }
 
 // injectKeywordResults adds keyword-matched nodes that vector search missed into the results.
-// Returns the updated results and a set of all keyword-matched node IDs (for reranking bonus).
+// Returns the updated results and per-node keyword match counts (for proportional reranking).
 func injectKeywordResults(
 	results []vectorstore.SearchResult,
-	keywordNodes map[string]*graph.Node,
+	keywordNodes map[string]*keywordResult,
 	typeFilter map[graph.NodeType]bool,
 	noDocs bool,
 	pkg, language string,
-) ([]vectorstore.SearchResult, map[string]bool) {
+) ([]vectorstore.SearchResult, map[string]int) {
 	// Build set of node IDs already in results.
 	existing := make(map[string]bool, len(results))
 	for _, r := range results {
@@ -417,18 +462,19 @@ func injectKeywordResults(
 		}
 	}
 
-	// All keyword node IDs (for reranking bonus, even if already in results).
-	keywordIDs := make(map[string]bool, len(keywordNodes))
-	for id := range keywordNodes {
-		keywordIDs[id] = true
+	// All keyword node match counts (for reranking, even if already in results).
+	keywordCounts := make(map[string]int, len(keywordNodes))
+	for id, kr := range keywordNodes {
+		keywordCounts[id] = kr.matchCount
 	}
 
 	// Inject keyword-only nodes (not in vector results) with zero vector score.
 	// The reranker will assign them a score based on keyword + code type + centrality.
-	for id, n := range keywordNodes {
+	for id, kr := range keywordNodes {
 		if existing[id] {
 			continue
 		}
+		n := kr.node
 		// Apply the same filters that were applied to vector results.
 		if noDocs && docNodeTypes[n.Type] {
 			continue
@@ -448,18 +494,19 @@ func injectKeywordResults(
 		})
 	}
 
-	return results, keywordIDs
+	return results, keywordCounts
 }
 
 // rerankResults combines vector similarity with keyword match bonus, code type boost, and graph centrality.
-func rerankResults(ctx context.Context, store graph.Store, results []vectorstore.SearchResult, keywordHits map[string]bool) []vectorstore.SearchResult {
+// The keyword bonus is scaled proportionally: a node matching 2/3 keywords scores higher than 1/3.
+func rerankResults(ctx context.Context, store graph.Store, results []vectorstore.SearchResult, keywordCounts map[string]int, totalKeywords int) []vectorstore.SearchResult {
 	if len(results) == 0 {
 		return results
 	}
 
 	const (
-		vectorWeight     = 0.60 // base vector similarity
-		keywordBonus     = 0.15 // bonus if node name matches a query keyword
+		vectorWeight     = 0.55 // base vector similarity
+		keywordWeight    = 0.20 // proportional keyword match (matchCount / totalKeywords)
 		codeTypeBonus    = 0.10 // bonus for code entities (vs docs)
 		centralityWeight = 0.15 // normalized graph centrality
 	)
@@ -492,12 +539,26 @@ func rerankResults(ctx context.Context, store graph.Store, results []vectorstore
 			continue
 		}
 
-		combined := vectorWeight * r.Score
-
-		// Keyword match bonus.
-		if keywordHits[r.Node.ID] {
-			combined += keywordBonus
+		vectorScore := r.Score
+		matchCount := keywordCounts[r.Node.ID]
+		keywordRatio := 0.0
+		if totalKeywords > 0 && matchCount > 0 {
+			keywordRatio = float64(matchCount) / float64(totalKeywords)
 		}
+
+		// For keyword-injected nodes (zero vector score), estimate a synthetic
+		// vector score from their keyword match ratio. A node matching 2/3
+		// keywords is likely more relevant than one matching 1/3, and should
+		// be competitive with low-scoring vector results.
+		if vectorScore == 0 && keywordRatio > 0 {
+			vectorScore = keywordRatio * 0.5 // scale to ~half of a strong vector match
+		}
+
+		combined := vectorWeight * vectorScore
+
+		// Proportional keyword match bonus: matchCount/totalKeywords.
+		// A node matching all keywords gets the full bonus; matching 1/3 gets 1/3.
+		combined += keywordWeight * keywordRatio
 
 		// Code type boost.
 		if codeNodeTypes[r.Node.Type] {
