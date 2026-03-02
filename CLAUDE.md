@@ -75,6 +75,7 @@ codeeagle query edges --node <name>     # Show relationships for a node
 codeeagle query unused [--type T]       # Find potentially unused functions/methods
 codeeagle query coverage [--level L]    # Show test coverage by file or function
 
+codeeagle rag <query>                   # Semantic search over the knowledge graph
 codeeagle backpop [--all]               # Run linker phases on existing graph
 codeeagle metrics [service|file|func]   # Show code quality metrics
 codeeagle mcp serve                     # Start MCP server (stdio transport)

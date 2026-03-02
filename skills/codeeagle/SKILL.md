@@ -26,6 +26,8 @@ Pick the right command based on what you need:
 | Search nodes by type/name/package | `codeeagle query --type X --name Y` |
 | Find unused functions/methods | `codeeagle query unused` |
 | Test coverage report by file/function | `codeeagle query coverage [--level function]` |
+| Semantic search ("find code that does X") | `codeeagle rag "<query>"` |
+| Find code by meaning, not exact name | `codeeagle rag "<query>" --type Function` |
 | Impact analysis ("what breaks if I change X?") | `codeeagle agent plan "<question>"` |
 | Design patterns, API consistency | `codeeagle agent design "<question>"` |
 | General "how does X work?" questions | `codeeagle agent ask "<question>"` |
@@ -121,6 +123,22 @@ codeeagle query --type TestFile
 codeeagle query --type TestFunction --language rust
 ```
 
+## Semantic Search (fast, meaning-based)
+
+### Find code by meaning
+```
+codeeagle rag "<natural language query>"
+codeeagle rag "authentication middleware" --limit 10
+codeeagle rag "database connection" --type Function,Struct
+codeeagle rag "error handling patterns" --json
+codeeagle rag "API endpoint routing" --edges
+```
+Finds code entities semantically related to your query using vector embeddings.
+Faster than AI agents, works by meaning rather than exact name matching.
+Requires a vector index (`codeeagle sync` or `codeeagle vectorindex`).
+
+Flags: `--limit N` (max results), `--type T` (filter by node type), `--json`, `--edges` (show relationships), `--min-score S`
+
 ## AI Agents (slower, prose answers)
 
 ### Impact analysis and planning
@@ -156,12 +174,14 @@ Use for: high-level understanding, "how does X work?" questions.
 - Project must be initialized (`codeeagle init`) with an indexed graph (`codeeagle sync`)
 
 ## Tips
-- Structured queries are instant; AI agents take 10-20 seconds
+- **Run commands concurrently.** All `codeeagle query` and `codeeagle rag` commands are read-only and safe to run in parallel. When you need multiple pieces of information, launch them as parallel Bash calls in a single message rather than sequentially. For example, query symbols for 3 files simultaneously, or run `rag` and `query edges` at the same time.
+- Structured queries and `rag` are instant; AI agents take 10-20 seconds
+- Use `rag` for natural language search ("find code that handles X"); use `query` for exact lookups
 - Use `--type Calls --direction out` to see what a function depends on
 - Use `--type Calls --direction in` to find all callers of a function
 - Use `--type DependsOn` to trace imports through to manifest dependencies
 - Use `--type Tests` to find which tests cover a given file or function
 - Use `query unused` to find dead code; `query coverage` for test gaps
-- All query commands support `--json` for machine-readable output
+- All query and rag commands support `--json` for machine-readable output
 - Prefer structured queries for implementation planning, AI agents for understanding
 - Supported languages: Go, Python, TypeScript, JavaScript, Java, Rust, C#, Ruby, HTML, Markdown, Makefile, Shell, Terraform, YAML
