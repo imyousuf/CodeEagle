@@ -93,6 +93,55 @@ The extracted version produces **three benefits**:
 
 ## Configuration
 
+### Remote Sources via SSHFS
+
+CodeEagle indexes local filesystem paths. To include files from a remote server (e.g., a NAS, image server, or backup host), mount the remote filesystem locally using SSHFS, then add the mount point as a repository.
+
+```bash
+# Mount remote image server
+mkdir -p ~/mnt/imageserver
+sshfs user@imageserver:/photos ~/mnt/imageserver
+
+# Mount NAS documents
+mkdir -p ~/mnt/nas-docs
+sshfs user@nas:/shared/documents ~/mnt/nas-docs
+```
+
+Then configure CodeEagle with each directory as a separate repository. Each repository path acts as an inclusion boundary — only files under listed paths are indexed:
+
+```yaml
+project:
+  name: "personal-files"
+
+repositories:
+  - path: /home/user/Documents
+    type: single
+  - path: /home/user/Pictures
+    type: single
+  - path: /home/user/Videos
+    type: single
+  - path: /home/user/Downloads
+    type: single
+  - path: /home/user/mnt/imageserver
+    type: single
+  - path: /home/user/mnt/nas-docs
+    type: single
+
+watch:
+  exclude:
+    - "**/.cache/**"
+    - "**/Thumbs.db"
+    - "**/.DS_Store"
+```
+
+No `include` patterns are needed — `repositories` entries define what is indexed. `exclude` patterns filter within those boundaries.
+
+**SSHFS notes:**
+- `codeeagle sync` works normally over SSHFS mounts — file reads are transparent
+- `codeeagle watch` uses fsnotify which has limited support over FUSE mounts — prefer `sync` with periodic re-runs for remote sources
+- For large remote collections, consider mounting with caching: `sshfs -o cache=yes,cache_timeout=300 user@host:/path ~/mnt/point`
+- SSHFS mounts must be active during sync/watch — if the mount is unavailable, those paths are skipped with a warning
+
 ### New `docs` config section
 
 ```yaml
