@@ -33,6 +33,7 @@ Usage:
   facescan label <cluster-id> <name> Assign a person name to a cluster
   facescan search <name>            Find images containing a named person
   facescan stats                     Show scan statistics
+  facescan imageview <path>          Preview an image in the terminal
 
 Options (for scan):
   --force             Re-scan all images (ignore previous results)
@@ -79,6 +80,8 @@ func main() {
 		cmdSuggest()
 	case "stats":
 		cmdStats()
+	case "imageview":
+		cmdImageView(os.Args[2:])
 	default:
 		usage()
 		os.Exit(1)
