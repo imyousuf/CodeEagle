@@ -15,9 +15,24 @@ const (
 	FileClassText FileClass = iota
 	// FileClassImage indicates an image to describe with a vision model.
 	FileClassImage
+	// FileClassDocument indicates a document format (DOCX, PPTX, XLSX, ODT, ODS, ODP, PDF)
+	// that requires format-specific text extraction from binary containers.
+	FileClassDocument
 	// FileClassSkip indicates a file to skip (excluded extension or binary).
 	FileClassSkip
 )
+
+// documentExtensions lists known document file extensions that require
+// format-specific text extraction (ZIP-based Office/ODF formats and PDF).
+var documentExtensions = map[string]bool{
+	".docx": true,
+	".pptx": true,
+	".xlsx": true,
+	".odt":  true,
+	".ods":  true,
+	".odp":  true,
+	".pdf":  true,
+}
 
 // imageExtensions lists known image file extensions.
 var imageExtensions = map[string]bool{
@@ -47,6 +62,11 @@ func Classify(filePath string, excludeExts []string) FileClass {
 		if strings.HasSuffix(base, excl) {
 			return FileClassSkip
 		}
+	}
+
+	// Check document extensions (ZIP-based Office/ODF + PDF).
+	if documentExtensions[ext] {
+		return FileClassDocument
 	}
 
 	// Check image extensions.

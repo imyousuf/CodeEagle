@@ -83,8 +83,11 @@ func (p *GenericParser) ParseFile(filePath string, content []byte) (*parser.Pars
 	// Determine kind and MIME type.
 	kind := "text"
 	mimeType := detectMIMEType(filePath)
-	if class == FileClassImage {
+	switch class {
+	case FileClassImage:
 		kind = "image"
+	case FileClassDocument:
+		kind = "document"
 	}
 
 	docNode := &graph.Node{
@@ -102,7 +105,7 @@ func (p *GenericParser) ParseFile(filePath string, content []byte) (*parser.Pars
 		},
 	}
 
-	// Try LLM-based extraction for text files.
+	// Extract content and topics based on file class.
 	switch class {
 	case FileClassText:
 		extraction := p.extractTopics(filePath, contentHash, content)
@@ -123,6 +126,22 @@ func (p *GenericParser) ParseFile(filePath string, content []byte) (*parser.Pars
 			result.Edges = append(result.Edges, topicEdges...)
 		} else {
 			docNode.DocComment = fmt.Sprintf("Image file: %s (%s, %d bytes)", fileName, mimeType, len(content))
+		}
+	case FileClassDocument:
+		text, err := ExtractDocument(filePath, content)
+		if err != nil || len(strings.TrimSpace(text)) < 10 {
+			docNode.DocComment = fmt.Sprintf("Document file: %s (%s, %d bytes)", fileName, mimeType, len(content))
+		} else {
+			// Feed extracted text through LLM topic extraction if available.
+			extraction := p.extractTopics(filePath, contentHash, []byte(text))
+			if extraction != nil {
+				docNode.DocComment = extraction.Summary
+				topicNodes, topicEdges := CreateTopicNodes(extraction.Topics, nodeID)
+				result.Nodes = append(result.Nodes, topicNodes...)
+				result.Edges = append(result.Edges, topicEdges...)
+			} else {
+				docNode.DocComment = text
+			}
 		}
 	}
 

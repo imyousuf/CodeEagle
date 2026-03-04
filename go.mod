@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/coder/hnsw v0.6.1
 	github.com/dgraph-io/badger/v4 v4.5.1
+	github.com/dslipak/pdf v0.0.2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
