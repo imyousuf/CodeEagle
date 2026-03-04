@@ -36,7 +36,7 @@ Pick the right command based on what you need:
 
 `File`, `TestFile`, `Package`, `Service`, `Function`, `TestFunction`, `Method`, `Struct`, `Class`,
 `Interface`, `Enum`, `Variable`, `Constant`, `Type`, `Module`, `Dependency`, `APIEndpoint`,
-`Document`, `DTO`, `AIGuideline`, `DBModel`, `DomainModel`, `ViewModel`
+`Document`, `Directory`, `Topic`, `Person`, `DTO`, `AIGuideline`, `DBModel`, `DomainModel`, `ViewModel`
 
 ## Edge Types
 
@@ -51,6 +51,8 @@ Pick the right command based on what you need:
 | `Exposes` | Service exposes endpoint | `backend -> GET /api/users` |
 | `Consumes` | API call targets endpoint | `fetch /api/users -> GET /api/users` |
 | `Documents` | Doc describes code entity | `README -> Service` |
+| `HasTopic` | Document has extracted topic | `CHANGELOG.txt -> authentication` |
+| `AppearsIn` | Person appears in image | `Dad -> photo.jpg` |
 
 ## Structured Queries (fast, machine-friendly)
 
@@ -122,6 +124,21 @@ codeeagle query --type Service
 codeeagle query --type TestFile
 codeeagle query --type TestFunction --language rust
 ```
+
+### Search non-code files (docs, images, configs)
+```
+codeeagle query --type Document --name "*.txt"
+codeeagle query --type Document --name "*.csv"
+codeeagle query --type Directory
+codeeagle query --type Topic
+codeeagle query edges --node "authentication" --type HasTopic
+codeeagle query --type Person
+codeeagle query edges --node "Dad" --type AppearsIn
+```
+Non-code files (changelogs, design docs, CSVs, images, config templates) are automatically
+indexed as `Document` nodes. When a docs LLM provider is available (Ollama or Vertex AI),
+topics are extracted and linked via `HasTopic` edges. Images are described by the LLM.
+Directory hierarchy is represented as `Directory` nodes with `Contains` edges.
 
 ## Semantic Search (fast, meaning-based)
 

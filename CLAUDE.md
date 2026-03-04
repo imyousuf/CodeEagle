@@ -176,6 +176,20 @@ agents:
   # api_key: sk-...          # for direct Anthropic API
   # project: my-gcp-project  # for Vertex AI
   # location: us-central1    # for Vertex AI
+
+docs:
+  # provider: ollama          # auto-detected if omitted (ollama -> vertex-ai -> disabled)
+  # model: qwen3.5:9b         # Ollama model for topic extraction
+  # max_image_resolution: 1024
+  # context_window: 49152
+  # disable_thinking: false
+  exclude_extensions:
+    - ".lock"
+    - ".min.js"
+    - ".min.css"
+    - ".map"
+    - ".wasm"
+    - ".pb.go"
 ```
 
 ## Architecture
@@ -190,7 +204,8 @@ codeeagle/
 │   ├── gitutil/            # Git operations (branch detection, diffs)
 │   ├── graph/              # Knowledge graph interface + embedded store (BadgerDB)
 │   ├── indexer/            # Orchestrates parsing -> graph updates + LLM summarization
-│   ├── linker/             # Cross-service linker (7 phases: services, endpoints, API calls, deps, imports, implements, tests)
+│   ├── docs/               # Document content extraction providers (Ollama, Vertex AI) with topic extraction + caching
+│   ├── linker/             # Cross-service linker (8 phases: services, endpoints, API calls, deps, imports, implements, tests, documents)
 │   ├── llm/                # LLM provider implementations (Anthropic, Vertex AI, Claude CLI)
 │   ├── mcp/                # MCP server (JSON-RPC over stdio)
 │   ├── metrics/            # Code quality metric calculators
@@ -210,6 +225,7 @@ codeeagle/
 │   │   ├── shell/          # Shell parser (tree-sitter bash)
 │   │   ├── terraform/      # Terraform parser (tree-sitter HCL)
 │   │   ├── yaml/           # YAML parser (GHA, Ansible, generic)
+│   │   ├── generic/        # Generic fallback parser for non-code files (text, images, directories)
 │   │   └── manifest/       # Manifest parser (go.mod, package.json, pyproject.toml, requirements.txt)
 │   └── watcher/            # Filesystem watcher (fsnotify + gitignore)
 ├── pkg/llm/                # Public LLM client interface + provider registry
