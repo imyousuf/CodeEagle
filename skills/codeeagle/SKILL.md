@@ -125,20 +125,28 @@ codeeagle query --type TestFile
 codeeagle query --type TestFunction --language rust
 ```
 
-### Search non-code files (docs, images, configs)
+### Search non-code files (docs, documents, images, configs)
 ```
 codeeagle query --type Document --name "*.txt"
-codeeagle query --type Document --name "*.csv"
+codeeagle query --type Document --name "*.docx"
+codeeagle query --type Document --name "*.pdf"
+codeeagle query --type Document --name "*.xlsx"
 codeeagle query --type Directory
 codeeagle query --type Topic
 codeeagle query edges --node "authentication" --type HasTopic
 codeeagle query --type Person
 codeeagle query edges --node "Dad" --type AppearsIn
 ```
-Non-code files (changelogs, design docs, CSVs, images, config templates) are automatically
-indexed as `Document` nodes. When a docs LLM provider is available (Ollama or Vertex AI),
-topics are extracted and linked via `HasTopic` edges. Images are described by the LLM.
-Directory hierarchy is represented as `Directory` nodes with `Contains` edges.
+Non-code files are automatically indexed as `Document` nodes, including:
+- **Office documents**: DOCX, PPTX, XLSX (text extracted from ZIP/XML, pure Go)
+- **OpenDocument**: ODT, ODS, ODP (text extracted from content.xml)
+- **PDF**: text extracted via `dslipak/pdf` (pure Go)
+- **Text files**: changelogs, CSVs, config templates, design docs
+- **Images**: PNG, JPG, GIF, WebP, BMP, TIFF (described by LLM if available)
+
+When a docs LLM provider is available (Ollama or Vertex AI), topics are extracted
+and linked via `HasTopic` edges. Directory hierarchy is represented as `Directory`
+nodes with `Contains` edges.
 
 ## Semantic Search (fast, meaning-based)
 
@@ -207,3 +215,4 @@ Use for: high-level understanding, "how does X work?" questions.
 - All query and rag commands support `--json` for machine-readable output
 - Prefer structured queries for implementation planning, AI agents for understanding
 - Supported languages: Go, Python, TypeScript, JavaScript, Java, Rust, C#, Ruby, HTML, Markdown, Makefile, Shell, Terraform, YAML
+- Supported document formats: DOCX, PPTX, XLSX, ODT, ODS, ODP, PDF (plus plain text, CSV, SVG, images)

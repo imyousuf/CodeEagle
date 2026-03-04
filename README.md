@@ -8,6 +8,8 @@ It supports monorepos, multi-repo setups, and multi-language codebases (Go, Pyth
 
 - **Knowledge graph** of source code entities (functions, classes, interfaces, packages, services) and their relationships (calls, imports, implements, tests, etc.)
 - **15 language parsers**: Go (stdlib AST), Python, TypeScript, JavaScript, Java, Rust, C# (with ASP.NET), Ruby (with Rails), HTML, Markdown, Makefile, Shell, Terraform, YAML, plus a manifest parser (go.mod, package.json, pyproject.toml, requirements.txt)
+- **Document format extraction**: Text extraction from DOCX, PPTX, XLSX, ODT, ODS, ODP (pure Go, stdlib only) and PDF (`dslipak/pdf`). Documents are indexed, topic-extracted via LLM, and semantically searchable
+- **Non-code file indexing**: Changelogs, design docs, CSVs, images, config templates — all indexed as Document nodes with optional LLM-based topic extraction and image description
 - **Cross-service dependency analysis**: API endpoint extraction, HTTP client call detection, import-to-manifest linking, cross-file interface implements resolution
 - **Test coverage mapping**: automatic test file/function detection across 8 languages with `EdgeTests` linking to source counterparts
 - **Code quality metrics**: cyclomatic complexity, lines of code, TODO/FIXME counts
@@ -154,6 +156,19 @@ agents:
   llm_provider: claude-cli   # claude-cli, anthropic, or vertex-ai
   model: sonnet
   auto_link: true            # enable LLM-assisted cross-service edge detection
+
+docs:
+  # provider: ollama          # auto-detected if omitted (ollama -> vertex-ai -> disabled)
+  # model: qwen3.5:9b         # Ollama model for topic extraction
+  # max_image_resolution: 1024
+  # context_window: 49152
+  exclude_extensions:
+    - ".lock"
+    - ".min.js"
+    - ".min.css"
+    - ".map"
+    - ".wasm"
+    - ".pb.go"
 ```
 
 ### LLM Providers
@@ -195,7 +210,10 @@ codeeagle -p my-project status
 | APIEndpoint | REST routes, gRPC services, ASP.NET endpoints, Rails routes |
 | DBModel, DomainModel, ViewModel, DTO | Classified model types |
 | Dependency | External dependency |
-| Document | Documentation file (README, spec, etc.) |
+| Document | Documentation file, office document (DOCX, PPTX, XLSX, ODT, ODS, ODP, PDF), or other non-code file |
+| Directory | Directory in the file hierarchy |
+| Topic | Extracted topic from document content (via LLM) |
+| Person | Named person (from face detection, requires `-tags faces` build) |
 | AIGuideline | AI-related guideline files (CLAUDE.md, etc.) |
 
 ### Edge Types
@@ -213,6 +231,8 @@ codeeagle -p my-project status
 | Consumes | Code makes HTTP client call to an API endpoint |
 | Configures | Config file configures a service/deployment |
 | Migrates | Migration file migrates a schema |
+| HasTopic | Document has an extracted topic |
+| AppearsIn | Person appears in an image |
 | References | General cross-reference |
 | Embeds | Struct embeds another type |
 
@@ -274,12 +294,13 @@ codeeagle/
 │   ├── config/             Configuration loading (viper)
 │   ├── gitutil/            Git operations (branch detection, diffs)
 │   ├── graph/              Knowledge graph interface + embedded store
+│   ├── docs/              Document content extraction providers (Ollama, Vertex AI)
 │   ├── indexer/            Orchestrates parsing -> graph updates
 │   ├── llm/               LLM provider implementations
 │   ├── mcp/               MCP server (JSON-RPC over stdio)
 │   ├── metrics/            Code quality metric calculators
-│   ├── linker/             Cross-service linker (7 phases: services, endpoints, API calls, deps, imports, implements, tests)
-│   ├── parser/             Language parsers (Go, Python, TS, JS, Java, Rust, C#, Ruby, HTML, MD, + 5 more)
+│   ├── linker/             Cross-service linker (8 phases: services, endpoints, API calls, deps, imports, implements, tests, documents)
+│   ├── parser/             Language parsers + generic fallback (document formats, images, text files)
 │   └── watcher/            Filesystem watcher (fsnotify)
 └── pkg/llm/               Public LLM client interface + provider registry
 ```

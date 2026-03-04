@@ -21,6 +21,10 @@ Build and maintain a rich knowledge graph that captures:
 
 **Documentation Entities**
 - READMEs, tech specs, design docs, ADRs
+- Office documents: DOCX, PPTX, XLSX (text extracted from ZIP/XML, pure Go stdlib)
+- OpenDocument files: ODT, ODS, ODP (text extracted from content.xml)
+- PDF files (text extracted via `github.com/dslipak/pdf`, BSD-3, pure Go)
+- Images: PNG, JPG, GIF, WebP, BMP, TIFF (LLM-described when provider available)
 - Inline doc comments (godoc, JSDoc, Python docstrings)
 - Architecture diagrams (reference/link tracking)
 - CLAUDE.md and similar development guideline files
@@ -36,6 +40,8 @@ Build and maintain a rich knowledge graph that captures:
 - `TESTS` — test file/function -> source file/function
 - `MIGRATES` — migration -> database schema
 - `CONFIGURES` — config file -> service/deployment
+- `HAS_TOPIC` — document -> extracted topic (via LLM)
+- `APPEARS_IN` — person -> image
 
 **Code Quality Metrics** (attached to graph nodes)
 - Cyclomatic complexity per function
@@ -225,7 +231,7 @@ codeeagle/
 │   │   ├── shell/          # Shell parser (tree-sitter bash)
 │   │   ├── terraform/      # Terraform parser (tree-sitter HCL)
 │   │   ├── yaml/           # YAML parser (GHA, Ansible, generic)
-│   │   ├── generic/        # Generic fallback parser for non-code files (text, images, directories)
+│   │   ├── generic/        # Generic fallback parser for non-code files (text, images, directories, document formats)
 │   │   └── manifest/       # Manifest parser (go.mod, package.json, pyproject.toml, requirements.txt)
 │   └── watcher/            # Filesystem watcher (fsnotify + gitignore)
 ├── pkg/llm/                # Public LLM client interface + provider registry
@@ -243,6 +249,7 @@ codeeagle/
 - **File Watching:** fsnotify
 - **Go AST Parsing:** stdlib `go/ast`, `go/parser`, `go/types`
 - **Tree-sitter:** for Python, TypeScript, JavaScript, Java, Rust, C#, Ruby, Shell, Terraform parsing (via `github.com/smacker/go-tree-sitter` bindings)
+- **Document Extraction:** OOXML/ODF via stdlib `archive/zip` + `encoding/xml`; PDF via `github.com/dslipak/pdf` (pure Go)
 - **Graph Storage:** Embedded (BadgerDB with secondary indexes), branch-aware with fallback reads
 - **LLM Integration:** Anthropic API (direct) + Vertex AI (Claude & Gemini on GCP), extensible to others
 - **Config:** viper (YAML config loading)
