@@ -12,6 +12,8 @@ type Registry struct {
 	extIndex      map[string]Parser
 	filenameIndex map[string]Parser
 	order         []Language
+	fallback      Parser   // fallback parser for files with no registered language parser
+	excludeExts   []string // extensions to exclude from fallback processing
 }
 
 // NewRegistry creates a new parser registry.
@@ -65,7 +67,8 @@ func (r *Registry) GetByExtension(ext string) (Parser, bool) {
 }
 
 // ParserForFile resolves the appropriate parser for a given file path.
-// It first tries extension-based lookup, then falls back to filename-based lookup.
+// It first tries extension-based lookup, then filename-based lookup,
+// then falls back to the generic fallback parser (if set).
 func (r *Registry) ParserForFile(filePath string) (Parser, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -80,7 +83,39 @@ func (r *Registry) ParserForFile(filePath string) (Parser, bool) {
 		return p, true
 	}
 
+	if r.fallback != nil {
+		return r.fallback, true
+	}
+
 	return nil, false
+}
+
+// SetFallback sets a fallback parser used when no language parser matches.
+func (r *Registry) SetFallback(p Parser) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.fallback = p
+}
+
+// Fallback returns the fallback parser, or nil if not set.
+func (r *Registry) Fallback() Parser {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.fallback
+}
+
+// SetExcludeExtensions sets extensions to exclude from fallback processing.
+func (r *Registry) SetExcludeExtensions(exts []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.excludeExts = exts
+}
+
+// ExcludeExtensions returns the list of extensions excluded from fallback processing.
+func (r *Registry) ExcludeExtensions() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.excludeExts
 }
 
 // All returns all registered parsers in registration order.

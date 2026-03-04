@@ -34,6 +34,9 @@ const (
 	NodeAIGuideline  NodeType = "AIGuideline"
 	NodeTestFunction NodeType = "TestFunction"
 	NodeTestFile     NodeType = "TestFile"
+	NodeDirectory    NodeType = "Directory"
+	NodeTopic        NodeType = "Topic"
+	NodePerson       NodeType = "Person"
 )
 
 // Well-known property keys used for architectural classification.
@@ -70,6 +73,8 @@ const (
 	EdgeTests      EdgeType = "Tests"
 	EdgeMigrates   EdgeType = "Migrates"
 	EdgeConfigures EdgeType = "Configures"
+	EdgeHasTopic   EdgeType = "HasTopic"
+	EdgeAppearsIn  EdgeType = "AppearsIn"
 )
 
 // Node represents a source code or documentation entity in the knowledge graph.

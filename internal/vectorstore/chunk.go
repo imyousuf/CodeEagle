@@ -187,6 +187,9 @@ var EmbeddableTypes = []graph.NodeType{
 	graph.NodeService,
 	graph.NodeDBModel,
 	graph.NodeAIGuideline,
+	graph.NodeDirectory,
+	graph.NodeTopic,
+	graph.NodePerson,
 }
 
 // IsEmbeddable returns true if the node type should be considered for embedding.

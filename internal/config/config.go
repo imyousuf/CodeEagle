@@ -31,6 +31,50 @@ type ProjectConf struct {
 	ExportFile string `yaml:"export_file"`
 }
 
+// DocsConfig holds configuration for non-code file indexing (docs LLM).
+type DocsConfig struct {
+	// Provider is the docs LLM provider ("ollama", "vertex-ai").
+	Provider string `mapstructure:"provider" yaml:"provider,omitempty"`
+	// Model is the multimodal model name (e.g., "qwen3.5:9b", "gemini-2.0-flash").
+	Model string `mapstructure:"model" yaml:"model,omitempty"`
+	// Project is the GCP project ID (for Vertex AI).
+	Project string `mapstructure:"project" yaml:"project,omitempty"`
+	// Location is the GCP region (for Vertex AI).
+	Location string `mapstructure:"location" yaml:"location,omitempty"`
+	// CredentialsFile is the path to a GCP service account credentials JSON file.
+	CredentialsFile string `mapstructure:"credentials_file" yaml:"credentials_file,omitempty"`
+	// BaseURL is the base URL for the docs LLM provider API (e.g., Ollama endpoint).
+	BaseURL string `mapstructure:"base_url" yaml:"base_url,omitempty"`
+	// MaxImageRes is the maximum image resolution (longest edge in pixels) before LLM processing.
+	MaxImageRes int `mapstructure:"max_image_resolution" yaml:"max_image_resolution,omitempty"`
+	// ContextWindow is the Ollama num_ctx value (default 49152).
+	ContextWindow int `mapstructure:"context_window" yaml:"context_window,omitempty"`
+	// DisableThinking appends /no_think to prompts (saves tokens, may reduce quality).
+	DisableThinking bool `mapstructure:"disable_thinking" yaml:"disable_thinking,omitempty"`
+	// ExcludeExtensions lists file extensions to never index as non-code files.
+	ExcludeExtensions []string `mapstructure:"exclude_extensions" yaml:"exclude_extensions,omitempty"`
+	// Faces contains face detection configuration.
+	Faces FacesConfig `mapstructure:"faces" yaml:"faces,omitempty"`
+}
+
+// FacesConfig holds face detection and recognition configuration.
+type FacesConfig struct {
+	// Enabled enables OpenCV face detection + object detection.
+	Enabled bool `mapstructure:"enabled" yaml:"enabled,omitempty"`
+	// ModelDir is the directory for ONNX model files (auto-downloaded).
+	ModelDir string `mapstructure:"model_dir" yaml:"model_dir,omitempty"`
+	// MinFaceSize is the minimum face size in pixels.
+	MinFaceSize int `mapstructure:"min_face_size" yaml:"min_face_size,omitempty"`
+	// SimilarityThreshold is the cosine similarity threshold for clustering (default 0.30).
+	SimilarityThreshold float64 `mapstructure:"similarity_threshold" yaml:"similarity_threshold,omitempty"`
+	// ConfidenceThreshold is the minimum detection confidence for faces.
+	ConfidenceThreshold float64 `mapstructure:"confidence_threshold" yaml:"confidence_threshold,omitempty"`
+	// ObjectDetection enables YOLO object detection (labels → topics).
+	ObjectDetection bool `mapstructure:"object_detection" yaml:"object_detection,omitempty"`
+	// ObjectConfidence is the minimum confidence for object labels.
+	ObjectConfidence float64 `mapstructure:"object_confidence" yaml:"object_confidence,omitempty"`
+}
+
 // Config holds all configuration for CodeEagle.
 type Config struct {
 	// Project contains project metadata.
@@ -45,6 +89,8 @@ type Config struct {
 	Graph GraphConfig `mapstructure:"graph" yaml:"graph"`
 	// Agents contains AI agent configuration.
 	Agents AgentsConfig `mapstructure:"agents" yaml:"agents"`
+	// Docs contains non-code file indexing configuration.
+	Docs DocsConfig `mapstructure:"docs" yaml:"docs"`
 	// ConfigDir is the resolved .CodeEagle directory path (not persisted in YAML).
 	ConfigDir string `mapstructure:"-" yaml:"-"`
 	// ProjectConf is the parsed .CodeEagle.conf if found (not persisted).
@@ -360,6 +406,17 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("agents.llm_provider", "anthropic")
 	v.SetDefault("agents.model", "claude-sonnet-4-5-20250929")
 	v.SetDefault("agents.auto_summarize", false)
+
+	v.SetDefault("docs.max_image_resolution", 1024)
+	v.SetDefault("docs.context_window", 49152)
+	v.SetDefault("docs.exclude_extensions", []string{".lock", ".min.js", ".min.css", ".map", ".wasm", ".pb.go"})
+	v.SetDefault("docs.faces.enabled", false)
+	v.SetDefault("docs.faces.model_dir", "~/.codeeagle/models/")
+	v.SetDefault("docs.faces.min_face_size", 40)
+	v.SetDefault("docs.faces.similarity_threshold", 0.30)
+	v.SetDefault("docs.faces.confidence_threshold", 0.7)
+	v.SetDefault("docs.faces.object_detection", true)
+	v.SetDefault("docs.faces.object_confidence", 0.5)
 }
 
 // loadEnvFile reads a .env file and sets environment variables from it.
