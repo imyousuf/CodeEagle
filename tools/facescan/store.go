@@ -9,12 +9,12 @@ import (
 
 // FaceRecord represents a single detected face in an image.
 type FaceRecord struct {
-	ImagePath  string      `json:"image_path"`
-	FaceIdx    int         `json:"face_idx"`
+	ImagePath  string          `json:"image_path"`
+	FaceIdx    int             `json:"face_idx"`
 	BBox       image.Rectangle `json:"bbox"`
-	Confidence float32     `json:"confidence"`
-	Embedding  []float32   `json:"embedding"`
-	ClusterID  int         `json:"cluster_id"`
+	Confidence float32         `json:"confidence"`
+	Embedding  []float32       `json:"embedding"`
+	ClusterID  int             `json:"cluster_id"`
 }
 
 // FaceDB holds all face records and cluster labels.

@@ -1,4 +1,4 @@
-.PHONY: build install clean test test-fast test-smoke lint fmt tidy help \
+.PHONY: build build-faces install clean test test-fast test-smoke lint fmt tidy help \
 	build-linux-amd64 build-linux-arm64 \
 	build-darwin-amd64 build-darwin-arm64 \
 	build-all
@@ -33,6 +33,11 @@ all: build
 build:
 	@mkdir -p $(BUILD_DIR)
 	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/codeeagle
+
+## build-faces: Build with face detection support (requires libopencv-dev)
+build-faces:
+	@mkdir -p $(BUILD_DIR)
+	$(GOBUILD) -tags faces $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/codeeagle
 
 ## install: Build and install to $GOPATH/bin
 install:

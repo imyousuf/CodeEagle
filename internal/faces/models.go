@@ -1,4 +1,6 @@
-package main
+//go:build faces
+
+package faces
 
 import (
 	"fmt"
@@ -11,40 +13,44 @@ import (
 // Model filenames.
 const (
 	// SSD face detector (Caffe model) — ~10 MB, well-tested with OpenCV DNN.
-	faceDetectorProto = "deploy.prototxt"
-	faceDetectorModel = "res10_300x300_ssd_iter_140000.caffemodel"
+	FaceDetectorProto = "deploy.prototxt"
+	FaceDetectorModel = "res10_300x300_ssd_iter_140000.caffemodel"
 
 	// SFace face recognizer (ONNX) — ~37 MB, 128-dim L2-normalized embeddings.
-	sfaceModel = "face_recognition_sface_2021dec.onnx"
+	SFaceModel = "face_recognition_sface_2021dec.onnx"
 )
 
-// Model download URLs.
-var modelURLs = map[string]string{
-	faceDetectorProto: "https://raw.githubusercontent.com/opencv/opencv/4.x/samples/dnn/face_detector/deploy.prototxt",
-	faceDetectorModel: "https://github.com/opencv/opencv_3rdparty/raw/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel",
-	sfaceModel:        "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
+// ModelURLs maps model filenames to their download URLs.
+var ModelURLs = map[string]string{
+	FaceDetectorProto: "https://raw.githubusercontent.com/opencv/opencv/4.x/samples/dnn/face_detector/deploy.prototxt",
+	FaceDetectorModel: "https://github.com/opencv/opencv_3rdparty/raw/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel",
+	SFaceModel:        "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
 }
 
-// ensureModels downloads any missing model files to modelDir.
-func ensureModels(modelDir string) error {
+// EnsureModels downloads any missing model files to modelDir.
+func EnsureModels(modelDir string, logFn func(format string, args ...any)) error {
+	if logFn == nil {
+		logFn = func(string, ...any) {}
+	}
+
 	if err := os.MkdirAll(modelDir, 0o755); err != nil {
 		return fmt.Errorf("create model dir: %w", err)
 	}
 
-	for name, url := range modelURLs {
+	for name, url := range ModelURLs {
 		path := filepath.Join(modelDir, name)
 		if _, err := os.Stat(path); err == nil {
-			fmt.Printf("  ✓ %s (already downloaded)\n", name)
+			logFn("  model %s (already downloaded)", name)
 			continue
 		}
 
-		fmt.Printf("  ↓ Downloading %s...\n", name)
+		logFn("  downloading %s...", name)
 		if err := downloadFile(url, path); err != nil {
 			return fmt.Errorf("download %s: %w", name, err)
 		}
 
 		info, _ := os.Stat(path)
-		fmt.Printf("  ✓ %s (%s)\n", name, humanSize(info.Size()))
+		logFn("  model %s (%s)", name, humanSize(info.Size()))
 	}
 
 	return nil
@@ -52,7 +58,7 @@ func ensureModels(modelDir string) error {
 
 // downloadFile downloads a URL to a local file, following redirects.
 func downloadFile(url, destPath string) error {
-	resp, err := http.Get(url)
+	resp, err := http.Get(url) //nolint:gosec
 	if err != nil {
 		return err
 	}
@@ -62,7 +68,6 @@ func downloadFile(url, destPath string) error {
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 
-	// Write to temp file first, then rename (atomic).
 	tmpPath := destPath + ".tmp"
 	f, err := os.Create(tmpPath)
 	if err != nil {
@@ -84,17 +89,16 @@ func downloadFile(url, destPath string) error {
 	return os.Rename(tmpPath, destPath)
 }
 
-// humanSize formats bytes into a human-readable string.
 func humanSize(bytes int64) string {
 	const (
-		KB = 1024
-		MB = 1024 * KB
+		kb = 1024
+		mb = 1024 * kb
 	)
 	switch {
-	case bytes >= MB:
-		return fmt.Sprintf("%.1f MB", float64(bytes)/float64(MB))
-	case bytes >= KB:
-		return fmt.Sprintf("%.1f KB", float64(bytes)/float64(KB))
+	case bytes >= mb:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/float64(mb))
+	case bytes >= kb:
+		return fmt.Sprintf("%.1f KB", float64(bytes)/float64(kb))
 	default:
 		return fmt.Sprintf("%d B", bytes)
 	}
