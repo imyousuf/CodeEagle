@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -372,10 +373,11 @@ type edgesResult struct {
 
 func newQueryEdgesCmd() *cobra.Command {
 	var (
-		nodeArg   string
-		edgeType  string
-		direction string
-		jsonOut   bool
+		nodeArg       string
+		edgeType      string
+		direction     string
+		packageFilter string
+		jsonOut       bool
 	)
 
 	cmd := &cobra.Command{
@@ -402,13 +404,31 @@ func newQueryEdgesCmd() *cobra.Command {
 			// Try to find the node by ID first, then by name.
 			node, err := store.GetNode(ctx, nodeArg)
 			if err != nil || node == nil {
-				// Try name search.
-				candidates, qErr := store.QueryNodes(ctx, graph.NodeFilter{NamePattern: nodeArg})
+				// Try name search, optionally filtered by package.
+				filter := graph.NodeFilter{NamePattern: nodeArg}
+				if packageFilter != "" {
+					filter.Package = packageFilter
+				}
+				candidates, qErr := store.QueryNodes(ctx, filter)
 				if qErr != nil {
 					return fmt.Errorf("query nodes: %w", qErr)
 				}
 				if len(candidates) == 0 {
 					return fmt.Errorf("no node found matching %q", nodeArg)
+				}
+				if len(candidates) > 1 && packageFilter == "" {
+					fmt.Fprintf(os.Stderr, "Warning: %d nodes match %q, using first. Use --package to disambiguate:\n", len(candidates), nodeArg)
+					for i, c := range candidates {
+						if i >= 5 {
+							fmt.Fprintf(os.Stderr, "  ... and %d more\n", len(candidates)-5)
+							break
+						}
+						loc := c.FilePath
+						if c.Line > 0 {
+							loc = fmt.Sprintf("%s:%d", c.FilePath, c.Line)
+						}
+						fmt.Fprintf(os.Stderr, "  %s (%s, %s)\n", c.Name, c.Package, loc)
+					}
 				}
 				node = candidates[0]
 			}
@@ -516,6 +536,7 @@ func newQueryEdgesCmd() *cobra.Command {
 	cmd.Flags().StringVar(&nodeArg, "node", "", "node name or ID (required)")
 	cmd.Flags().StringVar(&edgeType, "type", "", "filter by edge type (e.g. Calls, Implements)")
 	cmd.Flags().StringVar(&direction, "direction", "both", "edge direction: in, out, or both")
+	cmd.Flags().StringVar(&packageFilter, "package", "", "filter by package name (disambiguate common names)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output as JSON")
 
 	return cmd

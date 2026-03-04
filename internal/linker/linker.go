@@ -49,15 +49,17 @@ func (l *Linker) Phases() []Phase {
 		{Name: "imports", Fn: l.linkImports},
 		{Name: "implements", Fn: l.linkImplements},
 		{Name: "tests", Fn: l.linkTests},
+		{Name: "calls", Fn: l.linkCalls},
 		{Name: "documents", Fn: l.linkDocuments},
 	}
 }
 
-// NewPhases returns only the newly added phases (implements + tests).
+// NewPhases returns only the newly added phases (implements + tests + calls).
 func (l *Linker) NewPhases() []Phase {
 	return []Phase{
 		{Name: "implements", Fn: l.linkImplements},
 		{Name: "tests", Fn: l.linkTests},
+		{Name: "calls", Fn: l.linkCalls},
 	}
 }
 
@@ -146,7 +148,16 @@ func (l *Linker) RunAll(ctx context.Context) error {
 		l.log("  Linked %d test coverage edges", testCount)
 	}
 
-	// 4.8. Link documents to code entities they reference.
+	// 4.8. Resolve cross-file intra-package function calls.
+	callsLinked, err := l.linkCalls(ctx)
+	if err != nil {
+		return fmt.Errorf("link calls: %w", err)
+	}
+	if l.verbose {
+		l.log("  Linked %d cross-file call edges", callsLinked)
+	}
+
+	// 4.9. Link documents to code entities they reference.
 	docCount, err := l.linkDocuments(ctx)
 	if err != nil {
 		return fmt.Errorf("link documents: %w", err)

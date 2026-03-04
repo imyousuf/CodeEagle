@@ -1243,13 +1243,13 @@ func TestPhasesCount(t *testing.T) {
 	linker := NewLinker(store, nil, nil, false)
 
 	allPhases := linker.Phases()
-	if len(allPhases) != 8 {
-		t.Errorf("Phases() returned %d, want 8", len(allPhases))
+	if len(allPhases) != 9 {
+		t.Errorf("Phases() returned %d, want 9", len(allPhases))
 	}
 
 	newPhases := linker.NewPhases()
-	if len(newPhases) != 2 {
-		t.Errorf("NewPhases() returned %d, want 2", len(newPhases))
+	if len(newPhases) != 3 {
+		t.Errorf("NewPhases() returned %d, want 3", len(newPhases))
 	}
 }
 

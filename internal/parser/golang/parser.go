@@ -1002,6 +1002,8 @@ func (e *extractor) enclosingFuncNodeID(fn *ast.FuncDecl) string {
 
 // extractFunctionCalls walks all function/method bodies and creates EdgeCalls for
 // detected call expressions: same-file calls and import-qualified calls.
+// Unresolved direct calls (likely cross-file same-package) are stored as
+// Properties["unresolved_calls"] for the linker to resolve.
 func (e *extractor) extractFunctionCalls() {
 	for _, decl := range e.file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -1010,6 +1012,7 @@ func (e *extractor) extractFunctionCalls() {
 		}
 
 		enclosingNodeID := e.enclosingFuncNodeID(fn)
+		var unresolvedCalls []string // track unresolved same-package calls
 
 		// Determine receiver parameter name and type for chained field access resolution.
 		var recvParamName, recvTypeName_ string
@@ -1101,12 +1104,42 @@ func (e *extractor) extractFunctionCalls() {
 							TargetID: targetID,
 						})
 					}
+				} else {
+					// Unresolved: likely a cross-file same-package call.
+					// Store for linker resolution.
+					unresolvedCalls = append(unresolvedCalls, name)
 				}
 			}
 
 			return true
 		})
+
+		// Store unresolved calls on the enclosing node for cross-file linker resolution.
+		if len(unresolvedCalls) > 0 {
+			for _, n := range e.nodes {
+				if n.ID == enclosingNodeID {
+					if n.Properties == nil {
+						n.Properties = make(map[string]string)
+					}
+					n.Properties["unresolved_calls"] = strings.Join(dedupStrings(unresolvedCalls), ",")
+					break
+				}
+			}
+		}
 	}
+}
+
+// dedupStrings returns a deduplicated copy of ss preserving order.
+func dedupStrings(ss []string) []string {
+	seen := make(map[string]bool, len(ss))
+	out := make([]string, 0, len(ss))
+	for _, s := range ss {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // resolveFieldChain walks a chain of SelectorExpr nodes (e.g., receiver.field1.field2)

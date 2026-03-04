@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
@@ -988,4 +989,44 @@ func indexByName(nodes []*graph.Node) map[string]*graph.Node {
 		m[n.Name] = n
 	}
 	return m
+}
+
+func TestUnresolvedCallsProperty(t *testing.T) {
+	src := []byte(`package mypkg
+
+import "fmt"
+
+func helper() { fmt.Println("hi") }
+
+func caller() {
+	helper()
+	crossFileFunc()
+	anotherCrossFile("arg")
+}
+`)
+	p := NewParser()
+	result, err := p.ParseFile("test.go", src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	for _, n := range result.Nodes {
+		if n.Name == "caller" {
+			v, ok := n.Properties["unresolved_calls"]
+			if !ok {
+				t.Fatal("caller should have unresolved_calls property")
+			}
+			t.Logf("unresolved_calls = %s", v)
+			if !strings.Contains(v, "crossFileFunc") {
+				t.Errorf("expected crossFileFunc in unresolved_calls, got %s", v)
+			}
+			if !strings.Contains(v, "anotherCrossFile") {
+				t.Errorf("expected anotherCrossFile in unresolved_calls, got %s", v)
+			}
+			if strings.Contains(v, "helper") {
+				t.Errorf("helper should NOT be in unresolved_calls (same-file), got %s", v)
+			}
+			return
+		}
+	}
+	t.Error("caller function not found")
 }
