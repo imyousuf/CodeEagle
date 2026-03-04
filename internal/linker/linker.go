@@ -49,6 +49,7 @@ func (l *Linker) Phases() []Phase {
 		{Name: "imports", Fn: l.linkImports},
 		{Name: "implements", Fn: l.linkImplements},
 		{Name: "tests", Fn: l.linkTests},
+		{Name: "documents", Fn: l.linkDocuments},
 	}
 }
 
@@ -143,6 +144,15 @@ func (l *Linker) RunAll(ctx context.Context) error {
 	}
 	if l.verbose {
 		l.log("  Linked %d test coverage edges", testCount)
+	}
+
+	// 4.8. Link documents to code entities they reference.
+	docCount, err := l.linkDocuments(ctx)
+	if err != nil {
+		return fmt.Errorf("link documents: %w", err)
+	}
+	if l.verbose {
+		l.log("  Linked %d document-to-code edges", docCount)
 	}
 
 	// 5. LLM-assisted analysis for unresolved calls (optional).

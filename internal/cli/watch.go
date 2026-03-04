@@ -10,11 +10,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
+	"github.com/imyousuf/CodeEagle/internal/docs"
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
 	"github.com/imyousuf/CodeEagle/internal/indexer"
 	"github.com/imyousuf/CodeEagle/internal/linker"
 	"github.com/imyousuf/CodeEagle/internal/parser"
 	csharpparser "github.com/imyousuf/CodeEagle/internal/parser/csharp"
+	genericparser "github.com/imyousuf/CodeEagle/internal/parser/generic"
 	"github.com/imyousuf/CodeEagle/internal/parser/golang"
 	htmlparser "github.com/imyousuf/CodeEagle/internal/parser/html"
 	"github.com/imyousuf/CodeEagle/internal/parser/java"
@@ -103,6 +105,30 @@ func newWatchCmd() *cobra.Command {
 			registry.Register(rubyparser.NewParser())
 			registry.Register(manifest.NewParser())
 			registry.Register(csharpparser.NewParser())
+
+			// Detect docs LLM provider for topic extraction.
+			var docsProvider docs.Provider
+			var docsCache *docs.Cache
+			dp, dpErr := docs.DetectProvider(cfg)
+			if dpErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: docs provider: %v\n", dpErr)
+			}
+			if dp != nil {
+				docsProvider = dp
+				logFn("[docs] Using %s (%s)", dp.Name(), dp.ModelName())
+				cachePath := cfg.ConfigDir + "/docs.db"
+				dc, dcErr := docs.OpenCache(cachePath)
+				if dcErr != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: docs cache: %v\n", dcErr)
+				} else {
+					docsCache = dc
+					defer docsCache.Close()
+				}
+			}
+
+			// Register generic fallback parser for non-code files.
+			registry.SetFallback(genericparser.NewGenericParser(cfg.Docs.ExcludeExtensions, docsProvider, docsCache, cfg.Docs.MaxImageRes))
+			registry.SetExcludeExtensions(cfg.Docs.ExcludeExtensions)
 
 			// Build watcher config from project config.
 			var paths []string
