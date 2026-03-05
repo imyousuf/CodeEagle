@@ -65,6 +65,7 @@ type VectorStore struct {
 //   - branch: the graph branch to index
 //   - idxPath: path to the HNSW index file (e.g., ".CodeEagle/vec.idx")
 //   - dbPath: path to the vector BadgerDB directory (e.g., ".CodeEagle/vec.db")
+//
 // openBadgerReadOnly tries to open BadgerDB in read-only mode. If the WAL needs
 // recovery, it briefly opens in write mode to flush, closes, and retries read-only.
 func openBadgerReadOnly(dbPath string) (*badger.DB, error) {
