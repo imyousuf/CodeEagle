@@ -82,6 +82,10 @@ func main() {
 		cmdStats()
 	case "imageview":
 		cmdImageView(os.Args[2:])
+	case "knn-test":
+		cmdKNNTest(os.Args[2:])
+	case "bootstrap":
+		cmdBootstrap(os.Args[2:])
 	default:
 		usage()
 		os.Exit(1)
