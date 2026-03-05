@@ -26,6 +26,11 @@ go.work.sum
 
 # Build output
 bin/
+codeeagle
+
+# Frontend build artifacts
+node_modules/
+internal/app/frontend/dist/
 
 # Graph database
 .codeeagle/
