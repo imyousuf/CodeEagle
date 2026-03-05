@@ -287,12 +287,25 @@ func runInteractiveInit(cmd *cobra.Command, cwd string) error {
 		return nil
 	}
 
+	// Build repository list — scope to user content dirs when in home directory.
+	var repos []config.RepositoryConfig
+	if isHomeDir(cwd) {
+		contentDirs := userContentDirs(cwd)
+		if len(contentDirs) > 0 {
+			for _, dir := range contentDirs {
+				repos = append(repos, config.RepositoryConfig{Path: dir, Type: "single"})
+			}
+		} else {
+			repos = []config.RepositoryConfig{{Path: cwd, Type: repoType}}
+		}
+	} else {
+		repos = []config.RepositoryConfig{{Path: cwd, Type: repoType}}
+	}
+
 	// Build config from wizard values
 	cfg := &config.Config{
-		Project: config.ProjectConfig{Name: projectName},
-		Repositories: []config.RepositoryConfig{
-			{Path: cwd, Type: repoType},
-		},
+		Project:      config.ProjectConfig{Name: projectName},
+		Repositories: repos,
 		Watch: config.WatchConfig{
 			Exclude: []string{
 				"**/node_modules/**",
@@ -307,7 +320,6 @@ func runInteractiveInit(cmd *cobra.Command, cwd string) error {
 		Graph:     config.GraphConfig{Storage: "embedded"},
 		Agents: config.AgentsConfig{
 			LLMProvider:   llmProvider,
-			Model:         "claude-sonnet-4-5-20250929",
 			AutoLink:      autoLink,
 			AutoSummarize: autoSummarize,
 		},

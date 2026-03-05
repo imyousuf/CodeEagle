@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -125,16 +127,63 @@ func detectLLMProvider() (provider, hint string) {
 	return "anthropic", ""
 }
 
+// isHomeDir returns true if the given directory is the user's home directory.
+func isHomeDir(dir string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	return filepath.Clean(dir) == filepath.Clean(home)
+}
+
+// userContentDirs returns the OS-specific user content directories that exist
+// within the given home directory. These are the directories typically containing
+// user documents, media, and downloads — safe to index without scanning the
+// entire home directory.
+func userContentDirs(home string) []string {
+	var candidates []string
+	switch runtime.GOOS {
+	case "darwin":
+		candidates = []string{"Documents", "Pictures", "Movies", "Downloads", "Desktop"}
+	case "windows":
+		candidates = []string{"Documents", "Pictures", "Videos", "Downloads", "Desktop"}
+	default: // linux and others
+		candidates = []string{"Documents", "Pictures", "Videos", "Downloads", "Desktop"}
+	}
+	var dirs []string
+	for _, name := range candidates {
+		path := filepath.Join(home, name)
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			dirs = append(dirs, path)
+		}
+	}
+	return dirs
+}
+
 func generateConfigYAML(projectName, projectRoot, provider string) string {
-	model := "claude-sonnet-4-5-20250929"
+	// Build repository entries.
+	var repoLines string
+	if isHomeDir(projectRoot) {
+		contentDirs := userContentDirs(projectRoot)
+		if len(contentDirs) > 0 {
+			var sb strings.Builder
+			for _, dir := range contentDirs {
+				sb.WriteString(fmt.Sprintf("  - path: %s\n    type: single\n", dir))
+			}
+			repoLines = sb.String()
+		} else {
+			// Fallback: no standard dirs found, use home itself.
+			repoLines = fmt.Sprintf("  - path: %s\n    type: single\n", projectRoot)
+		}
+	} else {
+		repoLines = fmt.Sprintf("  - path: %s\n    type: single\n", projectRoot)
+	}
 
 	return fmt.Sprintf(`project:
   name: %q
 
 repositories:
-  - path: %s
-    type: single
-
+%s
 watch:
   exclude:
     - "**/node_modules/**"
@@ -158,8 +207,7 @@ graph:
 
 agents:
   llm_provider: %s
-  model: %s
-`, projectName, projectRoot, provider, model)
+`, projectName, repoLines, provider)
 }
 
 func generateEnvTemplate() string {

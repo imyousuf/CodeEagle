@@ -134,7 +134,7 @@ type AgentsConfig struct {
 	// LLMProvider is the LLM provider (anthropic, vertex-ai, openai, ollama).
 	LLMProvider string `mapstructure:"llm_provider" yaml:"llm_provider"`
 	// Model is the model identifier.
-	Model string `mapstructure:"model" yaml:"model"`
+	Model string `mapstructure:"model" yaml:"model,omitempty"`
 	// Project is the GCP project ID (used when LLMProvider is "vertex-ai").
 	Project string `mapstructure:"project" yaml:"project,omitempty"`
 	// Location is the GCP region (used when LLMProvider is "vertex-ai", e.g. "us-central1").
