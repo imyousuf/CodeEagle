@@ -26,7 +26,7 @@ func newStatusCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			store, currentBranch, err := openBranchStore(cfg)
+			store, currentBranch, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}

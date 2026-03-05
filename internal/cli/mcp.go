@@ -46,7 +46,7 @@ This command is typically invoked automatically by the Claude CLI via
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			store, _, err := openBranchStore(cfg)
+			store, _, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}

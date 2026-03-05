@@ -77,7 +77,7 @@ Examples:
 				return fmt.Errorf("no config directory found; run 'codeeagle init' first")
 			}
 
-			store, currentBranch, err := openBranchStore(cfg)
+			store, currentBranch, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -89,7 +89,7 @@ Examples:
 				}
 			}
 
-			vs, err := openVectorStore(cfg, store, currentBranch, logFn)
+			vs, err := openReadOnlyVectorStore(cfg, store, currentBranch, logFn)
 			if err != nil {
 				return err
 			}

@@ -33,6 +33,7 @@ type BranchStore struct {
 
 // NewBranchStore opens (or creates) a BadgerDB-backed graph store at dbPath with
 // the given write branch and read branches (ordered by priority).
+// The DB is opened in read-write mode with an exclusive lock.
 func NewBranchStore(dbPath, writeBranch string, readBranches []string) (*BranchStore, error) {
 	opts := badger.DefaultOptions(dbPath)
 	opts.Logger = nil // suppress badger logs
@@ -41,6 +42,54 @@ func NewBranchStore(dbPath, writeBranch string, readBranches []string) (*BranchS
 		return nil, fmt.Errorf("open badger db: %w", err)
 	}
 	return &BranchStore{db: db, writeBranch: writeBranch, readBranches: readBranches}, nil
+}
+
+// NewReadOnlyBranchStore opens a BadgerDB-backed graph store in read-only mode,
+// allowing concurrent access from multiple processes. If the WAL has unrecovered
+// entries (e.g., after a crash), it briefly opens in write mode to repair, then
+// re-opens as read-only.
+func NewReadOnlyBranchStore(dbPath, writeBranch string, readBranches []string) (*BranchStore, error) {
+	db, err := openBadgerReadOnly(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	return &BranchStore{db: db, writeBranch: writeBranch, readBranches: readBranches}, nil
+}
+
+// openBadgerReadOnly tries to open BadgerDB in read-only mode. If the WAL needs
+// recovery (ErrTruncateNeeded), it briefly opens in read-write mode to flush the
+// WAL, closes, and retries read-only.
+func openBadgerReadOnly(dbPath string) (*badger.DB, error) {
+	opts := badger.DefaultOptions(dbPath)
+	opts.Logger = nil
+	opts.ReadOnly = true
+
+	db, err := badger.Open(opts)
+	if err == nil {
+		return db, nil
+	}
+
+	// If the error isn't about WAL recovery, give up.
+	if !strings.Contains(err.Error(), "truncate required") {
+		return nil, fmt.Errorf("open badger db (read-only): %w", err)
+	}
+
+	// WAL needs recovery — briefly open in write mode to let BadgerDB
+	// auto-recover the WAL, then close and retry read-only.
+	repairOpts := badger.DefaultOptions(dbPath)
+	repairOpts.Logger = nil
+	repairDB, repairErr := badger.Open(repairOpts)
+	if repairErr != nil {
+		return nil, fmt.Errorf("repair badger WAL: %w", repairErr)
+	}
+	repairDB.Close()
+
+	// Retry read-only.
+	db, err = badger.Open(opts)
+	if err != nil {
+		return nil, fmt.Errorf("open badger db (read-only after repair): %w", err)
+	}
+	return db, nil
 }
 
 // NewStore opens (or creates) a BadgerDB-backed graph store at dbPath.

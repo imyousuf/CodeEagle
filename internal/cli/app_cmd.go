@@ -49,7 +49,7 @@ index for search functionality.`,
 			}
 
 			// Open graph store.
-			store, currentBranch, err := openBranchStore(cfg)
+			store, currentBranch, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -60,7 +60,7 @@ index for search functionality.`,
 					fmt.Fprintf(os.Stderr, format+"\n", a...)
 				}
 			}
-			vs, err := openVectorStore(cfg, store, currentBranch, logFn)
+			vs, err := openReadOnlyVectorStore(cfg, store, currentBranch, logFn)
 			if err != nil {
 				logFn("Warning: vector store unavailable: %v", err)
 			}
@@ -115,4 +115,3 @@ index for search functionality.`,
 
 	return cmd
 }
-

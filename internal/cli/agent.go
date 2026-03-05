@@ -134,7 +134,7 @@ falls back to single-turn keyword-based context selection.`,
 				}
 			}
 
-			store, currentBranch, err := openBranchStore(cfg)
+			store, currentBranch, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -208,7 +208,7 @@ func newAgentDesignCmd() *cobra.Command {
 			}
 			defer client.Close()
 
-			store, currentBranch, err := openBranchStore(cfg)
+			store, currentBranch, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -260,7 +260,7 @@ func newAgentReviewCmd() *cobra.Command {
 			}
 			defer client.Close()
 
-			store, currentBranch, err := openBranchStore(cfg)
+			store, currentBranch, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -327,7 +327,7 @@ func newAgentAskCmd() *cobra.Command {
 			}
 			defer client.Close()
 
-			store, currentBranch, err := openBranchStore(cfg)
+			store, currentBranch, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}

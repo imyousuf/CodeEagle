@@ -65,10 +65,60 @@ type VectorStore struct {
 //   - branch: the graph branch to index
 //   - idxPath: path to the HNSW index file (e.g., ".CodeEagle/vec.idx")
 //   - dbPath: path to the vector BadgerDB directory (e.g., ".CodeEagle/vec.db")
-func New(graphDB graph.Store, embedder embedding.Provider, branch, idxPath, dbPath string) (*VectorStore, error) {
+// openBadgerReadOnly tries to open BadgerDB in read-only mode. If the WAL needs
+// recovery, it briefly opens in write mode to flush, closes, and retries read-only.
+func openBadgerReadOnly(dbPath string) (*badger.DB, error) {
 	opts := badger.DefaultOptions(dbPath)
 	opts.Logger = nil
+	opts.ReadOnly = true
+
 	db, err := badger.Open(opts)
+	if err == nil {
+		return db, nil
+	}
+
+	if !strings.Contains(err.Error(), "truncate required") {
+		return nil, fmt.Errorf("open badger db (read-only): %w", err)
+	}
+
+	// WAL needs recovery — briefly open in write mode.
+	repairOpts := badger.DefaultOptions(dbPath)
+	repairOpts.Logger = nil
+	repairDB, repairErr := badger.Open(repairOpts)
+	if repairErr != nil {
+		return nil, fmt.Errorf("repair badger WAL: %w", repairErr)
+	}
+	repairDB.Close()
+
+	db, err = badger.Open(opts)
+	if err != nil {
+		return nil, fmt.Errorf("open badger db (read-only after repair): %w", err)
+	}
+	return db, nil
+}
+
+func New(graphDB graph.Store, embedder embedding.Provider, branch, idxPath, dbPath string) (*VectorStore, error) {
+	return newVectorStore(graphDB, embedder, branch, idxPath, dbPath, false)
+}
+
+// NewReadOnly creates a VectorStore in read-only mode, allowing concurrent
+// access from multiple processes. If the WAL needs recovery, it briefly opens
+// in write mode to repair, then re-opens as read-only.
+func NewReadOnly(graphDB graph.Store, embedder embedding.Provider, branch, idxPath, dbPath string) (*VectorStore, error) {
+	return newVectorStore(graphDB, embedder, branch, idxPath, dbPath, true)
+}
+
+func newVectorStore(graphDB graph.Store, embedder embedding.Provider, branch, idxPath, dbPath string, readOnly bool) (*VectorStore, error) {
+	var db *badger.DB
+	var err error
+
+	if readOnly {
+		db, err = openBadgerReadOnly(dbPath)
+	} else {
+		opts := badger.DefaultOptions(dbPath)
+		opts.Logger = nil
+		db, err = badger.Open(opts)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("open vector db: %w", err)
 	}

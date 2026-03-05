@@ -46,3 +46,39 @@ func openBranchStore(cfg *config.Config) (*embedded.BranchStore, string, error) 
 
 	return store, currentBranch, nil
 }
+
+// openReadOnlyBranchStore opens a BranchStore in read-only mode, allowing
+// concurrent access from multiple processes. Use this for commands that
+// only query the graph (rag, query, status, agent, mcp serve, app).
+func openReadOnlyBranchStore(cfg *config.Config) (*embedded.BranchStore, string, error) {
+	resolvedDBPath := cfg.ResolveDBPath(dbPath)
+	if resolvedDBPath == "" {
+		return nil, "", fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
+	}
+
+	currentBranch := "default"
+	defaultBranch := "main"
+	if len(cfg.Repositories) > 0 {
+		repoPath := cfg.Repositories[0].Path
+		branch, err := gitutil.GetCurrentBranch(repoPath)
+		if err == nil && branch != "" {
+			currentBranch = branch
+		}
+		info, err := gitutil.GetBranchInfo(repoPath)
+		if err == nil {
+			defaultBranch = info.DefaultBranch
+		}
+	}
+
+	readBranches := []string{currentBranch}
+	if currentBranch != defaultBranch {
+		readBranches = append(readBranches, defaultBranch)
+	}
+
+	store, err := embedded.NewReadOnlyBranchStore(resolvedDBPath, currentBranch, readBranches)
+	if err != nil {
+		return nil, "", fmt.Errorf("open graph store (read-only): %w", err)
+	}
+
+	return store, currentBranch, nil
+}

@@ -310,7 +310,7 @@ func newFacesLabelCmd() *cobra.Command {
 			}
 
 			// Create NodePerson in graph if available.
-			graphStore, _, gsErr := openBranchStore(cfg)
+			graphStore, _, gsErr := openReadOnlyBranchStore(cfg)
 			if gsErr == nil {
 				defer graphStore.Close()
 				personID := graph.NewNodeID(string(graph.NodePerson), "", name)

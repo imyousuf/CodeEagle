@@ -32,7 +32,7 @@ func newQueryCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			store, _, err := openBranchStore(cfg)
+			store, _, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -109,7 +109,7 @@ func newQuerySymbolsCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			store, _, err := openBranchStore(cfg)
+			store, _, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -257,7 +257,7 @@ func newQueryInterfaceCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			store, _, err := openBranchStore(cfg)
+			store, _, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -393,7 +393,7 @@ func newQueryEdgesCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			store, _, err := openBranchStore(cfg)
+			store, _, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}
