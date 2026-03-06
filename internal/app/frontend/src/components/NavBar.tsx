@@ -52,6 +52,36 @@ export default function NavBar() {
       >
         Ask
       </NavLink>
+      <NavLink
+        to="/sync"
+        style={({ isActive }) => ({
+          ...linkBase,
+          color: isActive ? '#cdd6f4' : '#a6adc8',
+          borderBottomColor: isActive ? '#89b4fa' : 'transparent',
+        })}
+      >
+        Sync
+      </NavLink>
+      <NavLink
+        to="/faces"
+        style={({ isActive }) => ({
+          ...linkBase,
+          color: isActive ? '#cdd6f4' : '#a6adc8',
+          borderBottomColor: isActive ? '#89b4fa' : 'transparent',
+        })}
+      >
+        Faces
+      </NavLink>
+      <NavLink
+        to="/settings"
+        style={({ isActive }) => ({
+          ...linkBase,
+          color: isActive ? '#cdd6f4' : '#a6adc8',
+          borderBottomColor: isActive ? '#89b4fa' : 'transparent',
+        })}
+      >
+        Settings
+      </NavLink>
     </nav>
   );
 }
