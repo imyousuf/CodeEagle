@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -378,6 +379,53 @@ func TestExtractPDF(t *testing.T) {
 
 	if !strings.Contains(text, "Hello World") {
 		t.Errorf("expected 'Hello World', got: %s", text)
+	}
+}
+
+func TestExtractPDF_LargeFile(t *testing.T) {
+	pdfPath := "../../../testdata/2020-cx-5-owners-manual.pdf"
+	content, err := os.ReadFile(pdfPath)
+	if err != nil {
+		t.Skipf("large PDF test fixture not available: %v", err)
+	}
+
+	text, err := extractPDF(content)
+	if err != nil {
+		t.Fatalf("extractPDF() error on large file: %v", err)
+	}
+
+	// Should have extracted some text.
+	if len(text) < 1000 {
+		t.Errorf("expected substantial text from 99MB PDF, got %d bytes", len(text))
+	}
+
+	// Should have page markers.
+	if !strings.Contains(text, "--- Page ") {
+		t.Error("expected page markers in output")
+	}
+
+	// Should contain car manual content (Mazda CX-5).
+	textLower := strings.ToLower(text)
+	if !strings.Contains(textLower, "mazda") && !strings.Contains(textLower, "cx-5") && !strings.Contains(textLower, "vehicle") {
+		t.Errorf("expected car manual content, got first 500 chars: %s", text[:min(500, len(text))])
+	}
+
+	t.Logf("Extracted %d bytes of text from %d byte PDF", len(text), len(content))
+
+	// Count pages extracted.
+	pageCount := strings.Count(text, "--- Page ")
+	t.Logf("Extracted %d pages", pageCount)
+}
+
+func TestExtractPDF_PageMarkers(t *testing.T) {
+	content := createTestPDF()
+	text, err := extractPDF(content)
+	if err != nil {
+		t.Fatalf("extractPDF() error: %v", err)
+	}
+
+	if !strings.Contains(text, "--- Page 1 ---") {
+		t.Errorf("expected page marker, got: %s", text)
 	}
 }
 
