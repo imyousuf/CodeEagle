@@ -152,7 +152,7 @@ docs:
   model: qwen3.5:9b             # multimodal model (text + images), ~10-14GB VRAM
   # model: gemini-2.0-flash     # for vertex-ai
   max_image_resolution: 1024    # downscale longest edge before LLM (pixels)
-  context_window: 49152         # Ollama num_ctx — required for large files (default 49K)
+  context_window: 120000        # Ollama num_ctx — required for large files (default 120K)
   disable_thinking: false       # set true to add /no_think (saves tokens, may reduce quality)
   exclude_extensions:           # extensions to never index (only exclusion, no allowlist)
     - .lock
@@ -216,7 +216,7 @@ Docs DocsConfig `mapstructure:"docs" yaml:"docs"`
 ```go
 // in setDefaults()
 v.SetDefault("docs.max_image_resolution", 1024)
-v.SetDefault("docs.context_window", 49152)  // Ollama num_ctx — 49K balances VRAM and file size
+v.SetDefault("docs.context_window", 120000) // Ollama num_ctx — 120K covers most documents including large PDFs
 v.SetDefault("docs.exclude_extensions", []string{".lock", ".min.js", ".min.css", ".map", ".wasm", ".pb.go"})
 v.SetDefault("docs.faces.enabled", false)
 v.SetDefault("docs.faces.model_dir", "~/.codeeagle/models/")
@@ -287,7 +287,7 @@ type Config struct {
     Location        string // GCP (Vertex AI)
     CredentialsFile string
     MaxImageRes     int    // downscale longest edge
-    ContextWindow   int    // Ollama num_ctx (default 49152)
+    ContextWindow   int    // Ollama num_ctx (default 120000)
     DisableThinking bool   // append /no_think to prompts
 }
 ```
@@ -308,7 +308,7 @@ func init() {
   "model": "qwen3.5:9b",
   "stream": false,
   "format": "json",
-  "options": {"num_ctx": 49152},
+  "options": {"num_ctx": 120000},
   "messages": [
     {
       "role": "system",
@@ -322,11 +322,11 @@ func init() {
 }
 ```
 
-**IMPORTANT**: `"options": {"num_ctx": 49152}` is required. Without it, Ollama uses a small default context window and silently produces empty/garbage output for files larger than ~15KB.
+**IMPORTANT**: `"options": {"num_ctx": 120000}` is required. Without it, Ollama uses a small default context window and silently produces empty/garbage output for files larger than ~15KB.
 
 **Thinking mode**: thinking (chain-of-thought reasoning) is enabled by default — it improves extraction quality. If `disable_thinking` is set in config, the provider appends `/no_think` to the system prompt, which saves ~500-2000 tokens per call at the cost of potentially lower quality.
 
-**Large file handling**: no file is skipped due to size. For text files that exceed ~80% of the context window (~160KB at 49K context), the provider truncates the input. The LLM naturally handles summarization — the prompt says "if the text is very long, first summarize it then extract". Tested: 105KB doc (30,610 tokens) processes in 25-40s. Retry logic handles the ~25% garbage-output rate (see Reliability section above).
+**Large file handling**: no file is skipped due to size. For text files that exceed ~80% of the context window (~336KB at 120K context), the provider truncates the input. The LLM naturally handles summarization — the prompt says "if the text is very long, first summarize it then extract". Tested: 310KB extracted from a 99MB PDF (74,903 tokens) processes in ~78s at 120K context. Retry logic handles the ~25% garbage-output rate (see Reliability section above).
 
 **DescribeImage** — calls `POST /api/chat` with images field:
 ```json
@@ -411,7 +411,7 @@ func (p *ollamaProvider) extractWithRetry(ctx context.Context, messages []Messag
 var ErrExtractionSkipped = errors.New("extraction skipped after max retries")
 ```
 
-Reliability tested (5 runs per file, `num_ctx: 49152`):
+Reliability tested (5 runs per file, `num_ctx: 120000`):
 
 | File Size | Thinking ON | Thinking OFF |
 |-----------|-------------|--------------|
@@ -425,7 +425,7 @@ Both modes have similar reliability (~65-75% per attempt). At 70% per-attempt su
 **Thinking mode**: enabled by default. Thinking (chain-of-thought reasoning) allows the model to reason about the content before extracting topics. Set `disable_thinking: true` in config to append `/no_think` to prompts — this saves ~500-2000 tokens per call but may reduce extraction quality on complex documents. The failure rate is inherent to the model and present in both modes; retry logic is the correct mitigation.
 
 **Model sizing notes:**
-- `qwen3.5:9b` at `num_ctx: 49152` requires ~14GB VRAM — fits on GPUs with 16GB+ VRAM
+- `qwen3.5:9b` at `num_ctx: 120000` requires ~16GB VRAM — fits on GPUs with 24GB+ VRAM
 - `qwen3.5:27b` requires ~16GB+ base — may crash on 24GB GPUs with desktop compositor overhead; not recommended
 - `format: "json"` produces parseable JSON when the model doesn't produce garbage
 - First-call latency is ~55s (cold model load); subsequent warm calls: 17-46s depending on input size
@@ -437,7 +437,7 @@ Both modes have similar reliability (~65-75% per attempt). At 70% per-attempt su
 - The model accurately reads text labels, identifies diagram components, and describes relationships in technical diagrams
 
 **File size strategy:**
-- Files up to ~160KB (at `num_ctx: 49152`): send directly to LLM
+- Files up to ~336KB (at `num_ctx: 120000`): send directly to LLM
 - Files exceeding ~80% of context window: truncate to fit (estimate: 1 token ≈ 3.5 chars)
 - No file is skipped — truncated files still produce useful topic extraction from their content
 
