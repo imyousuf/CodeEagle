@@ -35,24 +35,30 @@ func NewThrottler(maxWorkers int, targetCPU float64) *Throttler {
 
 // NewThrottlerWithCPU creates a Throttler with an injectable CPU function.
 func NewThrottlerWithCPU(maxWorkers int, targetCPU float64, cpuFn CPUPercent) *Throttler {
+	t := newThrottler(maxWorkers, targetCPU, cpuFn, 5*time.Second)
+	go t.monitorLoop()
+	return t
+}
+
+// newThrottler creates a Throttler without starting the monitor loop.
+// Used by tests that need a custom sample interval.
+func newThrottler(maxWorkers int, targetCPU float64, cpuFn CPUPercent, interval time.Duration) *Throttler {
 	if maxWorkers <= 0 {
 		maxWorkers = max(runtime.NumCPU()/2, 1)
 	}
 	if targetCPU <= 0 {
 		targetCPU = 70.0
 	}
-	t := &Throttler{
+	return &Throttler{
 		maxWorkers:     maxWorkers,
 		minWorkers:     1,
 		targetCPU:      targetCPU,
 		coolCPU:        targetCPU - 20,
-		sampleInterval: 5 * time.Second,
+		sampleInterval: interval,
 		currentTarget:  maxWorkers,
 		cpuPercent:     cpuFn,
 		done:           make(chan struct{}),
 	}
-	go t.monitorLoop()
-	return t
 }
 
 // TargetWorkers returns the current target worker count.
@@ -93,4 +99,3 @@ func (t *Throttler) monitorLoop() {
 		}
 	}
 }
-

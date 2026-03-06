@@ -43,14 +43,10 @@ func TestThrottler_ReduceUnderLoad(t *testing.T) {
 		return []float64{float64(cpuVal.Load())}, nil
 	}
 
-	th := NewThrottlerWithCPU(4, 70, cpuFn)
-	th.Stop()
-	th.done = make(chan struct{})
-	th.sampleInterval = 10 * time.Millisecond
+	th := newThrottler(4, 70, cpuFn, 10*time.Millisecond)
 	go th.monitorLoop()
 	defer th.Stop()
 
-	// Wait for a few ticks.
 	time.Sleep(100 * time.Millisecond)
 
 	target := th.TargetWorkers()
@@ -60,10 +56,7 @@ func TestThrottler_ReduceUnderLoad(t *testing.T) {
 }
 
 func TestThrottler_IncreaseWhenIdle(t *testing.T) {
-	th := NewThrottlerWithCPU(4, 70, fakeCPU(40))
-	th.Stop()
-	th.done = make(chan struct{})
-	th.sampleInterval = 10 * time.Millisecond
+	th := newThrottler(4, 70, fakeCPU(40), 10*time.Millisecond)
 
 	// Set initial target low.
 	th.mu.Lock()
@@ -82,10 +75,7 @@ func TestThrottler_IncreaseWhenIdle(t *testing.T) {
 }
 
 func TestThrottler_HoldSteady(t *testing.T) {
-	th := NewThrottlerWithCPU(4, 70, fakeCPU(60)) // between 50 and 70
-	th.Stop()
-	th.done = make(chan struct{})
-	th.sampleInterval = 10 * time.Millisecond
+	th := newThrottler(4, 70, fakeCPU(60), 10*time.Millisecond) // between 50 and 70
 
 	th.mu.Lock()
 	th.currentTarget = 3
@@ -102,11 +92,7 @@ func TestThrottler_HoldSteady(t *testing.T) {
 }
 
 func TestThrottler_MinFloor(t *testing.T) {
-	th := NewThrottlerWithCPU(4, 70, fakeCPU(100))
-	th.Stop()
-	th.done = make(chan struct{})
-	th.sampleInterval = 10 * time.Millisecond
-
+	th := newThrottler(4, 70, fakeCPU(100), 10*time.Millisecond)
 	go th.monitorLoop()
 	defer th.Stop()
 
@@ -118,11 +104,7 @@ func TestThrottler_MinFloor(t *testing.T) {
 }
 
 func TestThrottler_MaxCeiling(t *testing.T) {
-	th := NewThrottlerWithCPU(4, 70, fakeCPU(10))
-	th.Stop()
-	th.done = make(chan struct{})
-	th.sampleInterval = 10 * time.Millisecond
-
+	th := newThrottler(4, 70, fakeCPU(10), 10*time.Millisecond)
 	go th.monitorLoop()
 	defer th.Stop()
 

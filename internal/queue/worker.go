@@ -45,11 +45,11 @@ func NewWorkerPool(queue *Store, throttler *Throttler, emit EventEmitter) *Worke
 		emit = func(string, ...any) {}
 	}
 	return &WorkerPool{
-		queue:    queue,
-		handlers: make(map[JobType]Handler),
-		emit:     emit,
+		queue:     queue,
+		handlers:  make(map[JobType]Handler),
+		emit:      emit,
 		throttler: throttler,
-		resumeCh: make(chan struct{}, 1),
+		resumeCh:  make(chan struct{}, 1),
 	}
 }
 
@@ -61,7 +61,9 @@ func (wp *WorkerPool) Register(jobType JobType, handler Handler) {
 // Run starts the worker dispatch loop. Blocks until ctx is cancelled or all
 // jobs are done (no pending + no running).
 func (wp *WorkerPool) Run(ctx context.Context) {
+	wp.pauseMu.Lock()
 	wp.ctx, wp.cancel = context.WithCancel(ctx)
+	wp.pauseMu.Unlock()
 
 	for {
 		select {
@@ -120,8 +122,11 @@ func (wp *WorkerPool) Run(ctx context.Context) {
 
 // Stop signals the worker pool to stop and waits for active workers to finish.
 func (wp *WorkerPool) Stop() {
-	if wp.cancel != nil {
-		wp.cancel()
+	wp.pauseMu.Lock()
+	cancel := wp.cancel
+	wp.pauseMu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 	wp.wg.Wait()
 }
