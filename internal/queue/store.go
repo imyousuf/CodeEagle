@@ -25,11 +25,11 @@ const (
 type JobStatus string
 
 const (
-	StatusPending  JobStatus = "pending"
-	StatusRunning  JobStatus = "running"
-	StatusDone     JobStatus = "done"
-	StatusFailed   JobStatus = "failed"
-	StatusSkipped  JobStatus = "skipped"
+	StatusPending JobStatus = "pending"
+	StatusRunning JobStatus = "running"
+	StatusDone    JobStatus = "done"
+	StatusFailed  JobStatus = "failed"
+	StatusSkipped JobStatus = "skipped"
 )
 
 // Job is a single enrichment work item in the queue.

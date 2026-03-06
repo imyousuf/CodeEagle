@@ -32,7 +32,7 @@ func (m *mockProvider) DescribeImage(ctx context.Context, data []byte, mime stri
 }
 
 func (m *mockProvider) Name() string      { return "mock" }
-func (m *mockProvider) ModelName() string  { return "test-model" }
+func (m *mockProvider) ModelName() string { return "test-model" }
 
 // mockStore implements graph.Store for testing.
 type mockStore struct {

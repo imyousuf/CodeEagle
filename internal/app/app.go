@@ -123,4 +123,3 @@ func (a *App) openLLM() (llm.Client, func(), error) {
 	}
 	return client, func() { client.Close() }, nil
 }
-

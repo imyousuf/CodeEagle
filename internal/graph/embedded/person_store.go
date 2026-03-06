@@ -12,14 +12,14 @@ import (
 
 // Person key prefix constants (not branch-aware — person data is global).
 const (
-	prefixPerson       = "person:"
-	prefixExemplar     = "person:exemplar:"
-	prefixFace         = "person:face:"
-	prefixPersonIdx    = "person:idx:name:"
-	prefixImgMeta      = "img:meta:"
-	prefixImgDateIdx   = "img:idx:date:"
-	prefixImgEventIdx  = "img:idx:event:"
-	prefixImgScanned   = "img:scanned:"
+	prefixPerson      = "person:"
+	prefixExemplar    = "person:exemplar:"
+	prefixFace        = "person:face:"
+	prefixPersonIdx   = "person:idx:name:"
+	prefixImgMeta     = "img:meta:"
+	prefixImgDateIdx  = "img:idx:date:"
+	prefixImgEventIdx = "img:idx:event:"
+	prefixImgScanned  = "img:scanned:"
 )
 
 // Relationship types for persons.
@@ -62,7 +62,7 @@ type ImageMetadata struct {
 	DateTaken   time.Time `json:"date_taken"`
 	DateSource  string    `json:"date_source"`
 	FolderName  string    `json:"folder_name"`
-	CameraModel string   `json:"camera_model,omitempty"`
+	CameraModel string    `json:"camera_model,omitempty"`
 	GPSLat      float64   `json:"gps_lat,omitempty"`
 	GPSLon      float64   `json:"gps_lon,omitempty"`
 	EventName   string    `json:"event_name,omitempty"`

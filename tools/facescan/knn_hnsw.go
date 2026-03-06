@@ -21,7 +21,7 @@ func buildHNSWIndex(exemplars []exemplar) (*hnswIndex, time.Duration) {
 	start := time.Now()
 
 	g := hnsw.NewGraph[int]()
-	g.M = 32       // more connections = better recall for small datasets
+	g.M = 32         // more connections = better recall for small datasets
 	g.EfSearch = 128 // large candidate pool for high recall
 
 	for i, ex := range exemplars {

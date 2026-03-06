@@ -150,9 +150,9 @@ func classifyKNNBucketed(embedding []float32, _ string, idx *bucketedIndex, quer
 	}
 
 	// Weighted majority vote.
-	weightSum := make(map[string]float32)  // label → sum of temporal weights
-	simSum := make(map[string]float32)     // label → sum of raw similarities
-	voteCounts := make(map[string]int)     // label → count
+	weightSum := make(map[string]float32) // label → sum of temporal weights
+	simSum := make(map[string]float32)    // label → sum of raw similarities
+	voteCounts := make(map[string]int)    // label → count
 	totalWeight := float32(0)
 
 	for _, wm := range topK {
@@ -317,7 +317,7 @@ func (bi *bucketedIndex) medianYear() int {
 // quarterKey returns a string key for per-person-per-quarter cap tracking.
 // Format: "label:YYYY-QN" where N is 1-4.
 func quarterKey(label string, date time.Time) string {
-	q := (int(date.Month()) - 1) / 3 + 1
+	q := (int(date.Month())-1)/3 + 1
 	return fmt.Sprintf("%s:%d-Q%d", label, date.Year(), q)
 }
 
@@ -454,4 +454,3 @@ func benchmarkKNN3Way(testFaces []testFaceRecord, exemplars []exemplar, queryDat
 		}
 	}
 }
-
