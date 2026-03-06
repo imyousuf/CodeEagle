@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -311,14 +314,24 @@ func runQueueEnrichment(
 		return fmt.Errorf("populate queue: %w", err)
 	}
 
-	if qs.PendingCount() == 0 {
+	pending := qs.PendingCount()
+	if pending == 0 {
 		return nil
 	}
 
 	throttler := queue.NewThrottler(cfg.Queue.MaxWorkers, float64(cfg.Queue.TargetCPU))
 	defer throttler.Stop()
 
-	pool := queue.NewWorkerPool(qs, throttler, nil)
+	// Track completions for periodic progress reporting.
+	var completed atomic.Int32
+	total := pending
+	emitter := func(event string, data ...any) {
+		if event == "sync:progress" {
+			completed.Add(1)
+		}
+	}
+
+	pool := queue.NewWorkerPool(qs, throttler, emitter)
 	pool.Register(queue.JobDocExtract, queue.NewDocExtractHandler(docsProvider, docsCache, graphStore))
 	pool.Register(queue.JobImageDescribe, queue.NewImageDescribeHandler(docsProvider, docsCache, graphStore, cfg.Docs.MaxImageRes))
 
@@ -329,8 +342,28 @@ func runQueueEnrichment(
 	if maxW <= 0 {
 		maxW = throttler.TargetWorkers()
 	}
-	logFn("[queue] Starting worker pool (max %d workers, target CPU %d%%)", maxW, cfg.Queue.TargetCPU)
+	logFn("[queue] Processing %d jobs (max %d workers, target CPU %d%%)", total, maxW, cfg.Queue.TargetCPU)
+
+	// Periodic progress reporter.
+	progressDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-progressDone:
+				return
+			case <-ticker.C:
+				done := int(completed.Load())
+				active := pool.ActiveCount()
+				remaining := total - done
+				logFn("[queue] Progress: %d/%d done, %d active, %d remaining", done, total, active, remaining)
+			}
+		}
+	}()
+
 	pool.Run(ctx)
+	close(progressDone)
 
 	stats, _ := qs.Stats()
 	logFn("[queue] Enrichment complete: %d done, %d failed, %d skipped", stats.Done, stats.Failed, stats.Skipped)
@@ -417,7 +450,16 @@ func populateQueue(
 		return nil
 	}
 
-	logFn("[queue] Enqueuing %d enrichment jobs", len(jobs))
+	// Count per-type breakdown for log.
+	typeCounts := make(map[queue.JobType]int)
+	for _, j := range jobs {
+		typeCounts[j.Type]++
+	}
+	parts := make([]string, 0, len(typeCounts))
+	for jt, c := range typeCounts {
+		parts = append(parts, fmt.Sprintf("%d %s", c, jt))
+	}
+	logFn("[queue] Enqueuing %d jobs (%s)", len(jobs), strings.Join(parts, ", "))
 	return qs.EnqueueBatch(jobs)
 }
 
