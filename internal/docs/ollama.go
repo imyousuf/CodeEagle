@@ -9,12 +9,17 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const (
 	defaultOllamaBaseURL   = "http://localhost:11434"
 	defaultOllamaDocsModel = "qwen3.5:9b"
 	maxExtractRetries      = 4
+	// ollamaRequestTimeout is the maximum time for a single Ollama API call.
+	// Large documents at 120K context can take 60-90s; allow headroom for
+	// cold model reloads and GPU scheduling delays.
+	ollamaRequestTimeout = 3 * time.Minute
 )
 
 type ollamaProvider struct {
@@ -110,16 +115,29 @@ func (o *ollamaProvider) DescribeImage(ctx context.Context, imageData []byte, mi
 }
 
 func (o *ollamaProvider) extractWithRetry(ctx context.Context, messages []ollamaChatMessage) (*ExtractionResult, error) {
+	var lastErr error
 	for range maxExtractRetries {
+		// Bail if the parent context (worker pool) is cancelled.
+		if ctx.Err() != nil {
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, ctx.Err()
+		}
+
 		result, err := o.callOllama(ctx, messages)
 		if err != nil {
-			return nil, err
+			lastErr = err
+			continue // retry on all errors (timeouts, network, HTTP errors)
 		}
 		// Validate: must have >2 topics and non-placeholder summary.
 		if len(result.Topics) > 2 && !strings.Contains(result.Summary, "...") && len(result.Summary) > 20 {
 			return result, nil
 		}
 		// Garbage output — retry.
+	}
+	if lastErr != nil {
+		return nil, lastErr
 	}
 	return nil, ErrExtractionSkipped
 }
@@ -139,7 +157,9 @@ func (o *ollamaProvider) callOllama(ctx context.Context, messages []ollamaChatMe
 	}
 
 	url := o.baseURL + "/api/chat"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	reqCtx, cancel := context.WithTimeout(ctx, ollamaRequestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("create chat request: %w", err)
 	}
