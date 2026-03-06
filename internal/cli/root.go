@@ -85,6 +85,7 @@ func init() {
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newVectorIndexCmd())
 	rootCmd.AddCommand(newRagCmd())
+	rootCmd.AddCommand(newQueueCmd())
 
 	// Conditionally register faces commands (requires -tags faces build).
 	if registerFacesCmd != nil {
