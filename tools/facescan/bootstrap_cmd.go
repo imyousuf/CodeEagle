@@ -44,6 +44,7 @@ func cmdBootstrap(args []string) {
 	minFace := 30
 	maxRes := 1600
 	dryRun := false
+	useHNSW := false
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -80,6 +81,8 @@ func cmdBootstrap(args []string) {
 			fmt.Sscanf(args[i], "%f", &detThreshold)
 		case "--dry-run":
 			dryRun = true
+		case "--hnsw":
+			useHNSW = true
 		default:
 			testDirs = append(testDirs, expandPath(args[i]))
 		}
@@ -152,6 +155,13 @@ func cmdBootstrap(args []string) {
 	pool := make([]exemplar, len(seedExemplars))
 	copy(pool, seedExemplars)
 
+	// Build HNSW index if requested. Rebuilt each event when pool grows.
+	var hnswIdx *hnswIndex
+	poolDirty := true // force initial build
+	if useHNSW {
+		fmt.Println("  Using HNSW for KNN classification")
+	}
+
 	var results []bootstrapResult
 	totalAutoAccepted := 0
 
@@ -189,6 +199,12 @@ func cmdBootstrap(args []string) {
 			continue
 		}
 
+		// Rebuild HNSW index if pool changed.
+		if useHNSW && poolDirty {
+			hnswIdx, _ = buildHNSWIndex(pool)
+			poolDirty = false
+		}
+
 		// Classify each face.
 		type classifiedFace struct {
 			face   detectedFace
@@ -196,7 +212,12 @@ func cmdBootstrap(args []string) {
 		}
 		var classified []classifiedFace
 		for _, df := range eventFaces {
-			knnRes := classifyKNN(df.record.Embedding, df.imagePath, pool, k, classifyThreshold)
+			var knnRes knnResult
+			if useHNSW && hnswIdx != nil {
+				knnRes = classifyKNNHNSW(df.record.Embedding, df.imagePath, hnswIdx, k, classifyThreshold)
+			} else {
+				knnRes = classifyKNN(df.record.Embedding, df.imagePath, pool, k, classifyThreshold)
+			}
 			classified = append(classified, classifiedFace{face: df, result: knnRes})
 		}
 
@@ -295,6 +316,7 @@ func cmdBootstrap(args []string) {
 					Embedding: a.cf.face.record.Embedding,
 					FileName:  fmt.Sprintf("%s:face_%d", a.cf.face.imagePath, a.cf.face.record.FaceIdx),
 				})
+				poolDirty = true
 			}
 		}
 

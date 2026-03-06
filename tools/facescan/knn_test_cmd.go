@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"gocv.io/x/gocv"
 )
@@ -39,7 +40,7 @@ type knnResult struct {
 // 3. Classifies each face using KNN
 // 4. Reports results (filtered to specified labels)
 //
-// Usage: facescan knn-test --train <clusters-dir> --test <image-dir1> [dir2...] --labels hamza,mahdi --k 7 --threshold 0.35
+// Usage: facescan knn-test --train <clusters-dir> --test <image-dir1> [dir2...] --labels hamza,mahdi --k 7 --threshold 0.35 [--benchmark]
 func cmdKNNTest(args []string) {
 	var trainDir string
 	var testDirs []string
@@ -49,6 +50,8 @@ func cmdKNNTest(args []string) {
 	detThreshold := float32(0.5)
 	minFace := 30
 	maxRes := 1600
+	benchmark := false
+	useHNSW := false
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -74,6 +77,10 @@ func cmdKNNTest(args []string) {
 		case "--det-threshold":
 			i++
 			fmt.Sscanf(args[i], "%f", &detThreshold)
+		case "--benchmark":
+			benchmark = true
+		case "--hnsw":
+			useHNSW = true
 		default:
 			testDirs = append(testDirs, expandPath(args[i]))
 		}
@@ -153,7 +160,11 @@ func cmdKNNTest(args []string) {
 	fmt.Printf("  Total test faces detected: %d\n\n", len(allTestFaces))
 
 	// Step 3: Classify each test face using KNN
-	fmt.Println("=== KNN Classification ===")
+	mode := "brute-force"
+	if useHNSW {
+		mode = "HNSW"
+	}
+	fmt.Printf("=== KNN Classification (%s) ===\n", mode)
 	fmt.Printf("  K=%d, threshold=%.2f\n\n", k, threshold)
 
 	// Build label filter set
@@ -162,12 +173,25 @@ func cmdKNNTest(args []string) {
 		filterSet[l] = true
 	}
 
+	// Build HNSW index if needed.
+	var hnswIdx *hnswIndex
+	if useHNSW || benchmark {
+		var buildTime time.Duration
+		hnswIdx, buildTime = buildHNSWIndex(exemplars)
+		fmt.Printf("  HNSW index built in %s\n\n", fmtDuration(buildTime))
+	}
+
 	// Classify
 	classifiedCounts := make(map[string]int) // label → count
 	unknownCount := 0
 
 	for i := range allTestFaces {
-		result := classifyKNN(allTestFaces[i].Embedding, allTestFaces[i].ImagePath, exemplars, k, threshold)
+		var result knnResult
+		if useHNSW {
+			result = classifyKNNHNSW(allTestFaces[i].Embedding, allTestFaces[i].ImagePath, hnswIdx, k, threshold)
+		} else {
+			result = classifyKNN(allTestFaces[i].Embedding, allTestFaces[i].ImagePath, exemplars, k, threshold)
+		}
 		allTestFaces[i].Result = result
 		if result.Label == "unknown" {
 			unknownCount++
@@ -261,6 +285,19 @@ func cmdKNNTest(args []string) {
 				}
 			}
 		}
+	}
+
+	// Run benchmark if requested.
+	if benchmark {
+		testRecords := make([]testFaceRecord, len(allTestFaces))
+		for i, tf := range allTestFaces {
+			testRecords[i] = testFaceRecord{
+				ImagePath: tf.ImagePath,
+				FaceIdx:   tf.FaceIdx,
+				Embedding: tf.Embedding,
+			}
+		}
+		benchmarkKNN(testRecords, exemplars, k, threshold)
 	}
 }
 
