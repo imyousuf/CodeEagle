@@ -2,93 +2,19 @@ package cli
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
-	"github.com/imyousuf/CodeEagle/internal/parser"
 )
 
-// allLanguages is the user-facing list of supported languages (excludes manifest).
-var allLanguages = []string{
-	"go", "python", "typescript", "javascript", "java",
-	"rust", "csharp", "ruby",
-	"html", "markdown", "makefile", "shell", "terraform", "yaml",
-}
-
-// filenameToLanguage maps well-known filenames to their language for auto-detection.
-var filenameToLanguage = map[string]string{
-	"Makefile":         "makefile",
-	"makefile":         "makefile",
-	"GNUmakefile":      "makefile",
-	"go.mod":           "go",
-	"package.json":     "javascript",
-	"pyproject.toml":   "python",
-	"requirements.txt": "python",
-	"setup.py":         "python",
-	"Cargo.toml":       "rust",
-	"Gemfile":          "ruby",
-}
-
-// detectLanguages walks rootDir (depth-limited to 2 levels) and returns
-// languages detected by file extensions and well-known filenames.
+// detectLanguages delegates to config.DetectLanguages.
 func detectLanguages(rootDir string) []string {
-	found := make(map[string]bool)
-
-	// Build reverse map: extension -> language
-	extToLang := make(map[string]string)
-	for lang, exts := range parser.FileExtensions {
-		langStr := string(lang)
-		if langStr == "manifest" {
-			continue
-		}
-		for _, ext := range exts {
-			extToLang[ext] = langStr
-		}
-	}
-
-	rootDepth := strings.Count(filepath.ToSlash(rootDir), "/")
-	_ = filepath.WalkDir(rootDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		// Depth limit: 2 levels below root
-		depth := strings.Count(filepath.ToSlash(path), "/") - rootDepth
-		if d.IsDir() {
-			if depth >= 2 {
-				return fs.SkipDir
-			}
-			// Skip common non-source directories
-			base := d.Name()
-			if base == ".git" || base == "node_modules" || base == "vendor" || base == "__pycache__" || base == "dist" || base == "build" {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		// Check extension
-		ext := filepath.Ext(path)
-		if lang, ok := extToLang[ext]; ok {
-			found[lang] = true
-		}
-		// Check filename
-		if lang, ok := filenameToLanguage[d.Name()]; ok {
-			found[lang] = true
-		}
-		return nil
-	})
-
-	result := make([]string, 0, len(found))
-	for lang := range found {
-		result = append(result, lang)
-	}
-	sort.Strings(result)
-	return result
+	return config.DetectLanguages(rootDir)
 }
 
 // runInteractiveInit runs the interactive TUI wizard for project initialization.
@@ -119,8 +45,8 @@ func runInteractiveInit(cmd *cobra.Command, cwd string) error {
 	defaultProvider, _ := detectLLMProvider()
 
 	// Build language options with detected ones pre-selected
-	langOptions := make([]huh.Option[string], len(allLanguages))
-	for i, lang := range allLanguages {
+	langOptions := make([]huh.Option[string], len(config.AllLanguages))
+	for i, lang := range config.AllLanguages {
 		opt := huh.NewOption(lang, lang)
 		if detectedSet[lang] {
 			opt = opt.Selected(true)

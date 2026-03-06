@@ -323,7 +323,12 @@ func readDateFile(filename string) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	data, err := os.ReadFile(filepath.Join(homeDir, filename))
+	return readDateFileIn(homeDir, filename)
+}
+
+// readDateFileIn reads a date from a file in the given directory.
+func readDateFileIn(dir, filename string) (time.Time, error) {
+	data, err := os.ReadFile(filepath.Join(dir, filename))
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -339,7 +344,12 @@ func writeDateFile(filename string, t time.Time) error {
 	if err := config.EnsureHomeDir(); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(homeDir, filename), []byte(t.Format(time.RFC3339)), 0644)
+	return writeDateFileIn(homeDir, filename, t)
+}
+
+// writeDateFileIn writes a date to a file in the given directory.
+func writeDateFileIn(dir, filename string, t time.Time) error {
+	return os.WriteFile(filepath.Join(dir, filename), []byte(t.Format(time.RFC3339)), 0644)
 }
 
 // getLocalReleaseDate returns the date of our installed dev release.
@@ -353,7 +363,17 @@ func getLocalReleaseDate() (time.Time, error) {
 
 // shouldCheckNow returns true if enough time has passed since the last check.
 func shouldCheckNow() bool {
-	lastCheck, err := readDateFile(devLastCheckFile)
+	homeDir, err := config.HomeDir()
+	if err != nil {
+		return true
+	}
+	return shouldCheckNowIn(homeDir)
+}
+
+// shouldCheckNowIn returns true if enough time has passed since the last check
+// recorded in the given directory. Extracted for testability.
+func shouldCheckNowIn(dir string) bool {
+	lastCheck, err := readDateFileIn(dir, devLastCheckFile)
 	if err != nil {
 		return true
 	}
@@ -626,8 +646,12 @@ func CheckAndAutoUpdate() bool {
 		return true
 	}
 
-	// Stable version: check for new release
-	fmt.Println("[Checking for updates...]")
+	// Stable version: check for new release (throttled to devCheckInterval).
+	if !shouldCheckNow() {
+		return false
+	}
+	_ = recordLastCheck()
+
 	latestTag, err := getLatestReleaseTag()
 	if err != nil {
 		return false

@@ -183,8 +183,8 @@ func runConfigEdit(cmd *cobra.Command) error {
 	for _, l := range languages {
 		selectedSet[l] = true
 	}
-	langOptions := make([]huh.Option[string], len(allLanguages))
-	for i, lang := range allLanguages {
+	langOptions := make([]huh.Option[string], len(config.AllLanguages))
+	for i, lang := range config.AllLanguages {
 		opt := huh.NewOption(lang, lang)
 		if selectedSet[lang] {
 			opt = opt.Selected(true)

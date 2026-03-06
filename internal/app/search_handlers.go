@@ -13,9 +13,18 @@ import (
 )
 
 // Search performs a hybrid semantic + keyword search over the knowledge graph.
+// Opens graph and vector stores for the request and closes them when done.
 func (a *App) Search(query string, filters SearchFilters) (*SearchResults, error) {
-	if a.vectorStore == nil || !a.vectorStore.Available() {
-		return nil, fmt.Errorf("vector index not available; run 'codeeagle sync' first")
+	gr, closeGraph, err := a.openGraph()
+	if err != nil {
+		return nil, fmt.Errorf("search not available — %v", err)
+	}
+	defer closeGraph()
+
+	vs, closeVector := a.openVector(gr.store, gr.branch)
+	defer closeVector()
+	if vs == nil || !vs.Available() {
+		return nil, fmt.Errorf("search not available — run 'codeeagle sync' and 'codeeagle vectorindex' to build the index")
 	}
 
 	if query == "" {
@@ -54,7 +63,7 @@ func (a *App) Search(query string, filters SearchFilters) (*SearchResults, error
 
 	ctx := context.Background()
 
-	results, err := a.vectorStore.Search(ctx, query, fetchK)
+	results, err := vs.Search(ctx, query, fetchK)
 	if err != nil {
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
@@ -104,9 +113,9 @@ func (a *App) Search(query string, filters SearchFilters) (*SearchResults, error
 	}
 
 	// Hybrid keyword search + reranking.
-	keywordNodes, totalKeywords := search.KeywordSearch(ctx, a.graphStore, query)
+	keywordNodes, totalKeywords := search.KeywordSearch(ctx, gr.store, query)
 	results, keywordCounts := search.InjectKeywordResults(results, keywordNodes, typeFilter, filters.NoDocs, filters.Package, filters.Language)
-	results = search.RerankResults(ctx, a.graphStore, results, keywordCounts, totalKeywords)
+	results = search.RerankResults(ctx, gr.store, results, keywordCounts, totalKeywords)
 
 	// Apply min score filter.
 	if filters.MinScore > 0 {
@@ -163,7 +172,7 @@ func (a *App) Search(query string, filters SearchFilters) (*SearchResults, error
 		}
 	}
 
-	if meta := a.vectorStore.Meta(); meta != nil {
+	if meta := vs.Meta(); meta != nil {
 		sr.Provider = meta.Provider + "/" + meta.Model
 	}
 

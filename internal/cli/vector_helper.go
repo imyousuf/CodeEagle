@@ -142,15 +142,7 @@ func openReadOnlyVectorStore(cfg *config.Config, store *embedded.BranchStore, br
 // openAgentVectorStore opens the vector store for agent use (read-only).
 // Returns nil silently if vector search is unavailable or the index hasn't been built.
 func openAgentVectorStore(cfg *config.Config, store *embedded.BranchStore, branch string) *vectorstore.VectorStore {
-	vs, err := openReadOnlyVectorStore(cfg, store, branch, func(string, ...any) {})
-	if err != nil || vs == nil {
-		return nil
-	}
-	loaded, err := vs.Load()
-	if err != nil || !loaded {
-		vs.Close()
-		return nil
-	}
+	vs, _ := vectorstore.OpenReadOnlyWithLoad(cfg, store, branch)
 	return vs
 }
 

@@ -6,9 +6,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
-
 	"github.com/imyousuf/CodeEagle/internal/agents"
+	"github.com/imyousuf/CodeEagle/internal/vectorstore"
+	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 
 // GetAgentTypes returns the list of available AI agents.
@@ -38,19 +38,16 @@ func (a *App) GetAgentTypes() []AgentInfo {
 }
 
 // AskAgent sends a query to the specified agent asynchronously.
-// It emits Wails events: "agent:thinking", "agent:response", "agent:error".
+// Opens all required resources, runs the agent, then closes everything.
+// Emits Wails events: "agent:thinking", "agent:response", "agent:error".
 func (a *App) AskAgent(agentType, query string) error {
-	if a.llmClient == nil {
-		return fmt.Errorf("LLM provider not available; set ANTHROPIC_API_KEY or configure vertex-ai")
-	}
-
 	if query == "" {
 		return fmt.Errorf("query cannot be empty")
 	}
 
 	go func() {
 		// Emit thinking event.
-		runtime.EventsEmit(a.ctx, "agent:thinking", map[string]string{
+		a.emit("agent:thinking", map[string]string{
 			"agent": agentType,
 		})
 
@@ -58,9 +55,35 @@ func (a *App) AskAgent(agentType, query string) error {
 		a.agentMu.Lock()
 		defer a.agentMu.Unlock()
 
-		agent, err := a.createAgent(agentType)
+		// Open LLM.
+		llmClient, closeLLM, err := a.openLLM()
 		if err != nil {
-			runtime.EventsEmit(a.ctx, "agent:error", map[string]string{
+			a.emit("agent:error", map[string]string{
+				"agent": agentType,
+				"error": fmt.Sprintf("LLM not available: %v", err),
+			})
+			return
+		}
+		defer closeLLM()
+
+		// Open graph.
+		gr, closeGraph, err := a.openGraph()
+		if err != nil {
+			a.emit("agent:error", map[string]string{
+				"agent": agentType,
+				"error": fmt.Sprintf("knowledge graph not available: %v — run 'codeeagle sync' first", err),
+			})
+			return
+		}
+		defer closeGraph()
+
+		// Open vector (optional).
+		vs, closeVector := a.openVector(gr.store, gr.branch)
+		defer closeVector()
+
+		agent, err := createAgent(agentType, llmClient, gr.ctxBuilder, vs, a.repoPaths)
+		if err != nil {
+			a.emit("agent:error", map[string]string{
 				"agent": agentType,
 				"error": err.Error(),
 			})
@@ -69,14 +92,14 @@ func (a *App) AskAgent(agentType, query string) error {
 
 		resp, err := agent.Ask(context.Background(), query)
 		if err != nil {
-			runtime.EventsEmit(a.ctx, "agent:error", map[string]string{
+			a.emit("agent:error", map[string]string{
 				"agent": agentType,
 				"error": err.Error(),
 			})
 			return
 		}
 
-		runtime.EventsEmit(a.ctx, "agent:response", map[string]string{
+		a.emit("agent:response", map[string]string{
 			"agent":   agentType,
 			"content": resp,
 		})
@@ -85,21 +108,21 @@ func (a *App) AskAgent(agentType, query string) error {
 	return nil
 }
 
-// createAgent instantiates the requested agent type.
-func (a *App) createAgent(agentType string) (agents.Agent, error) {
+// createAgent instantiates the requested agent type with the given resources.
+func createAgent(agentType string, llmClient llm.Client, ctxBuilder *agents.ContextBuilder, vs *vectorstore.VectorStore, repoPaths []string) (agents.Agent, error) {
 	switch agentType {
 	case "planner":
 		var opts []agents.PlannerOption
-		if a.vectorStore != nil {
-			opts = append(opts, agents.WithVectorStore(a.vectorStore))
+		if vs != nil {
+			opts = append(opts, agents.WithVectorStore(vs))
 		}
-		return agents.NewPlanner(a.llmClient, a.ctxBuilder, a.repoPaths, opts...), nil
+		return agents.NewPlanner(llmClient, ctxBuilder, repoPaths, opts...), nil
 	case "designer":
-		return agents.NewDesigner(a.llmClient, a.ctxBuilder, a.vectorStore), nil
+		return agents.NewDesigner(llmClient, ctxBuilder, vs), nil
 	case "reviewer":
-		return agents.NewReviewer(a.llmClient, a.ctxBuilder, a.vectorStore), nil
+		return agents.NewReviewer(llmClient, ctxBuilder, vs), nil
 	case "asker":
-		return agents.NewAsker(a.llmClient, a.ctxBuilder, a.vectorStore, a.repoPaths...), nil
+		return agents.NewAsker(llmClient, ctxBuilder, vs, repoPaths...), nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %s", agentType)
 	}

@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
-	internalllm "github.com/imyousuf/CodeEagle/internal/llm"
 )
 
 func newInitCmd() *cobra.Command {
@@ -113,18 +112,9 @@ Use --interactive (-i) for a guided setup wizard with language auto-detection.`,
 	return cmd
 }
 
-// detectLLMProvider checks environment variables to auto-detect the LLM provider.
-func detectLLMProvider() (provider, hint string) {
-	if os.Getenv("ANTHROPIC_API_KEY") != "" {
-		return "anthropic", "ANTHROPIC_API_KEY set"
-	}
-	if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "" || os.Getenv("GOOGLE_CLOUD_PROJECT") != "" {
-		return "vertex-ai", "Google Cloud credentials detected"
-	}
-	if internalllm.FindClaudeCLI() != "" {
-		return "claude-cli", "Claude Code CLI detected"
-	}
-	return "anthropic", ""
+// detectLLMProvider delegates to config.DetectLLMProvider.
+func detectLLMProvider() (string, string) {
+	return config.DetectLLMProvider()
 }
 
 // isHomeDir returns true if the given directory is the user's home directory.
