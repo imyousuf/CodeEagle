@@ -14,7 +14,6 @@ import (
 const (
 	defaultOllamaBaseURL   = "http://localhost:11434"
 	defaultOllamaDocsModel = "qwen3.5:9b"
-	defaultContextWindow   = 49152
 	maxExtractRetries      = 4
 )
 
@@ -41,7 +40,7 @@ func newOllamaProvider(cfg Config) (Provider, error) {
 	}
 	contextWindow := cfg.ContextWindow
 	if contextWindow == 0 {
-		contextWindow = defaultContextWindow
+		contextWindow = DefaultContextWindow
 	}
 	return &ollamaProvider{
 		baseURL:         baseURL,

@@ -9,6 +9,13 @@ import (
 	"sync"
 )
 
+const (
+	// DefaultContextWindow is the default Ollama num_ctx value (120K tokens).
+	// qwen3.5:9b supports up to 256K; 120K covers documents up to ~336KB
+	// (estimate: 80% × 3.5 chars/token) including large PDFs.
+	DefaultContextWindow = 120000
+)
+
 // ErrExtractionSkipped is returned when topic extraction fails after max retries.
 // The file should still be indexed with raw text as fallback.
 var ErrExtractionSkipped = errors.New("extraction skipped after max retries")
@@ -54,7 +61,7 @@ type Config struct {
 	CredentialsFile string
 	// MaxImageRes is the maximum image resolution (longest edge in pixels).
 	MaxImageRes int
-	// ContextWindow is the Ollama num_ctx value (default 49152).
+	// ContextWindow is the Ollama num_ctx value (default DefaultContextWindow).
 	ContextWindow int
 	// DisableThinking appends /no_think to prompts.
 	DisableThinking bool

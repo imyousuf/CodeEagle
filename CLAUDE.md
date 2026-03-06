@@ -187,7 +187,7 @@ docs:
   # provider: ollama          # auto-detected if omitted (ollama -> vertex-ai -> disabled)
   # model: qwen3.5:9b         # Ollama model for topic extraction
   # max_image_resolution: 1024
-  # context_window: 49152
+  # context_window: 120000
   # disable_thinking: false
   exclude_extensions:
     - ".lock"

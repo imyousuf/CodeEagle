@@ -47,7 +47,7 @@ type DocsConfig struct {
 	BaseURL string `mapstructure:"base_url" yaml:"base_url,omitempty"`
 	// MaxImageRes is the maximum image resolution (longest edge in pixels) before LLM processing.
 	MaxImageRes int `mapstructure:"max_image_resolution" yaml:"max_image_resolution,omitempty"`
-	// ContextWindow is the Ollama num_ctx value (default 49152).
+	// ContextWindow is the Ollama num_ctx value. Default: docs.DefaultContextWindow (120000).
 	ContextWindow int `mapstructure:"context_window" yaml:"context_window,omitempty"`
 	// DisableThinking appends /no_think to prompts (saves tokens, may reduce quality).
 	DisableThinking bool `mapstructure:"disable_thinking" yaml:"disable_thinking,omitempty"`
@@ -432,7 +432,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("agents.auto_summarize", false)
 
 	v.SetDefault("docs.max_image_resolution", 1024)
-	v.SetDefault("docs.context_window", 49152)
+	v.SetDefault("docs.context_window", 120000) // Must match docs.DefaultContextWindow
 	v.SetDefault("docs.exclude_extensions", []string{".lock", ".min.js", ".min.css", ".map", ".wasm", ".pb.go"})
 	v.SetDefault("docs.faces.enabled", false)
 	v.SetDefault("docs.faces.model_dir", "~/.codeeagle/models/")
