@@ -26,11 +26,13 @@ type PersonStore interface {
 // FaceDetectHandler detects faces in images, runs KNN classification, and
 // assigns high-confidence matches.
 type FaceDetectHandler struct {
-	detector    *faces.Detector
-	faceStore   *faces.Store
-	personStore PersonStore
-	classifier  *faces.KNNClassifier
-	autoAccept  float64
+	detector      *faces.Detector
+	faceStore     *faces.Store
+	personStore   PersonStore
+	classifier    *faces.KNNClassifier
+	autoAccept    float64
+	bucketedIdx   *faces.BucketedIndex
+	exemplarCount int
 }
 
 // NewFaceDetectHandler creates a face detection handler.
@@ -93,7 +95,7 @@ func (h *FaceDetectHandler) Handle(_ context.Context, job *Job) (json.RawMessage
 	if h.classifier != nil {
 		exemplars, _ := h.personStore.AllExemplars()
 		if len(exemplars) > 0 {
-			h.classifyFaces(imagePath, result.Faces, exemplars)
+			h.classifyFaces(imagePath, dateResult.DateTaken, result.Faces, exemplars)
 		}
 	}
 
@@ -108,20 +110,26 @@ func (h *FaceDetectHandler) Handle(_ context.Context, job *Job) (json.RawMessage
 	return marshalFaceResult("detected", imagePath, len(result.Faces)), nil
 }
 
-func (h *FaceDetectHandler) classifyFaces(imagePath string, detectedFaces []faces.FaceRecord, exemplars []*embedded.Exemplar) {
+func (h *FaceDetectHandler) classifyFaces(imagePath string, queryDate time.Time, detectedFaces []faces.FaceRecord, exemplars []*embedded.Exemplar) {
 	// Convert exemplars to classifier format.
-	var exData []faces.ExemplarData
-	for _, e := range exemplars {
-		exData = append(exData, faces.ExemplarData{
+	exData := make([]faces.ExemplarData, len(exemplars))
+	for i, e := range exemplars {
+		exData[i] = faces.ExemplarData{
 			PersonID:  e.PersonID,
 			Embedding: e.Embedding,
 			ImagePath: e.ImagePath,
 			DateTaken: e.DateTaken,
-		})
+		}
+	}
+
+	// Rebuild bucketed index when exemplar count changes.
+	if h.bucketedIdx == nil || len(exemplars) != h.exemplarCount {
+		h.bucketedIdx = faces.BuildBucketedIndex(exData)
+		h.exemplarCount = len(exemplars)
 	}
 
 	for i, face := range detectedFaces {
-		cr := h.classifier.Classify(face.Embedding, imagePath, exData)
+		cr := h.classifier.ClassifyBucketed(face.Embedding, imagePath, queryDate, h.bucketedIdx)
 		if cr == nil || cr.Confidence < h.autoAccept {
 			continue
 		}
