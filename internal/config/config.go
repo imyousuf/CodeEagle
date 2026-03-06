@@ -73,6 +73,28 @@ type FacesConfig struct {
 	ObjectDetection bool `mapstructure:"object_detection" yaml:"object_detection,omitempty"`
 	// ObjectConfidence is the minimum confidence for object labels.
 	ObjectConfidence float64 `mapstructure:"object_confidence" yaml:"object_confidence,omitempty"`
+	// CheckpointClusters is the number of new clusters that triggers a checkpoint pause (default 10).
+	CheckpointClusters int `mapstructure:"checkpoint_clusters" yaml:"checkpoint_clusters,omitempty"`
+	// AutoAcceptThreshold is the KNN confidence above which faces are auto-assigned (default 0.55).
+	AutoAcceptThreshold float64 `mapstructure:"auto_accept_threshold" yaml:"auto_accept_threshold,omitempty"`
+	// RejectThreshold is the KNN confidence below which classifications are discarded (default 0.30).
+	RejectThreshold float64 `mapstructure:"reject_threshold" yaml:"reject_threshold,omitempty"`
+	// ClassifyK is the K value for KNN classification (default 7).
+	ClassifyK int `mapstructure:"classify_k" yaml:"classify_k,omitempty"`
+	// MaxExemplarsPerEvent caps exemplars per person per event (default 10).
+	MaxExemplarsPerEvent int `mapstructure:"max_exemplars_per_event" yaml:"max_exemplars_per_event,omitempty"`
+	// ConfidenceDecayWarning is the per-year confidence decay factor (default 0.10).
+	ConfidenceDecayWarning float64 `mapstructure:"confidence_decay_warning" yaml:"confidence_decay_warning,omitempty"`
+}
+
+// QueueConfig holds enrichment queue configuration.
+type QueueConfig struct {
+	// MaxWorkers is the maximum number of concurrent workers (0 = NumCPU/2).
+	MaxWorkers int `mapstructure:"max_workers" yaml:"max_workers,omitempty"`
+	// TargetCPU is the target CPU percentage for auto-throttle (default 70).
+	TargetCPU int `mapstructure:"target_cpu" yaml:"target_cpu,omitempty"`
+	// RetryAttempts is the maximum number of retry attempts per job (default 3).
+	RetryAttempts int `mapstructure:"retry_attempts" yaml:"retry_attempts,omitempty"`
 }
 
 // Config holds all configuration for CodeEagle.
@@ -91,6 +113,8 @@ type Config struct {
 	Agents AgentsConfig `mapstructure:"agents" yaml:"agents"`
 	// Docs contains non-code file indexing configuration.
 	Docs DocsConfig `mapstructure:"docs" yaml:"docs"`
+	// Queue contains enrichment queue configuration.
+	Queue QueueConfig `mapstructure:"queue" yaml:"queue,omitempty"`
 	// ConfigDir is the resolved .CodeEagle directory path (not persisted in YAML).
 	ConfigDir string `mapstructure:"-" yaml:"-"`
 	// ProjectConf is the parsed .CodeEagle.conf if found (not persisted).
@@ -417,6 +441,16 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("docs.faces.confidence_threshold", 0.7)
 	v.SetDefault("docs.faces.object_detection", true)
 	v.SetDefault("docs.faces.object_confidence", 0.5)
+	v.SetDefault("docs.faces.checkpoint_clusters", 10)
+	v.SetDefault("docs.faces.auto_accept_threshold", 0.55)
+	v.SetDefault("docs.faces.reject_threshold", 0.30)
+	v.SetDefault("docs.faces.classify_k", 7)
+	v.SetDefault("docs.faces.max_exemplars_per_event", 10)
+	v.SetDefault("docs.faces.confidence_decay_warning", 0.10)
+
+	v.SetDefault("queue.max_workers", 0)
+	v.SetDefault("queue.target_cpu", 70)
+	v.SetDefault("queue.retry_attempts", 3)
 }
 
 // loadEnvFile reads a .env file and sets environment variables from it.

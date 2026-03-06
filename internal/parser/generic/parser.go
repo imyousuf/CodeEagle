@@ -216,7 +216,7 @@ func (p *GenericParser) describeImage(filePath, contentHash string, content []by
 	}
 
 	// Downscale image for LLM consumption.
-	imgData, _, _, err := downscaleImage(content, mimeType, p.maxImageRes)
+	imgData, _, _, err := DownscaleImage(content, mimeType, p.maxImageRes)
 	if err != nil {
 		log.Printf("[docs] image downscale failed for %s: %v", filePath, err)
 		return nil
