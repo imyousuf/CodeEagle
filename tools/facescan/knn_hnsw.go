@@ -204,13 +204,6 @@ func benchmarkKNN(testFaces []testFaceRecord, exemplars []exemplar, k int, thres
 	}
 }
 
-// testFaceRecord is used by the benchmark to hold a test face's data.
-type testFaceRecord struct {
-	ImagePath string
-	FaceIdx   int
-	Embedding []float32
-}
-
 func fmtDuration(d time.Duration) string {
 	if d < time.Microsecond {
 		return fmt.Sprintf("%dns", d.Nanoseconds())

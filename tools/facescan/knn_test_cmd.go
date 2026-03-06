@@ -18,6 +18,7 @@ type exemplar struct {
 	Label     string
 	Embedding []float32
 	FileName  string
+	DateTaken time.Time // zero value = unknown date
 }
 
 // knnMatch is a single match in KNN results.
@@ -52,6 +53,7 @@ func cmdKNNTest(args []string) {
 	maxRes := 1600
 	benchmark := false
 	useHNSW := false
+	useBucketed := false
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -81,6 +83,8 @@ func cmdKNNTest(args []string) {
 			benchmark = true
 		case "--hnsw":
 			useHNSW = true
+		case "--bucketed":
+			useBucketed = true
 		default:
 			testDirs = append(testDirs, expandPath(args[i]))
 		}
@@ -161,7 +165,9 @@ func cmdKNNTest(args []string) {
 
 	// Step 3: Classify each test face using KNN
 	mode := "brute-force"
-	if useHNSW {
+	if useBucketed {
+		mode = "bucketed"
+	} else if useHNSW {
 		mode = "HNSW"
 	}
 	fmt.Printf("=== KNN Classification (%s) ===\n", mode)
@@ -181,13 +187,30 @@ func cmdKNNTest(args []string) {
 		fmt.Printf("  HNSW index built in %s\n\n", fmtDuration(buildTime))
 	}
 
+	// Build bucketed index if needed.
+	var bucketedIdx *bucketedIndex
+	if useBucketed || benchmark {
+		var buildTime time.Duration
+		bucketedIdx, buildTime = buildBucketedIndex(exemplars)
+		fmt.Printf("  Bucketed index built in %s (%d buckets, %d unknown)\n\n",
+			fmtDuration(buildTime), len(bucketedIdx.buckets), len(bucketedIdx.unknownBucket.Exemplars))
+	}
+
+	// Determine query date from test dirs (use first dir's folder name).
+	var queryDate time.Time
+	if len(testDirs) > 0 {
+		queryDate = parseDateFromFolderName(filepath.Base(testDirs[0]))
+	}
+
 	// Classify
 	classifiedCounts := make(map[string]int) // label → count
 	unknownCount := 0
 
 	for i := range allTestFaces {
 		var result knnResult
-		if useHNSW {
+		if useBucketed {
+			result = classifyKNNBucketed(allTestFaces[i].Embedding, allTestFaces[i].ImagePath, bucketedIdx, queryDate, k, threshold)
+		} else if useHNSW {
 			result = classifyKNNHNSW(allTestFaces[i].Embedding, allTestFaces[i].ImagePath, hnswIdx, k, threshold)
 		} else {
 			result = classifyKNN(allTestFaces[i].Embedding, allTestFaces[i].ImagePath, exemplars, k, threshold)
@@ -295,9 +318,14 @@ func cmdKNNTest(args []string) {
 				ImagePath: tf.ImagePath,
 				FaceIdx:   tf.FaceIdx,
 				Embedding: tf.Embedding,
+				QueryDate: queryDate,
 			}
 		}
-		benchmarkKNN(testRecords, exemplars, k, threshold)
+		if useBucketed {
+			benchmarkKNN3Way(testRecords, exemplars, queryDate, k, threshold)
+		} else {
+			benchmarkKNN(testRecords, exemplars, k, threshold)
+		}
 	}
 }
 

@@ -37,7 +37,7 @@ func cmdBootstrap(args []string) {
 	var labelFilter []string
 	autoAccept := float32(0.55)
 	rejectThreshold := float32(0.30)
-	maxPerPersonPerEvent := 10
+	maxPerQuarter := 50
 	k := 7
 	classifyThreshold := float32(0.35)
 	detThreshold := float32(0.5)
@@ -45,6 +45,7 @@ func cmdBootstrap(args []string) {
 	maxRes := 1600
 	dryRun := false
 	useHNSW := false
+	useBucketed := false
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -67,9 +68,9 @@ func cmdBootstrap(args []string) {
 		case "--reject":
 			i++
 			fmt.Sscanf(args[i], "%f", &rejectThreshold)
-		case "--max-per-event":
+		case "--max-per-quarter":
 			i++
-			fmt.Sscanf(args[i], "%d", &maxPerPersonPerEvent)
+			fmt.Sscanf(args[i], "%d", &maxPerQuarter)
 		case "--k":
 			i++
 			fmt.Sscanf(args[i], "%d", &k)
@@ -83,6 +84,8 @@ func cmdBootstrap(args []string) {
 			dryRun = true
 		case "--hnsw":
 			useHNSW = true
+		case "--bucketed":
+			useBucketed = true
 		default:
 			testDirs = append(testDirs, expandPath(args[i]))
 		}
@@ -148,8 +151,8 @@ func cmdBootstrap(args []string) {
 	if dryRun {
 		fmt.Println("=== DRY RUN — no exemplars will be added ===")
 	}
-	fmt.Printf("=== Bootstrapping (auto-accept=%.2f, reject=%.2f, K=%d, max/person/event=%d) ===\n\n",
-		autoAccept, rejectThreshold, k, maxPerPersonPerEvent)
+	fmt.Printf("=== Bootstrapping (auto-accept=%.2f, reject=%.2f, K=%d, max/person/quarter=%d) ===\n\n",
+		autoAccept, rejectThreshold, k, maxPerQuarter)
 
 	// Copy seed exemplars into the working pool.
 	pool := make([]exemplar, len(seedExemplars))
@@ -161,6 +164,16 @@ func cmdBootstrap(args []string) {
 	if useHNSW {
 		fmt.Println("  Using HNSW for KNN classification")
 	}
+
+	// Build bucketed index if requested. Rebuilt each event when pool grows.
+	var bucketedIdx *bucketedIndex
+	bucketedDirty := true
+	if useBucketed {
+		fmt.Println("  Using time-bucketed KNN classification")
+	}
+
+	// Per-person-per-quarter cap tracking.
+	quarterCounts := make(map[string]int)
 
 	var results []bootstrapResult
 	totalAutoAccepted := 0
@@ -205,6 +218,12 @@ func cmdBootstrap(args []string) {
 			poolDirty = false
 		}
 
+		// Rebuild bucketed index if pool changed.
+		if useBucketed && bucketedDirty {
+			bucketedIdx, _ = buildBucketedIndex(pool)
+			bucketedDirty = false
+		}
+
 		// Classify each face.
 		type classifiedFace struct {
 			face   detectedFace
@@ -213,7 +232,9 @@ func cmdBootstrap(args []string) {
 		var classified []classifiedFace
 		for _, df := range eventFaces {
 			var knnRes knnResult
-			if useHNSW && hnswIdx != nil {
+			if useBucketed && bucketedIdx != nil {
+				knnRes = classifyKNNBucketed(df.record.Embedding, df.imagePath, bucketedIdx, event.Date, k, classifyThreshold)
+			} else if useHNSW && hnswIdx != nil {
 				knnRes = classifyKNNHNSW(df.record.Embedding, df.imagePath, hnswIdx, k, classifyThreshold)
 			} else {
 				knnRes = classifyKNN(df.record.Embedding, df.imagePath, pool, k, classifyThreshold)
@@ -286,22 +307,22 @@ func cmdBootstrap(args []string) {
 			result.Accepted++
 		}
 
-		// Apply per-person-per-event cap.
+		// Apply per-person-per-quarter cap.
 		// Sort by confidence (descending) to keep the best.
 		sort.Slice(accepted, func(i, j int) bool {
 			return accepted[i].confidence > accepted[j].confidence
 		})
 
-		personCount := make(map[string]int)
 		var finalAccepted []acceptCandidate
 		for _, a := range accepted {
 			label := a.cf.result.Label
-			if personCount[label] >= maxPerPersonPerEvent {
+			qk := quarterKey(label, event.Date)
+			if quarterCounts[qk] >= maxPerQuarter {
 				result.Accepted--
 				result.Review++
 				continue
 			}
-			personCount[label]++
+			quarterCounts[qk]++
 			finalAccepted = append(finalAccepted, a)
 		}
 
@@ -315,8 +336,10 @@ func cmdBootstrap(args []string) {
 					Label:     label,
 					Embedding: a.cf.face.record.Embedding,
 					FileName:  fmt.Sprintf("%s:face_%d", a.cf.face.imagePath, a.cf.face.record.FaceIdx),
+					DateTaken: event.Date,
 				})
 				poolDirty = true
+				bucketedDirty = true
 			}
 		}
 
