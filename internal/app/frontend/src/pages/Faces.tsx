@@ -156,7 +156,7 @@ const checkpointText: React.CSSProperties = {
   margin: '0 0 10px 0',
 };
 
-const knownRelationships = ['family', 'friend', 'colleague', 'acquaintance', 'other'];
+const knownRelationships = ['child', 'spouse', 'parent', 'in-law', 'sibling', 'friend', 'colleague', 'other'];
 
 export default function Faces({ status }: FacesProps) {
   const {

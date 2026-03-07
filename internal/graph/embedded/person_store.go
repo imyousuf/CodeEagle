@@ -24,7 +24,7 @@ const (
 
 // Relationship types for persons.
 var KnownRelationships = []string{
-	"family", "friend", "colleague", "acquaintance", "other",
+	"child", "spouse", "parent", "in-law", "sibling", "friend", "colleague", "other",
 }
 
 // Person represents a recognized individual.

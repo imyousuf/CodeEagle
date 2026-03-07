@@ -7,7 +7,7 @@ import (
 
 func TestCreateGetPerson(t *testing.T) {
 	s := newTestStore(t)
-	p := &Person{Name: "Alice", Relationships: []string{"family"}}
+	p := &Person{Name: "Alice", Relationships: []string{"child"}}
 	if err := s.CreatePerson(p); err != nil {
 		t.Fatalf("CreatePerson: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestCreateGetPerson(t *testing.T) {
 	if got.Name != "Alice" {
 		t.Errorf("Name = %q, want Alice", got.Name)
 	}
-	if len(got.Relationships) != 1 || got.Relationships[0] != "family" {
+	if len(got.Relationships) != 1 || got.Relationships[0] != "child" {
 		t.Errorf("Relationships = %v", got.Relationships)
 	}
 }
