@@ -687,7 +687,7 @@ func newFacesPersonAddCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&relationship, "relationship", "", "relationship type (family, friend, colleague, acquaintance, other)")
+	cmd.Flags().StringVar(&relationship, "relationship", "", "relationship type (child, spouse, parent, in-law, sibling, friend, colleague, other)")
 	return cmd
 }
 

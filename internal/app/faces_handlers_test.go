@@ -10,7 +10,7 @@ func TestPersonInfoFields(t *testing.T) {
 	p := PersonInfo{
 		ID:            "abc",
 		Name:          "Alice",
-		Relationships: []string{"family"},
+		Relationships: []string{"child"},
 		FaceCount:     5,
 		CreatedAt:     "2024-01-01T00:00:00Z",
 	}
