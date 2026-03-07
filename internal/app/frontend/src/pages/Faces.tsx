@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useFaces } from '../hooks/useFaces';
+import Combobox from '../components/Combobox';
 import type { AppStatus } from '../types';
 
 interface FacesProps {
@@ -156,7 +157,18 @@ const checkpointText: React.CSSProperties = {
   margin: '0 0 10px 0',
 };
 
-const knownRelationships = ['child', 'spouse', 'parent', 'in-law', 'sibling', 'friend', 'colleague', 'other'];
+const knownRelationships = [
+  // Immediate family
+  'son', 'daughter', 'father', 'mother', 'brother', 'sister',
+  // Spouse
+  'husband', 'wife', 'spouse',
+  // In-laws
+  'father-in-law', 'mother-in-law', 'brother-in-law', 'sister-in-law', 'son-in-law', 'daughter-in-law',
+  // Extended family
+  'grandfather', 'grandmother', 'grandson', 'granddaughter', 'uncle', 'aunt', 'nephew', 'niece', 'cousin',
+  // Other
+  'friend', 'colleague', 'neighbor', 'other',
+];
 
 export default function Faces({ status }: FacesProps) {
   const {
@@ -277,16 +289,13 @@ export default function Faces({ status }: FacesProps) {
           style={inputStyle}
           onKeyDown={e => e.key === 'Enter' && handleCreate()}
         />
-        <select
+        <Combobox
+          options={knownRelationships}
           value={newRel}
-          onChange={e => setNewRel(e.target.value)}
+          onChange={setNewRel}
+          placeholder="Relationship (optional)"
           style={selectStyle}
-        >
-          <option value="">Relationship (optional)</option>
-          {knownRelationships.map(r => (
-            <option key={r} value={r}>{r}</option>
-          ))}
-        </select>
+        />
         <button
           style={creating || !newName.trim() ? { ...btnPrimary, opacity: 0.5 } : btnPrimary}
           disabled={creating || !newName.trim()}
