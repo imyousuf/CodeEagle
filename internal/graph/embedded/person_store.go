@@ -24,7 +24,16 @@ const (
 
 // Relationship types for persons.
 var KnownRelationships = []string{
-	"child", "spouse", "parent", "in-law", "sibling", "friend", "colleague", "other",
+	// Immediate family
+	"son", "daughter", "father", "mother", "brother", "sister",
+	// Spouse
+	"husband", "wife", "spouse",
+	// In-laws
+	"father-in-law", "mother-in-law", "brother-in-law", "sister-in-law", "son-in-law", "daughter-in-law",
+	// Extended family
+	"grandfather", "grandmother", "grandson", "granddaughter", "uncle", "aunt", "nephew", "niece", "cousin",
+	// Other
+	"friend", "colleague", "neighbor", "other",
 }
 
 // Person represents a recognized individual.
