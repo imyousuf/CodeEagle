@@ -118,3 +118,161 @@ func TestShouldCheckNowIn_ExactBoundary(t *testing.T) {
 		t.Error("shouldCheckNowIn() = false at exact boundary, want true")
 	}
 }
+
+func TestShouldUpdateDevDates(t *testing.T) {
+	now := time.Now()
+	hourAgo := now.Add(-1 * time.Hour)
+	dayAgo := now.Add(-24 * time.Hour)
+	hourLater := now.Add(1 * time.Hour)
+
+	tests := []struct {
+		name       string
+		remoteDate time.Time
+		localDate  time.Time
+		binModTime time.Time
+		want       bool
+	}{
+		{
+			name:       "remote newer than both local and binary",
+			remoteDate: hourLater,
+			localDate:  dayAgo,
+			binModTime: hourAgo,
+			want:       true,
+		},
+		{
+			name:       "remote newer than local but older than binary (local build)",
+			remoteDate: hourAgo,
+			localDate:  dayAgo,
+			binModTime: now,
+			want:       false,
+		},
+		{
+			name:       "remote older than local date",
+			remoteDate: dayAgo,
+			localDate:  hourAgo,
+			binModTime: hourAgo,
+			want:       false,
+		},
+		{
+			name:       "remote equal to local date",
+			remoteDate: now,
+			localDate:  now,
+			binModTime: hourAgo,
+			want:       false,
+		},
+		{
+			name:       "remote equal to binary mtime",
+			remoteDate: now,
+			localDate:  dayAgo,
+			binModTime: now,
+			want:       false,
+		},
+		{
+			name:       "zero binary mtime skips binary check",
+			remoteDate: hourAgo,
+			localDate:  dayAgo,
+			binModTime: time.Time{},
+			want:       true,
+		},
+		{
+			name:       "zero binary mtime but remote older than local",
+			remoteDate: dayAgo,
+			localDate:  hourAgo,
+			binModTime: time.Time{},
+			want:       false,
+		},
+		{
+			name:       "zero local date with newer remote and older binary",
+			remoteDate: now,
+			localDate:  time.Time{},
+			binModTime: dayAgo,
+			want:       true,
+		},
+		{
+			name:       "zero local date with newer binary than remote",
+			remoteDate: hourAgo,
+			localDate:  time.Time{},
+			binModTime: now,
+			want:       false,
+		},
+		{
+			name:       "both zero — remote is after zero time",
+			remoteDate: now,
+			localDate:  time.Time{},
+			binModTime: time.Time{},
+			want:       true,
+		},
+		{
+			name:       "stale release-date file but fresh binary (the bug scenario)",
+			remoteDate: now.Add(-30 * time.Minute),
+			localDate:  dayAgo,
+			binModTime: now,
+			want:       false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldUpdateDevDates(tt.remoteDate, tt.localDate, tt.binModTime)
+			if got != tt.want {
+				t.Errorf("shouldUpdateDevDates() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadUpdateConfigFrom_Defaults(t *testing.T) {
+	dir := t.TempDir()
+	// No update.yaml exists — should return defaults.
+	cfg := loadUpdateConfigFrom(filepath.Join(dir, "update.yaml"))
+	if !cfg.AutoUpdateDev {
+		t.Error("default AutoUpdateDev should be true")
+	}
+	if cfg.Disabled {
+		t.Error("default Disabled should be false")
+	}
+}
+
+func TestLoadUpdateConfigFrom_DisableAutoUpdate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "update.yaml")
+	if err := os.WriteFile(path, []byte("auto_update_dev: false\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := loadUpdateConfigFrom(path)
+	if cfg.AutoUpdateDev {
+		t.Error("AutoUpdateDev should be false from config file")
+	}
+	if cfg.Disabled {
+		t.Error("Disabled should remain false (not set in file)")
+	}
+}
+
+func TestLoadUpdateConfigFrom_DisableAll(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "update.yaml")
+	if err := os.WriteFile(path, []byte("auto_update_dev: false\ndisabled: true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := loadUpdateConfigFrom(path)
+	if cfg.AutoUpdateDev {
+		t.Error("AutoUpdateDev should be false")
+	}
+	if !cfg.Disabled {
+		t.Error("Disabled should be true")
+	}
+}
+
+func TestLoadUpdateConfigFrom_CorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "update.yaml")
+	if err := os.WriteFile(path, []byte("{{invalid yaml"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := loadUpdateConfigFrom(path)
+	if !cfg.AutoUpdateDev {
+		t.Error("corrupt file should return default AutoUpdateDev=true")
+	}
+}
