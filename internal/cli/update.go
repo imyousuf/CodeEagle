@@ -380,8 +380,23 @@ func shouldCheckNowIn(dir string) bool {
 	return time.Since(lastCheck) >= devCheckInterval
 }
 
+// shouldUpdateDevDates returns true if the remote release date is strictly newer
+// than both the local release date and the binary modification time.
+// A zero binModTime is treated as unavailable (skipped).
+func shouldUpdateDevDates(remoteDate, localDate, binModTime time.Time) bool {
+	if !remoteDate.After(localDate) {
+		return false
+	}
+	if !binModTime.IsZero() && !remoteDate.After(binModTime) {
+		return false
+	}
+	return true
+}
+
 // shouldAutoUpdateDev checks if we should update the dev version.
 // Returns true if an update is needed, along with the release info.
+// Compares the remote release date against both the recorded release date
+// and the binary modification time — if either is newer, skip the update.
 func shouldAutoUpdateDev() (bool, *githubRelease) {
 	if !shouldCheckNow() {
 		return false, nil
@@ -393,12 +408,13 @@ func shouldAutoUpdateDev() (bool, *githubRelease) {
 	}
 
 	localDate, _ := getLocalReleaseDate()
+	binTime, _ := getBinaryModTime()
 
-	if release.PublishedAt.After(localDate) {
-		return true, release
+	if !shouldUpdateDevDates(release.PublishedAt, localDate, binTime) {
+		return false, nil
 	}
 
-	return false, nil
+	return true, release
 }
 
 // recordDevUpdate stores the release's published date after a successful update.
@@ -576,23 +592,27 @@ func copyFile(src, dst string) error {
 // loadUpdateConfig reads update configuration from ~/.CodeEagle/update.yaml.
 // Returns defaults if the file doesn't exist.
 func loadUpdateConfig() updateConfig {
+	homeDir, err := config.HomeDir()
+	if err != nil {
+		return updateConfig{AutoUpdateDev: true}
+	}
+	return loadUpdateConfigFrom(filepath.Join(homeDir, "update.yaml"))
+}
+
+// loadUpdateConfigFrom reads update configuration from the given path.
+// Returns defaults if the file doesn't exist or is invalid.
+func loadUpdateConfigFrom(path string) updateConfig {
 	cfg := updateConfig{
 		AutoUpdateDev: true,
 		Disabled:      false,
 	}
 
-	homeDir, err := config.HomeDir()
-	if err != nil {
-		return cfg
-	}
-
-	configPath := filepath.Join(homeDir, "update.yaml")
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return cfg
 	}
 
 	v := viper.New()
-	v.SetConfigFile(configPath)
+	v.SetConfigFile(path)
 	v.SetDefault("auto_update_dev", true)
 	v.SetDefault("disabled", false)
 
