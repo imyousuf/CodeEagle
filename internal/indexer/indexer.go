@@ -131,11 +131,24 @@ func (idx *Indexer) toRelativePath(absPath string) string {
 }
 
 // IndexFile parses a single file and updates the knowledge graph.
+// It uses the file's modification time as the UpdatedAt timestamp.
 // filePath must be an absolute path (for reading from disk). It is converted
 // to a relative path (relative to repo roots) before passing to the parser
 // and graph store.
 // If no parser is registered for the file extension, it silently returns nil.
 func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return fmt.Errorf("stat file %s: %w", filePath, err)
+	}
+	return idx.IndexFileWithTimestamp(ctx, filePath, info.ModTime())
+}
+
+// IndexFileWithTimestamp parses a single file and updates the knowledge graph
+// using the provided timestamp as UpdatedAt for all nodes.
+// filePath must be an absolute path. It is converted to a relative path before
+// passing to the parser and graph store.
+func (idx *Indexer) IndexFileWithTimestamp(ctx context.Context, filePath string, updatedAt time.Time) error {
 	p, ok := idx.registry.ParserForFile(filePath)
 	if !ok {
 		return nil // no parser for this file
@@ -166,8 +179,9 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
 		return fmt.Errorf("delete old nodes for %s: %w", relPath, err)
 	}
 
-	// Add new nodes.
+	// Add new nodes with UpdatedAt timestamp.
 	for _, node := range result.Nodes {
+		node.UpdatedAt = updatedAt
 		if err := idx.store.AddNode(ctx, node); err != nil {
 			return fmt.Errorf("add node %s: %w", node.ID, err)
 		}
@@ -177,6 +191,19 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
 	for _, edge := range result.Edges {
 		if err := idx.store.AddEdge(ctx, edge); err != nil {
 			return fmt.Errorf("add edge %s: %w", edge.ID, err)
+		}
+	}
+
+	// Create date hierarchy nodes and UpdatedOn edge for the file node.
+	for _, node := range result.Nodes {
+		if isFileTypeNode(node.Type) {
+			if err := DeleteUpdatedOnEdges(ctx, idx.store, node.ID); err != nil {
+				idx.log("Warning: delete UpdatedOn edges for %s: %v", node.ID, err)
+			}
+			if err := EnsureDateNodes(ctx, idx.store, updatedAt, node.ID); err != nil {
+				idx.log("Warning: create date nodes for %s: %v", node.ID, err)
+			}
+			break
 		}
 	}
 
@@ -231,7 +258,7 @@ func (idx *Indexer) IndexDirectory(ctx context.Context, dirPath string) error {
 			return nil
 		}
 
-		if err := idx.IndexFile(ctx, path); err != nil {
+		if err := idx.IndexFileWithTimestamp(ctx, path, info.ModTime()); err != nil {
 			idx.mu.Lock()
 			idx.errors = append(idx.errors, fmt.Sprintf("%s: %v", path, err))
 			idx.mu.Unlock()
@@ -319,7 +346,7 @@ func (idx *Indexer) Start(ctx context.Context) error {
 func (idx *Indexer) handleEvent(ctx context.Context, evt watcher.Event) {
 	switch evt.Op {
 	case watcher.Create, watcher.Write:
-		if err := idx.IndexFile(ctx, evt.Path); err != nil {
+		if err := idx.IndexFileWithTimestamp(ctx, evt.Path, time.Now()); err != nil {
 			idx.mu.Lock()
 			idx.errors = append(idx.errors, fmt.Sprintf("index %s: %v", evt.Path, err))
 			idx.mu.Unlock()
