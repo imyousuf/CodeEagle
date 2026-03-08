@@ -3,6 +3,7 @@ package graph
 import (
 	"crypto/sha256"
 	"fmt"
+	"time"
 )
 
 // NodeType represents the kind of entity in the knowledge graph.
@@ -37,6 +38,9 @@ const (
 	NodeDirectory    NodeType = "Directory"
 	NodeTopic        NodeType = "Topic"
 	NodePerson       NodeType = "Person"
+	NodeYear         NodeType = "Year"
+	NodeMonth        NodeType = "Month"
+	NodeDate         NodeType = "Date"
 )
 
 // Well-known property keys used for architectural classification.
@@ -75,6 +79,7 @@ const (
 	EdgeConfigures EdgeType = "Configures"
 	EdgeHasTopic   EdgeType = "HasTopic"
 	EdgeAppearsIn  EdgeType = "AppearsIn"
+	EdgeUpdatedOn  EdgeType = "UpdatedOn"
 )
 
 // Node represents a source code or documentation entity in the knowledge graph.
@@ -93,6 +98,7 @@ type Node struct {
 	DocComment    string             `json:"doc_comment,omitempty"`
 	Properties    map[string]string  `json:"properties,omitempty"`
 	Metrics       map[string]float64 `json:"metrics,omitempty"`
+	UpdatedAt     time.Time          `json:"updated_at,omitempty"`
 }
 
 // Edge represents a relationship between two nodes in the knowledge graph.

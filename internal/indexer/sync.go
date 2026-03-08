@@ -28,13 +28,23 @@ func SyncFiles(ctx context.Context, idx *Indexer, paths []string, configDir stri
 	// Migrate legacy flat state to branch-aware on first load.
 	state.MigrateLegacy(branch)
 
+	// Auto-backpop UpdatedAt for existing nodes that lack it.
+	if needsUpdatedAtBackpop(ctx, idx.Store()) {
+		count, err := BackpopUpdatedAt(ctx, idx.Store(), paths, idx.log)
+		if err != nil {
+			idx.log("Warning: UpdatedAt backpop: %v", err)
+		} else if count > 0 {
+			idx.log("Backpopulated UpdatedAt for %d file nodes", count)
+		}
+	}
+
 	for _, repoPath := range paths {
 		if isGitRepo(repoPath) {
 			if err := syncGitRepo(ctx, idx, repoPath, state, full, branch); err != nil {
 				return fmt.Errorf("sync git repo %s: %w", repoPath, err)
 			}
 		} else {
-			if err := syncDirectory(ctx, idx, repoPath, state, full); err != nil {
+			if err := syncDirectory(ctx, idx, repoPath, state, full, statePath); err != nil {
 				return fmt.Errorf("sync directory %s: %w", repoPath, err)
 			}
 		}
@@ -101,10 +111,11 @@ func syncGitRepo(ctx context.Context, idx *Indexer, repoPath string, state *Sync
 				}
 			}
 
-			// Re-index added and modified files.
+			// Re-index added and modified files with current sync time.
+			syncTime := time.Now()
 			for _, relPath := range append(added, modified...) {
 				absPath := filepath.Join(repoPath, relPath)
-				if err := idx.IndexFile(ctx, absPath); err != nil {
+				if err := idx.IndexFileWithTimestamp(ctx, absPath, syncTime); err != nil {
 					idx.log("Warning: index file %s: %v", absPath, err)
 				}
 			}
@@ -119,7 +130,7 @@ func syncGitRepo(ctx context.Context, idx *Indexer, repoPath string, state *Sync
 // syncDirectory performs mtime-based sync for a non-git directory.
 // State tracking uses relative paths (relative to repo roots) so the state
 // file is portable across machines.
-func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *SyncState, full bool) error {
+func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *SyncState, full bool, statePath string) error {
 	if full {
 		if idx.verbose {
 			idx.log("Full index of %s (non-git)", dirPath)
@@ -142,6 +153,10 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 	// Track which relative paths still exist.
 	existing := make(map[string]struct{})
 
+	// Periodic save: save sync state every N files to avoid losing progress on crash.
+	const saveInterval = 10
+	filesSinceLastSave := 0
+
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -161,11 +176,27 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 		modTime := info.ModTime()
 
 		prevTime, hasPrev := state.FileTimes[relPath]
+		if !hasPrev {
+			// No sync state for this file — check DB for existing UpdatedAt
+			// to avoid re-indexing unchanged files on first walk.
+			// Check all file-type node types (File, Document, TestFile, etc.).
+			if hasMatchingUpdatedAt(ctx, idx.Store(), relPath, modTime) {
+				state.FileTimes[relPath] = modTime
+				return nil
+			}
+		}
 		if !hasPrev || modTime.After(prevTime) {
-			if err := idx.IndexFile(ctx, path); err != nil {
+			if err := idx.IndexFileWithTimestamp(ctx, path, modTime); err != nil {
 				idx.log("Warning: index file %s: %v", path, err)
 			}
 			state.FileTimes[relPath] = modTime
+		}
+
+		// Periodically save sync state to avoid losing progress on crash.
+		filesSinceLastSave++
+		if statePath != "" && filesSinceLastSave >= saveInterval {
+			_ = state.Save(statePath)
+			filesSinceLastSave = 0
 		}
 
 		return nil
