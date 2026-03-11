@@ -10,12 +10,15 @@ It supports monorepos, multi-repo setups, and multi-language codebases (Go, Pyth
 - **15 language parsers**: Go (stdlib AST), Python, TypeScript, JavaScript, Java, Rust, C# (with ASP.NET), Ruby (with Rails), HTML, Markdown, Makefile, Shell, Terraform, YAML, plus a manifest parser (go.mod, package.json, pyproject.toml, requirements.txt)
 - **Document format extraction**: Text extraction from DOCX, PPTX, XLSX, ODT, ODS, ODP (pure Go, stdlib only) and PDF (`dslipak/pdf`). Documents are indexed, topic-extracted via LLM, and semantically searchable
 - **Non-code file indexing**: Changelogs, design docs, CSVs, images, config templates — all indexed as Document nodes with optional LLM-based topic extraction and image description
+- **Face detection & recognition** (optional, `-tags faces`): OpenCV DNN-based face detection with 128-dim embeddings, agglomerative clustering, KNN classification, person management, and EXIF metadata extraction
 - **Cross-service dependency analysis**: API endpoint extraction, HTTP client call detection, import-to-manifest linking, cross-file interface implements resolution
 - **Test coverage mapping**: automatic test file/function detection across 8 languages with `EdgeTests` linking to source counterparts
 - **Code quality metrics**: cyclomatic complexity, lines of code, TODO/FIXME counts
 - **Graph analysis queries**: unused code detection and test coverage reporting
 - **AI agents** for planning, design, code review, and freeform Q&A — read-only, advisory, never modify code
+- **Temporal tracking**: Every file node records `UpdatedAt` with Year/Month/Date graph nodes for date-based queries (e.g., "files modified in March 2024")
 - **Git-aware incremental sync** with branch tracking and diff-based updates
+- **Smart non-git sync**: Skips unchanged files by comparing mtime against DB, with crash-resilient periodic state saving
 - **MCP server** for integration with Claude Code and other MCP-compatible tools
 - **LLM auto-summarization** of services and architectural patterns
 
@@ -54,7 +57,9 @@ Or clone and build:
 ```bash
 git clone https://github.com/imyousuf/CodeEagle.git
 cd CodeEagle
-make build
+make build           # Auto-detects OpenCV for face support
+make build-faces     # Explicitly enable face detection (requires libopencv-dev)
+make build-minimal   # Skip face detection
 # Binary: bin/codeeagle
 ```
 
@@ -108,9 +113,20 @@ codeeagle metrics [--file F] [--type T]     Show code quality metrics
 codeeagle mcp serve                         Start MCP server (stdio transport)
 codeeagle hook install                      Install git post-commit hook for auto-sync
 
+codeeagle faces scan [dirs...]              Detect, cluster, assign faces in images
+codeeagle faces clusters                    View/manage face clusters
+codeeagle faces label <id> <name>           Assign person name to a cluster
+codeeagle faces search <query>              Search by person or image
+codeeagle faces merge/split                 Merge or split face clusters
+codeeagle faces unlabeled                   Show unassigned clusters
+codeeagle faces suggest                     Auto-suggest face assignments
+codeeagle faces person [...]                Person CRUD (add, list, edit, delete)
+
 codeeagle version                           Print version, commit, build date
 codeeagle update [--check] [--force]        Check for and install updates
 ```
+
+> **Note:** `codeeagle faces` commands require building with `-tags faces` and OpenCV 4 (`libopencv-dev`).
 
 Global flags: `--config <path>`, `--db-path <path>`, `-p <project-name>`, `-v` (verbose).
 
@@ -215,6 +231,9 @@ codeeagle -p my-project status
 | Topic | Extracted topic from document content (via LLM) |
 | Person | Named person (from face detection, requires `-tags faces` build) |
 | AIGuideline | AI-related guideline files (CLAUDE.md, etc.) |
+| Year | Calendar year node (e.g., "2024") — part of date hierarchy |
+| Month | Calendar month node (e.g., "2024-03") — part of date hierarchy |
+| Date | Calendar date node (e.g., "2024-03-15") — part of date hierarchy |
 
 ### Edge Types
 
@@ -233,6 +252,7 @@ codeeagle -p my-project status
 | Migrates | Migration file migrates a schema |
 | HasTopic | Document has an extracted topic |
 | AppearsIn | Person appears in an image |
+| UpdatedOn | File node linked to its last-modified Date node |
 | References | General cross-reference |
 | Embeds | Struct embeds another type |
 
@@ -299,7 +319,9 @@ codeeagle/
 │   ├── llm/               LLM provider implementations
 │   ├── mcp/               MCP server (JSON-RPC over stdio)
 │   ├── metrics/            Code quality metric calculators
-│   ├── linker/             Cross-service linker (8 phases: services, endpoints, API calls, deps, imports, implements, tests, documents)
+│   ├── linker/             Cross-service linker (9 phases: services, endpoints, API calls, deps, imports, implements, tests, calls, documents)
+│   ├── faces/              Face detection & recognition (OpenCV DNN, clustering, KNN classification)
+│   ├── queue/              Async job queue (face detection, clustering, document enrichment)
 │   ├── parser/             Language parsers + generic fallback (document formats, images, text files)
 │   └── watcher/            Filesystem watcher (fsnotify)
 └── pkg/llm/               Public LLM client interface + provider registry

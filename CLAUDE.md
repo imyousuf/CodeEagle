@@ -42,6 +42,7 @@ Build and maintain a rich knowledge graph that captures:
 - `CONFIGURES` — config file -> service/deployment
 - `HAS_TOPIC` — document -> extracted topic (via LLM)
 - `APPEARS_IN` — person -> image
+- `UPDATED_ON` — file -> date node (Year/Month/Date hierarchy)
 
 **Code Quality Metrics** (attached to graph nodes)
 - Cyclomatic complexity per function
@@ -58,6 +59,10 @@ Build and maintain a rich knowledge graph that captures:
 - Support git-aware change detection (branch tracking, diff-based updates)
 - Handle multi-language codebases: Go, Python, TypeScript, JavaScript, Java, Rust, C#, Ruby, HTML, Markdown, Makefile, Shell, Terraform, YAML, and extensible to others
 - Respect `.gitignore` and configurable exclude patterns
+- **Temporal tracking**: Every node records `UpdatedAt` (file modification time). Year/Month/Date nodes form a date hierarchy linked via `UpdatedOn` edges, enabling queries like "files modified in March 2024"
+- **Smart sync for non-git directories**: Skips unchanged files by comparing file mtime against DB's `UpdatedAt`, avoiding brute-force re-indexing
+- **Auto-backpop**: On first sync after upgrade, automatically populates `UpdatedAt` for existing nodes from file mtimes
+- **Crash-resilient sync state**: Sync state is saved periodically (every 10 files) during directory walks to minimize progress loss on interruption
 
 ### 3. CLI Interface
 
@@ -85,6 +90,16 @@ codeeagle rag <query>                   # Semantic search over the knowledge gra
 codeeagle backpop [--all]               # Run linker phases on existing graph
 codeeagle metrics [service|file|func]   # Show code quality metrics
 codeeagle mcp serve                     # Start MCP server (stdio transport)
+
+codeeagle faces scan [dirs...]         # Detect, cluster, and assign faces in images
+codeeagle faces clusters               # View face clusters
+codeeagle faces label <id> <name>      # Assign person name to a cluster
+codeeagle faces search <query>         # Search by person or image
+codeeagle faces merge <ids...>         # Merge face clusters
+codeeagle faces split <id> [...]       # Split a face cluster
+codeeagle faces unlabeled              # Show unassigned clusters
+codeeagle faces suggest                # Auto-suggest face assignments
+codeeagle faces person [...]           # Person CRUD (add, list, edit, delete)
 
 codeeagle version                       # Print version, commit, build date
 codeeagle update [--check] [--force]    # Check for and install updates
@@ -211,7 +226,7 @@ codeeagle/
 │   ├── graph/              # Knowledge graph interface + embedded store (BadgerDB)
 │   ├── indexer/            # Orchestrates parsing -> graph updates + LLM summarization
 │   ├── docs/               # Document content extraction providers (Ollama, Vertex AI) with topic extraction + caching
-│   ├── linker/             # Cross-service linker (8 phases: services, endpoints, API calls, deps, imports, implements, tests, documents)
+│   ├── linker/             # Cross-service linker (9 phases: services, endpoints, API calls, deps, imports, implements, tests, calls, documents)
 │   ├── llm/                # LLM provider implementations (Anthropic, Vertex AI, Claude CLI)
 │   ├── mcp/                # MCP server (JSON-RPC over stdio)
 │   ├── metrics/            # Code quality metric calculators
@@ -233,6 +248,8 @@ codeeagle/
 │   │   ├── yaml/           # YAML parser (GHA, Ansible, generic)
 │   │   ├── generic/        # Generic fallback parser for non-code files (text, images, directories, document formats)
 │   │   └── manifest/       # Manifest parser (go.mod, package.json, pyproject.toml, requirements.txt)
+│   ├── faces/              # Face detection & recognition (OpenCV DNN, Caffe SSD + ONNX SFace, agglomerative clustering, KNN classification)
+│   ├── queue/              # Async job queue with worker pool (face detection, clustering, document enrichment)
 │   └── watcher/            # Filesystem watcher (fsnotify + gitignore)
 ├── pkg/llm/                # Public LLM client interface + provider registry
 ├── testdata/               # Test fixtures
@@ -250,7 +267,10 @@ codeeagle/
 - **Go AST Parsing:** stdlib `go/ast`, `go/parser`, `go/types`
 - **Tree-sitter:** for Python, TypeScript, JavaScript, Java, Rust, C#, Ruby, Shell, Terraform parsing (via `github.com/smacker/go-tree-sitter` bindings)
 - **Document Extraction:** OOXML/ODF via stdlib `archive/zip` + `encoding/xml`; PDF via `github.com/dslipak/pdf` (pure Go)
-- **Graph Storage:** Embedded (BadgerDB with secondary indexes), branch-aware with fallback reads
+- **Image Processing:** Downscaling (aspect-ratio preserving, max 1024px), LLM-based image description (Ollama/Vertex AI)
+- **Face Detection:** OpenCV DNN (Caffe SSD detector + ONNX SFace recognizer) via `gocv.io/x/gocv`; 128-dim L2-normalized embeddings; requires `-tags faces` build and `libopencv-dev`
+- **Face Classification:** KNN-based with temporal decay, agglomerative hierarchical clustering, majority voting, auto-assignment at high confidence
+- **Graph Storage:** Embedded (BadgerDB with secondary indexes), branch-aware with fallback reads; separate face.db for face embeddings/clusters
 - **LLM Integration:** Anthropic API (direct) + Vertex AI (Claude & Gemini on GCP), extensible to others
 - **Config:** viper (YAML config loading)
 - **Testing:** stdlib `testing` + testify
