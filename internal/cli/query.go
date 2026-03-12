@@ -86,6 +86,7 @@ func newQueryCmd() *cobra.Command {
 	cmd.AddCommand(newQueryEdgesCmd())
 	cmd.AddCommand(newQueryUnusedCmd())
 	cmd.AddCommand(newQueryCoverageCmd())
+	cmd.AddCommand(newQueryDuplicatesCmd())
 
 	return cmd
 }

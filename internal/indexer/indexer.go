@@ -174,6 +174,39 @@ func (idx *Indexer) IndexFileWithTimestamp(ctx context.Context, filePath string,
 	classifier := parser.NewClassifier()
 	result = classifier.Classify(result)
 
+	// Inject content_hash and mime_type into file-type nodes that lack them.
+	contentHash := computeContentHash(content)
+	mimeType := detectMIMEType(relPath)
+	for _, node := range result.Nodes {
+		if isFileTypeNode(node.Type) && node.Type != graph.NodeDirectory {
+			if node.Properties == nil {
+				node.Properties = make(map[string]string)
+			}
+			if node.Properties[graph.PropContentHash] == "" {
+				node.Properties[graph.PropContentHash] = contentHash
+			}
+			if node.Properties[graph.PropMimeType] == "" {
+				node.Properties[graph.PropMimeType] = mimeType
+			}
+		}
+	}
+
+	// Detect symlinks and record the target path.
+	if linfo, lerr := os.Lstat(filePath); lerr == nil && linfo.Mode()&os.ModeSymlink != 0 {
+		if target, eerr := filepath.EvalSymlinks(filePath); eerr == nil {
+			relTarget := idx.toRelativePath(target)
+			for _, node := range result.Nodes {
+				if isFileTypeNode(node.Type) && node.Type != graph.NodeDirectory {
+					if node.Properties == nil {
+						node.Properties = make(map[string]string)
+					}
+					node.Properties[graph.PropSymlinkTarget] = relTarget
+					break
+				}
+			}
+		}
+	}
+
 	// Delete old nodes for this file to support incremental updates.
 	if err := idx.store.DeleteByFile(ctx, relPath); err != nil {
 		return fmt.Errorf("delete old nodes for %s: %w", relPath, err)
@@ -222,13 +255,11 @@ func (idx *Indexer) IndexFileWithTimestamp(ctx context.Context, filePath string,
 
 // IndexDirectory walks a directory tree and indexes all supported files.
 func (idx *Indexer) IndexDirectory(ctx context.Context, dirPath string) error {
-	if idx.verbose {
-		idx.log("Scanning directory: %s", dirPath)
-	}
-
-	dirStart := time.Now()
-	startFiles := idx.filesIndexed
-	fileCount := 0
+	// Pre-scan to count indexable files for progress reporting.
+	idx.log("Indexing %s: counting files...", dirPath)
+	totalFiles := idx.countIndexableFiles(dirPath)
+	idx.log("Indexing %s: %d files to process", dirPath, totalFiles)
+	progress := newSyncProgress(totalFiles, "index", idx.log)
 
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -265,21 +296,37 @@ func (idx *Indexer) IndexDirectory(ctx context.Context, dirPath string) error {
 			// Continue indexing other files.
 		}
 
-		fileCount++
-		if idx.verbose && fileCount%100 == 0 {
-			idx.log("  Progress: %d files indexed...", fileCount)
-		}
+		progress.tickIndexed()
 
 		return nil
 	})
 
-	if idx.verbose {
-		elapsed := time.Since(dirStart)
-		newFiles := idx.filesIndexed - startFiles
-		idx.log("  Directory complete: %s (%d files indexed in %s)", dirPath, newFiles, elapsed)
-	}
+	elapsed := time.Since(progress.startTime).Round(time.Second)
+	idx.log("Indexing %s: complete (%d files in %s)", dirPath, progress.indexed, elapsed)
 
 	return err
+}
+
+// countIndexableFiles counts files in a directory tree, respecting exclude patterns.
+func (idx *Indexer) countIndexableFiles(dirPath string) int {
+	count := 0
+	_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			if idx.matcher.Match(path) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if idx.matcher.Match(path) {
+			return nil
+		}
+		count++
+		return nil
+	})
+	return count
 }
 
 // Start performs an initial full index of all configured paths, then starts

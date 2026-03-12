@@ -38,6 +38,20 @@ func SyncFiles(ctx context.Context, idx *Indexer, paths []string, configDir stri
 		}
 	}
 
+	// Auto-backpop content_hash for existing nodes that lack it.
+	if !state.ContentHashBackpopDone {
+		count, err := BackpopContentHash(ctx, idx.Store(), paths, idx.log)
+		if err != nil {
+			idx.log("Warning: content_hash backpop: %v", err)
+		} else {
+			if count > 0 {
+				idx.log("Backpopulated content_hash for %d file nodes", count)
+			}
+			state.ContentHashBackpopDone = true
+			_ = state.Save(statePath)
+		}
+	}
+
 	for _, repoPath := range paths {
 		if isGitRepo(repoPath) {
 			if err := syncGitRepo(ctx, idx, repoPath, state, full, branch); err != nil {
@@ -150,6 +164,12 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 		state.FileTimes = make(map[string]time.Time)
 	}
 
+	// Pre-scan to count total files for progress reporting.
+	idx.log("Sync %s: counting files...", dirPath)
+	totalFiles := countWalkableFiles(dirPath)
+	idx.log("Sync %s: %d files to process", dirPath, totalFiles)
+	progress := newSyncProgress(totalFiles, "sync", idx.log)
+
 	// Track which relative paths still exist.
 	existing := make(map[string]struct{})
 
@@ -176,21 +196,21 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 		modTime := info.ModTime()
 
 		prevTime, hasPrev := state.FileTimes[relPath]
-		if !hasPrev {
-			// No sync state for this file — check DB for existing UpdatedAt
-			// to avoid re-indexing unchanged files on first walk.
-			// Check all file-type node types (File, Document, TestFile, etc.).
-			if hasMatchingUpdatedAt(ctx, idx.Store(), relPath, modTime) {
-				state.FileTimes[relPath] = modTime
-				return nil
-			}
-		}
-		if !hasPrev || modTime.After(prevTime) {
+		didIndex := false
+		if hasPrev && !modTime.After(prevTime) {
+			// Unchanged per state — skip.
+		} else if !hasPrev && hasMatchingUpdatedAt(ctx, idx.Store(), relPath, modTime) {
+			// Unchanged per DB — skip.
+			state.FileTimes[relPath] = modTime
+		} else {
 			if err := idx.IndexFileWithTimestamp(ctx, path, modTime); err != nil {
 				idx.log("Warning: index file %s: %v", path, err)
 			}
 			state.FileTimes[relPath] = modTime
+			didIndex = true
 		}
+
+		progress.tick(didIndex)
 
 		// Periodically save sync state to avoid losing progress on crash.
 		filesSinceLastSave++
