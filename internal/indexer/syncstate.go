@@ -21,6 +21,10 @@ type SyncState struct {
 	LastImportTime time.Time `json:"last_import_time,omitempty"`
 	// FileTimes records file modification times for non-git directories.
 	FileTimes map[string]time.Time `json:"file_times,omitempty"`
+	// FileHashes records content hashes for non-git directory files.
+	// Used to detect duplicates during sync and skip re-indexing when
+	// content hasn't changed despite mtime differences.
+	FileHashes map[string]string `json:"file_hashes,omitempty"`
 
 	// UpdatedAtBackpopDone indicates that UpdatedAt has been backpopulated
 	// for all existing file nodes. Persisted so the expensive backpop scan

@@ -26,6 +26,7 @@ type IndexerConfig struct {
 	LLMClient      llm.Client                       // optional LLM client for auto-summarization
 	AutoSummarize  bool                             // enable post-index LLM summarization
 	PostIndexHook  func(ctx context.Context) error  // optional hook called after initial full index (e.g., linker)
+	ShowProgress   bool                             // show progress bars during sync/index (independent of Verbose)
 }
 
 // IndexStats holds statistics about the indexing state.
@@ -45,6 +46,7 @@ type Indexer struct {
 	matcher       *watcher.GitIgnoreMatcher
 	repoRoots     []string
 	verbose       bool
+	showProgress  bool
 	log           func(format string, args ...any)
 	llmClient     llm.Client
 	autoSummarize bool
@@ -87,6 +89,7 @@ func NewIndexer(cfg IndexerConfig) *Indexer {
 		matcher:       matcher,
 		repoRoots:     cfg.RepoRoots,
 		verbose:       cfg.Verbose,
+		showProgress:  cfg.ShowProgress,
 		log:           logFn,
 		llmClient:     cfg.LLMClient,
 		autoSummarize: cfg.AutoSummarize,
@@ -152,6 +155,11 @@ func (idx *Indexer) IndexFileWithTimestamp(ctx context.Context, filePath string,
 	p, ok := idx.registry.ParserForFile(filePath)
 	if !ok {
 		return nil // no parser for this file
+	}
+
+	// Pre-read skip: avoid expensive os.ReadFile for files the parser would skip.
+	if skipper, ok := p.(parser.FileSkipper); ok && skipper.ShouldSkipFile(filePath) {
+		return nil
 	}
 
 	content, err := os.ReadFile(filePath)
@@ -253,13 +261,82 @@ func (idx *Indexer) IndexFileWithTimestamp(ctx context.Context, filePath string,
 	return nil
 }
 
+// IndexDuplicateFile creates a minimal node for a file that is a content
+// duplicate of an already-indexed file. Instead of full parsing, it creates
+// a Document node with the same content_hash and mime_type, plus a DuplicateOf
+// edge pointing to the canonical (first-seen) node. This is much faster than
+// full indexing for directories with many duplicate files (e.g., photos).
+func (idx *Indexer) IndexDuplicateFile(ctx context.Context, filePath string, updatedAt time.Time, contentHash, mimeType, canonicalNodeID string) error {
+	relPath := idx.toRelativePath(filePath)
+	fileName := filepath.Base(relPath)
+	nodeID := graph.NewNodeID(string(graph.NodeDocument), relPath, fileName)
+
+	// Delete old nodes for this file.
+	if err := idx.store.DeleteByFile(ctx, relPath); err != nil {
+		return fmt.Errorf("delete old nodes for %s: %w", relPath, err)
+	}
+
+	// Create minimal document node.
+	node := &graph.Node{
+		ID:            nodeID,
+		Type:          graph.NodeDocument,
+		Name:          fileName,
+		QualifiedName: relPath,
+		FilePath:      relPath,
+		Package:       filepath.Dir(relPath),
+		Properties: map[string]string{
+			graph.PropContentHash: contentHash,
+			graph.PropMimeType:    mimeType,
+		},
+		UpdatedAt: updatedAt,
+	}
+	if err := idx.store.AddNode(ctx, node); err != nil {
+		return fmt.Errorf("add duplicate node %s: %w", nodeID, err)
+	}
+
+	// Create DuplicateOf edge.
+	edge := &graph.Edge{
+		ID:       graph.NewNodeID(string(graph.EdgeDuplicateOf), nodeID, canonicalNodeID),
+		Type:     graph.EdgeDuplicateOf,
+		SourceID: nodeID,
+		TargetID: canonicalNodeID,
+		Properties: map[string]string{
+			graph.PropContentHash: contentHash,
+			graph.PropMimeType:    mimeType,
+		},
+	}
+	if err := idx.store.AddEdge(ctx, edge); err != nil {
+		return fmt.Errorf("add DuplicateOf edge: %w", err)
+	}
+
+	// Create date hierarchy nodes.
+	if err := EnsureDateNodes(ctx, idx.store, updatedAt, nodeID); err != nil {
+		idx.log("Warning: create date nodes for %s: %v", nodeID, err)
+	}
+
+	idx.mu.Lock()
+	idx.filesIndexed++
+	idx.lastIndex = time.Now()
+	idx.changedFiles[relPath] = struct{}{}
+	idx.mu.Unlock()
+
+	if idx.verbose {
+		idx.log("  -> duplicate of canonical node (skipped parsing)")
+	}
+
+	return nil
+}
+
 // IndexDirectory walks a directory tree and indexes all supported files.
 func (idx *Indexer) IndexDirectory(ctx context.Context, dirPath string) error {
 	// Pre-scan to count indexable files for progress reporting.
-	idx.log("Indexing %s: counting files...", dirPath)
-	totalFiles := idx.countIndexableFiles(dirPath)
-	idx.log("Indexing %s: %d files to process", dirPath, totalFiles)
-	progress := newSyncProgress(totalFiles, "index", idx.log)
+	var progress *syncProgress
+	if idx.showProgress {
+		idx.log("Indexing %s: counting files...", dirPath)
+		totalFiles := idx.countIndexableFiles(dirPath)
+		idx.log("Indexing %s: %d files to process", dirPath, totalFiles)
+		progress = newSyncProgress(totalFiles, "index", idx.log)
+	}
 
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -296,13 +373,17 @@ func (idx *Indexer) IndexDirectory(ctx context.Context, dirPath string) error {
 			// Continue indexing other files.
 		}
 
-		progress.tickIndexed()
+		if progress != nil {
+			progress.tickIndexed()
+		}
 
 		return nil
 	})
 
-	elapsed := time.Since(progress.startTime).Round(time.Second)
-	idx.log("Indexing %s: complete (%d files in %s)", dirPath, progress.indexed, elapsed)
+	if progress != nil {
+		elapsed := time.Since(progress.startTime).Round(time.Second)
+		idx.log("Indexing %s: complete (%d files in %s)", dirPath, progress.indexed, elapsed)
+	}
 
 	return err
 }

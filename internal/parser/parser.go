@@ -69,3 +69,12 @@ type FilenameParser interface {
 	// Filenames returns the exact filenames this parser can handle.
 	Filenames() []string
 }
+
+// FileSkipper is an optional interface that parsers can implement to indicate
+// that a file should be skipped without reading its content. This is used by
+// the indexer to avoid expensive os.ReadFile calls for files that the parser
+// would immediately skip (e.g., unknown binary formats in the generic parser).
+type FileSkipper interface {
+	// ShouldSkipFile returns true if the file should be skipped without reading.
+	ShouldSkipFile(filePath string) bool
+}

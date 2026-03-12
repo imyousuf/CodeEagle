@@ -9,10 +9,17 @@ import (
 	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
+	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 )
 
 const syncStateFile = "sync.state"
+
+// hashEntry tracks a canonical node for a given content hash during sync.
+type hashEntry struct {
+	canonicalNodeID string
+	mimeType        string
+}
 
 // SyncFiles performs an incremental (or full) sync of the given paths.
 // For git repositories, it uses commit-based diffing. For non-git directories,
@@ -148,16 +155,29 @@ func syncGitRepo(ctx context.Context, idx *Indexer, repoPath string, state *Sync
 // syncDirectory performs mtime-based sync for a non-git directory.
 // State tracking uses relative paths (relative to repo roots) so the state
 // file is portable across machines.
+//
+// Content-hash dedup: tracks SHA-256 hashes per file in sync state. When a
+// file with the same content hash as an already-indexed file is encountered,
+// it creates a minimal duplicate node + DuplicateOf edge instead of full
+// parsing. This is a major optimization for directories with many duplicate
+// files (e.g., photos copied across folders).
 func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *SyncState, full bool, statePath string) error {
 	if full {
 		if idx.verbose {
 			idx.log("Full index of %s (non-git)", dirPath)
 		}
-		// Clear file times for this dir (keys may be relative or absolute from legacy state).
+		// Clear file times and hashes for this dir.
 		if state.FileTimes != nil {
 			for k := range state.FileTimes {
 				if isSubPath(k, dirPath) || !filepath.IsAbs(k) {
 					delete(state.FileTimes, k)
+				}
+			}
+		}
+		if state.FileHashes != nil {
+			for k := range state.FileHashes {
+				if isSubPath(k, dirPath) || !filepath.IsAbs(k) {
+					delete(state.FileHashes, k)
 				}
 			}
 		}
@@ -167,12 +187,32 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 	if state.FileTimes == nil {
 		state.FileTimes = make(map[string]time.Time)
 	}
+	if state.FileHashes == nil {
+		state.FileHashes = make(map[string]string)
+	}
 
-	// Pre-scan to count total files for progress reporting.
-	idx.log("Sync %s: counting files...", dirPath)
-	totalFiles := countWalkableFiles(dirPath)
-	idx.log("Sync %s: %d files to process", dirPath, totalFiles)
-	progress := newSyncProgress(totalFiles, "sync", idx.log)
+	// Build in-memory hash index from existing sync state for dedup.
+	// Maps content_hash → {canonicalNodeID, mimeType} for the first-seen file.
+	hashIndex := make(map[string]*hashEntry)
+	for relPath, hash := range state.FileHashes {
+		if _, exists := hashIndex[hash]; !exists {
+			fileName := filepath.Base(relPath)
+			nodeID := graph.NewNodeID(string(graph.NodeDocument), relPath, fileName)
+			hashIndex[hash] = &hashEntry{
+				canonicalNodeID: nodeID,
+				mimeType:        detectMIMEType(relPath),
+			}
+		}
+	}
+
+	// Pre-scan to count total files for progress reporting (-p flag).
+	var progress *syncProgress
+	if idx.showProgress {
+		idx.log("Sync %s: counting files...", dirPath)
+		totalFiles := countWalkableFiles(dirPath)
+		idx.log("Sync %s: %d files to process", dirPath, totalFiles)
+		progress = newSyncProgress(totalFiles, "sync", idx.log)
+	}
 
 	// Track which relative paths still exist.
 	existing := make(map[string]struct{})
@@ -180,6 +220,7 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 	// Periodic save: save sync state every N files to avoid losing progress on crash.
 	const saveInterval = 10
 	filesSinceLastSave := 0
+	duplicatesSkipped := 0
 
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -207,14 +248,23 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 			// Unchanged per DB — skip.
 			state.FileTimes[relPath] = modTime
 		} else {
-			if err := idx.IndexFileWithTimestamp(ctx, path, modTime); err != nil {
-				idx.log("Warning: index file %s: %v", path, err)
+			// File is new or changed — check for content duplicates.
+			indexed, hash := syncIndexFile(ctx, idx, path, relPath, modTime, hashIndex)
+			if indexed {
+				didIndex = true
+			} else if hash != "" {
+				// Was handled as a duplicate (skipped full parse).
+				duplicatesSkipped++
 			}
 			state.FileTimes[relPath] = modTime
-			didIndex = true
+			if hash != "" {
+				state.FileHashes[relPath] = hash
+			}
 		}
 
-		progress.tick(didIndex)
+		if progress != nil {
+			progress.tick(didIndex)
+		}
 
 		// Periodically save sync state to avoid losing progress on crash.
 		filesSinceLastSave++
@@ -229,6 +279,10 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 		return err
 	}
 
+	if duplicatesSkipped > 0 && idx.showProgress {
+		idx.log("Sync %s: %d duplicate files detected (skipped full parsing)", dirPath, duplicatesSkipped)
+	}
+
 	// Delete nodes for files that no longer exist.
 	for relPath := range state.FileTimes {
 		if _, ok := existing[relPath]; !ok {
@@ -236,10 +290,69 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 				idx.log("Warning: delete by file %s: %v", relPath, err)
 			}
 			delete(state.FileTimes, relPath)
+			delete(state.FileHashes, relPath)
 		}
 	}
 
 	return nil
+}
+
+// syncIndexFile handles indexing a single file during directory sync, with
+// content-hash-based duplicate detection. Returns (didFullIndex, contentHash).
+// If the file is a duplicate of an already-indexed generic file, it creates
+// a minimal node + DuplicateOf edge and returns (false, hash).
+// For code files (non-generic parser), duplicates still get full indexing.
+func syncIndexFile(ctx context.Context, idx *Indexer, absPath, relPath string, modTime time.Time, hashIndex map[string]*hashEntry) (bool, string) {
+	// Check if this file would be handled by the generic parser (images, docs).
+	// Only generic files get duplicate-skip optimization; code files always
+	// get full parsing since their nodes depend on path context.
+	p, hasParser := idx.registry.ParserForFile(absPath)
+	if !hasParser {
+		return false, "" // no parser at all
+	}
+
+	isGeneric := p.Language() == "generic"
+
+	// For generic files, read content and compute hash before full indexing.
+	if isGeneric {
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			idx.log("Warning: read file %s: %v", absPath, err)
+			return false, ""
+		}
+
+		hash := computeContentHash(content)
+		mimeType := detectMIMEType(relPath)
+
+		// Check if we've already seen this content hash.
+		if entry, exists := hashIndex[hash]; exists {
+			// Duplicate! Create minimal node + DuplicateOf edge.
+			if err := idx.IndexDuplicateFile(ctx, absPath, modTime, hash, mimeType, entry.canonicalNodeID); err != nil {
+				idx.log("Warning: index duplicate %s: %v", absPath, err)
+			}
+			return false, hash
+		}
+
+		// First occurrence — do full indexing.
+		if err := idx.IndexFileWithTimestamp(ctx, absPath, modTime); err != nil {
+			idx.log("Warning: index file %s: %v", absPath, err)
+		}
+
+		// Register in hash index for future duplicates.
+		fileName := filepath.Base(relPath)
+		nodeID := graph.NewNodeID(string(graph.NodeDocument), relPath, fileName)
+		hashIndex[hash] = &hashEntry{
+			canonicalNodeID: nodeID,
+			mimeType:        mimeType,
+		}
+		return true, hash
+	}
+
+	// Non-generic (code) file — always do full indexing.
+	if err := idx.IndexFileWithTimestamp(ctx, absPath, modTime); err != nil {
+		idx.log("Warning: index file %s: %v", absPath, err)
+	}
+	return true, ""
 }
 
 // AutoImportIfNeeded checks if the export file has been updated since the last import
