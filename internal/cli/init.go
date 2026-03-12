@@ -158,7 +158,7 @@ func generateConfigYAML(projectName, projectRoot, provider string) string {
 		if len(contentDirs) > 0 {
 			var sb strings.Builder
 			for _, dir := range contentDirs {
-				sb.WriteString(fmt.Sprintf("  - path: %s\n    type: single\n", dir))
+				fmt.Fprintf(&sb, "  - path: %s\n    type: single\n", dir)
 			}
 			repoLines = sb.String()
 		} else {

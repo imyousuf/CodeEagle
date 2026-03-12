@@ -60,6 +60,15 @@ const (
 	// PropGraphSource indicates which branch a node or edge came from
 	// when using BranchStore. Set to the branch name on reads, never persisted.
 	PropGraphSource = "graph_source"
+
+	// PropContentHash is the SHA-256 hash of a file's content ("sha256:<hex>").
+	PropContentHash = "content_hash"
+
+	// PropMimeType is the MIME type of a file (e.g., "image/jpeg", "text/x-go").
+	PropMimeType = "mime_type"
+
+	// PropSymlinkTarget is the relative path of a symlink's resolved target.
+	PropSymlinkTarget = "symlink_target"
 )
 
 // EdgeType represents a relationship between two nodes.
@@ -78,8 +87,10 @@ const (
 	EdgeMigrates   EdgeType = "Migrates"
 	EdgeConfigures EdgeType = "Configures"
 	EdgeHasTopic   EdgeType = "HasTopic"
-	EdgeAppearsIn  EdgeType = "AppearsIn"
-	EdgeUpdatedOn  EdgeType = "UpdatedOn"
+	EdgeAppearsIn    EdgeType = "AppearsIn"
+	EdgeUpdatedOn    EdgeType = "UpdatedOn"
+	EdgeDuplicateOf  EdgeType = "DuplicateOf"
+	EdgeSymLink      EdgeType = "SymLink"
 )
 
 // Node represents a source code or documentation entity in the knowledge graph.

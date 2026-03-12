@@ -43,6 +43,8 @@ Build and maintain a rich knowledge graph that captures:
 - `HAS_TOPIC` — document -> extracted topic (via LLM)
 - `APPEARS_IN` — person -> image
 - `UPDATED_ON` — file -> date node (Year/Month/Date hierarchy)
+- `DUPLICATE_OF` — file -> canonical file with identical content (same content_hash + mime_type)
+- `SYM_LINK` — symlink file -> resolved target file
 
 **Code Quality Metrics** (attached to graph nodes)
 - Cyclomatic complexity per function
@@ -85,6 +87,7 @@ codeeagle query interface --name <name> # Show interface and implementors
 codeeagle query edges --node <name>     # Show relationships for a node
 codeeagle query unused [--type T]       # Find potentially unused functions/methods
 codeeagle query coverage [--level L]    # Show test coverage by file or function
+codeeagle query duplicates [--json]     # Find duplicate files by content hash
 
 codeeagle rag <query>                   # Semantic search over the knowledge graph
 codeeagle backpop [--all]               # Run linker phases on existing graph
@@ -226,7 +229,7 @@ codeeagle/
 │   ├── graph/              # Knowledge graph interface + embedded store (BadgerDB)
 │   ├── indexer/            # Orchestrates parsing -> graph updates + LLM summarization
 │   ├── docs/               # Document content extraction providers (Ollama, Vertex AI) with topic extraction + caching
-│   ├── linker/             # Cross-service linker (9 phases: services, endpoints, API calls, deps, imports, implements, tests, calls, documents)
+│   ├── linker/             # Cross-service linker (11 phases: services, endpoints, API calls, deps, imports, implements, tests, calls, documents, duplicates, symlinks)
 │   ├── llm/                # LLM provider implementations (Anthropic, Vertex AI, Claude CLI)
 │   ├── mcp/                # MCP server (JSON-RPC over stdio)
 │   ├── metrics/            # Code quality metric calculators

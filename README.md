@@ -17,6 +17,8 @@ It supports monorepos, multi-repo setups, and multi-language codebases (Go, Pyth
 - **Graph analysis queries**: unused code detection and test coverage reporting
 - **AI agents** for planning, design, code review, and freeform Q&A — read-only, advisory, never modify code
 - **Temporal tracking**: Every file node records `UpdatedAt` with Year/Month/Date graph nodes for date-based queries (e.g., "files modified in March 2024")
+- **Duplicate file detection**: Content-hash-based identification of identical files across different paths, with `DuplicateOf` graph edges and `query duplicates` CLI command
+- **Symlink tracking**: Automatic detection of symbolic links with `SymLink` graph edges pointing to resolved targets
 - **Git-aware incremental sync** with branch tracking and diff-based updates
 - **Smart non-git sync**: Skips unchanged files by comparing mtime against DB, with crash-resilient periodic state saving
 - **MCP server** for integration with Claude Code and other MCP-compatible tools
@@ -107,6 +109,7 @@ codeeagle query interface --name <name>     Show interface and implementors
 codeeagle query edges --node <name>         Show relationships for a node
 codeeagle query unused [--type T]           Find potentially unused functions/methods
 codeeagle query coverage [--level L]        Show test coverage by file or function
+codeeagle query duplicates [--json]         Find duplicate files by content hash
 
 codeeagle backpop [--all]                   Run linker phases on existing graph
 codeeagle metrics [--file F] [--type T]     Show code quality metrics
@@ -253,6 +256,8 @@ codeeagle -p my-project status
 | HasTopic | Document has an extracted topic |
 | AppearsIn | Person appears in an image |
 | UpdatedOn | File node linked to its last-modified Date node |
+| DuplicateOf | File has identical content (same content_hash + mime_type) as canonical file |
+| SymLink | Symbolic link points to resolved target file |
 | References | General cross-reference |
 | Embeds | Struct embeds another type |
 
@@ -319,7 +324,7 @@ codeeagle/
 │   ├── llm/               LLM provider implementations
 │   ├── mcp/               MCP server (JSON-RPC over stdio)
 │   ├── metrics/            Code quality metric calculators
-│   ├── linker/             Cross-service linker (9 phases: services, endpoints, API calls, deps, imports, implements, tests, calls, documents)
+│   ├── linker/             Cross-service linker (11 phases: services, endpoints, API calls, deps, imports, implements, tests, calls, documents, duplicates, symlinks)
 │   ├── faces/              Face detection & recognition (OpenCV DNN, clustering, KNN classification)
 │   ├── queue/              Async job queue (face detection, clustering, document enrichment)
 │   ├── parser/             Language parsers + generic fallback (document formats, images, text files)

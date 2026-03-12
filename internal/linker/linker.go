@@ -51,15 +51,19 @@ func (l *Linker) Phases() []Phase {
 		{Name: "tests", Fn: l.linkTests},
 		{Name: "calls", Fn: l.linkCalls},
 		{Name: "documents", Fn: l.linkDocuments},
+		{Name: "duplicates", Fn: l.linkDuplicates},
+		{Name: "symlinks", Fn: l.linkSymlinks},
 	}
 }
 
-// NewPhases returns only the newly added phases (implements + tests + calls).
+// NewPhases returns only the newly added phases (implements + tests + calls + duplicates + symlinks).
 func (l *Linker) NewPhases() []Phase {
 	return []Phase{
 		{Name: "implements", Fn: l.linkImplements},
 		{Name: "tests", Fn: l.linkTests},
 		{Name: "calls", Fn: l.linkCalls},
+		{Name: "duplicates", Fn: l.linkDuplicates},
+		{Name: "symlinks", Fn: l.linkSymlinks},
 	}
 }
 
@@ -164,6 +168,24 @@ func (l *Linker) RunAll(ctx context.Context) error {
 	}
 	if l.verbose {
 		l.log("  Linked %d document-to-code edges", docCount)
+	}
+
+	// 4.10. Detect duplicate files by content hash.
+	dupCount, err := l.linkDuplicates(ctx)
+	if err != nil {
+		return fmt.Errorf("link duplicates: %w", err)
+	}
+	if l.verbose {
+		l.log("  Linked %d duplicate file edges", dupCount)
+	}
+
+	// 4.11. Resolve symlink relationships.
+	symlinkCount, err := l.linkSymlinks(ctx)
+	if err != nil {
+		return fmt.Errorf("link symlinks: %w", err)
+	}
+	if l.verbose {
+		l.log("  Linked %d symlink edges", symlinkCount)
 	}
 
 	// 5. LLM-assisted analysis for unresolved calls (optional).

@@ -136,7 +136,7 @@ func parseODSText(xmlData []byte) (string, error) {
 				if tableCount > 1 {
 					b.WriteByte('\n')
 				}
-				b.WriteString(fmt.Sprintf("--- Sheet %d ---\n", tableCount))
+				fmt.Fprintf(&b, "--- Sheet %d ---\n", tableCount)
 			case "table-row":
 				if inTable {
 					inRow = true
@@ -209,7 +209,7 @@ func parseODPText(xmlData []byte) (string, error) {
 				if pageCount > 1 {
 					b.WriteString("\n\n")
 				}
-				b.WriteString(fmt.Sprintf("--- Slide %d ---\n", pageCount))
+				fmt.Fprintf(&b, "--- Slide %d ---\n", pageCount)
 			case "p", "h":
 				if inPage {
 					textDepth++
