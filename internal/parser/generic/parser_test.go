@@ -15,13 +15,15 @@ func TestClassify(t *testing.T) {
 		filePath string
 		want     FileClass
 	}{
+		// Known text extensions
 		{"text file", "docs/README.txt", FileClassText},
-		{"markdown", "docs/spec.md", FileClassText},
 		{"json", "config.json", FileClassText},
-		{"yaml", "config.yaml", FileClassText},
 		{"csv", "data.csv", FileClassText},
 		{"log", "output.log", FileClassText},
-		{"no extension", "README", FileClassText},
+		{"sql", "schema.sql", FileClassText},
+		{"c source", "main.c", FileClassText},
+		{"ini config", "settings.ini", FileClassText},
+		// Image extensions
 		{"png image", "photo.png", FileClassImage},
 		{"jpg image", "photo.jpg", FileClassImage},
 		{"jpeg image", "photo.jpeg", FileClassImage},
@@ -29,10 +31,25 @@ func TestClassify(t *testing.T) {
 		{"webp image", "hero.webp", FileClassImage},
 		{"bmp image", "scan.bmp", FileClassImage},
 		{"tiff image", "raw.tiff", FileClassImage},
+		{"upper case PNG", "photo.PNG", FileClassImage},
+		// Document extensions
+		{"pdf doc", "report.pdf", FileClassDocument},
+		{"docx doc", "plan.docx", FileClassDocument},
+		// Exclude list
 		{"excluded lock", "package-lock.lock", FileClassSkip},
 		{"excluded min.js", "bundle.min.js", FileClassSkip},
 		{"excluded wasm", "module.wasm", FileClassSkip},
-		{"upper case PNG", "photo.PNG", FileClassImage},
+		// Unknown extensions — whitelist rejects
+		{"no extension", "README", FileClassSkip},
+		{"video mov", "vacation.mov", FileClassSkip},
+		{"video mp4", "clip.mp4", FileClassSkip},
+		{"audio mp3", "song.mp3", FileClassSkip},
+		{"raw cr3", "IMG_001.CR3", FileClassSkip},
+		{"raw cr2", "IMG_002.CR2", FileClassSkip},
+		{"raw nef", "DSC_003.NEF", FileClassSkip},
+		{"binary exe", "app.exe", FileClassSkip},
+		{"archive zip", "backup.zip", FileClassSkip},
+		{"unknown ext", "data.xyz", FileClassSkip},
 	}
 
 	for _, tt := range tests {

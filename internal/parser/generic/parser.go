@@ -58,6 +58,12 @@ func (p *GenericParser) Extensions() []string {
 	return nil
 }
 
+// ShouldSkipFile returns true if the file would be skipped by Classify.
+// This allows the indexer to skip reading the file content entirely.
+func (p *GenericParser) ShouldSkipFile(filePath string) bool {
+	return Classify(filePath, p.excludeExts) == FileClassSkip
+}
+
 // ParseFile parses a non-code file and returns document + directory nodes.
 func (p *GenericParser) ParseFile(filePath string, content []byte) (*parser.ParseResult, error) {
 	class := Classify(filePath, p.excludeExts)

@@ -43,13 +43,25 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/watcher"
 )
 
+// SyncOption configures optional RunSync behavior.
+type SyncOption func(*syncOptions)
+
+type syncOptions struct {
+	showProgress bool
+}
+
+// WithProgress enables progress reporting during sync.
+func WithProgress() SyncOption {
+	return func(o *syncOptions) { o.showProgress = true }
+}
+
 // RunSync performs the full sync pipeline: auto-import, parse, index, summarize,
 // link, vector-index, cleanup, and stats. It is called by both the CLI command
 // and the desktop app's sync handler.
 //
 // warnFn receives non-fatal warnings (e.g., provider detection failures).
 // logFn receives progress messages.
-func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, verboseMode bool, logFn func(format string, args ...any), warnFn func(format string, args ...any)) error {
+func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, verboseMode bool, logFn func(format string, args ...any), warnFn func(format string, args ...any), opts ...SyncOption) error {
 	// Open read-write store.
 	store, currentBranch, err := embedded.OpenReadWrite(cfg, paths, "")
 	if err != nil {
@@ -131,6 +143,12 @@ func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, v
 		}
 	}
 
+	// Apply options.
+	var sopts syncOptions
+	for _, o := range opts {
+		o(&sopts)
+	}
+
 	// Create indexer.
 	idx := indexer.NewIndexer(indexer.IndexerConfig{
 		GraphStore:     store,
@@ -138,6 +156,7 @@ func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, v
 		WatcherConfig:  wcfg,
 		RepoRoots:      paths,
 		Verbose:        verboseMode,
+		ShowProgress:   sopts.showProgress,
 		Logger:         logFn,
 		LLMClient:      llmClient,
 		AutoSummarize:  cfg.Agents.AutoSummarize,
@@ -222,6 +241,7 @@ func newSyncCmd() *cobra.Command {
 	var exportGraph bool
 	var importGraph bool
 	var branch string
+	var showProgress bool
 
 	cmd := &cobra.Command{
 		Use:   "sync",
@@ -263,11 +283,16 @@ target branch for import.`,
 				fmt.Fprintf(errOut, format+"\n", a...)
 			}
 
-			return RunSync(ctx(cmd), cfg, paths, full, verbose, logFn, warnFn)
+			var syncOpts []SyncOption
+			if showProgress {
+				syncOpts = append(syncOpts, WithProgress())
+			}
+			return RunSync(ctx(cmd), cfg, paths, full, verbose, logFn, warnFn, syncOpts...)
 		},
 	}
 
 	cmd.Flags().BoolVar(&full, "full", false, "full re-index of all files")
+	cmd.Flags().BoolVar(&showProgress, "progress", false, "show sync progress")
 	cmd.Flags().BoolVar(&exportGraph, "export", false, "export current branch graph to a file")
 	cmd.Flags().BoolVar(&importGraph, "import", false, "import a graph export file")
 	cmd.Flags().StringVar(&branch, "branch", "", "target branch for import (auto-detected if empty)")
