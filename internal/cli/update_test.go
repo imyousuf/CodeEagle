@@ -26,6 +26,40 @@ func TestIsDevVersion(t *testing.T) {
 	}
 }
 
+func TestIsLocalBuild(t *testing.T) {
+	tests := []struct {
+		version string
+		want    bool
+	}{
+		// Official releases — NOT local builds.
+		{"v1.0.0", false},
+		{"v0.1.0", false},
+		{"v12.34.56", false},
+		// Dev versions — NOT local builds (handled separately).
+		{"dev", false},
+		{"dev-abc1234", false},
+		// Local builds from git describe — IS local build.
+		{"v1.2.0-dirty", true},
+		{"v1.2.0-5-g12b180f", true},
+		{"v1.2.0-5-g12b180f-dirty", true},
+		{"12b180f", true},
+		{"12b180f-dirty", true},
+		// Edge cases.
+		{"", true},         // empty version
+		{"v", false},       // just "v" with no digits — technically clean (degenerate)
+		{"1.0.0", true},    // no v prefix
+		{"latest", true},   // random string
+		{"v1.0.0-rc1", true}, // pre-release suffix
+	}
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			if got := isLocalBuild(tt.version); got != tt.want {
+				t.Errorf("isLocalBuild(%q) = %v, want %v", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildDownloadURL(t *testing.T) {
 	url := buildDownloadURL("v1.2.3", "linux", "amd64")
 	want := "https://github.com/imyousuf/CodeEagle/releases/download/v1.2.3/codeeagle-linux-amd64.tar.gz"
