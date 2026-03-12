@@ -23,17 +23,22 @@ const (
 // extractPDF extracts plain text from a PDF file page by page.
 // Large PDFs are handled gracefully: extraction stops after maxPDFPages pages,
 // and individual pages that take longer than pdfPageTimeout are skipped.
-func extractPDF(content []byte) (string, error) {
+// Malformed PDFs that cause panics in the dslipak/pdf library are caught and
+// returned as errors.
+func extractPDF(content []byte) (result string, retErr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			retErr = fmt.Errorf("PDF parsing panic: %v", r)
+		}
+	}()
+
 	r, err := pdf.NewReader(bytes.NewReader(content), int64(len(content)))
 	if err != nil {
 		return "", fmt.Errorf("open PDF: %w", err)
 	}
 
 	totalPages := r.NumPage()
-	pagesToExtract := totalPages
-	if pagesToExtract > maxPDFPages {
-		pagesToExtract = maxPDFPages
-	}
+	pagesToExtract := min(totalPages, maxPDFPages)
 
 	var buf strings.Builder
 	fonts := make(map[string]*pdf.Font)
@@ -69,6 +74,11 @@ func extractPDFPage(r *pdf.Reader, pageNum int, fonts map[string]*pdf.Font) (str
 
 	ch := make(chan result, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				ch <- result{err: fmt.Errorf("page %d: panic: %v", pageNum, r)}
+			}
+		}()
 		p := r.Page(pageNum)
 		if p.V.IsNull() {
 			ch <- result{err: fmt.Errorf("page %d not found", pageNum)}

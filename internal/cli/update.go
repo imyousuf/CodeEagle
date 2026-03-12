@@ -76,6 +76,13 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	if isWSL() {
 		fmt.Println("(Running in WSL)")
 	}
+
+	if isLocalBuild(Version) && !forceFlag {
+		fmt.Println("\nThis is a local build (not an official release).")
+		fmt.Println("Auto-update is disabled for local builds to avoid overwriting your binary.")
+		fmt.Println("Use --force to update anyway.")
+		return nil
+	}
 	fmt.Println()
 
 	// Determine release tag to download
@@ -183,6 +190,31 @@ func isWSL() bool {
 // isDevVersion checks if the given version is a dev version.
 func isDevVersion(version string) bool {
 	return version == "dev" || strings.HasPrefix(version, "dev-")
+}
+
+// isLocalBuild returns true if the version string indicates a local build
+// rather than an official release. Local builds are produced by `make build`
+// which uses `git describe --tags --always --dirty`, yielding versions like
+// "v1.2.0-5-g12b180f", "v1.2.0-dirty", "12b180f-dirty", or bare commit
+// hashes — none of which should trigger auto-update.
+func isLocalBuild(version string) bool {
+	if isDevVersion(version) {
+		return false // dev versions are handled separately
+	}
+	// A clean release version is exactly "vN.N.N" (e.g. "v1.2.0").
+	// Anything with extra components (git describe suffixes like "-dirty",
+	// "-N-gXXXXX", or bare commit hashes) is a local build.
+	if !strings.HasPrefix(version, "v") {
+		return true // bare commit hash like "12b180f"
+	}
+	// Strip "v" prefix and check if what remains is a clean semver (digits and dots only).
+	rest := version[1:]
+	for _, c := range rest {
+		if c != '.' && (c < '0' || c > '9') {
+			return true // has extra suffixes like "-dirty", "-5-g12b180f"
+		}
+	}
+	return false
 }
 
 // buildDownloadURL constructs the GitHub release download URL for the given version and platform.
@@ -636,6 +668,11 @@ func CheckAndAutoUpdate() bool {
 
 	cfg := loadUpdateConfig()
 	if cfg.Disabled {
+		return false
+	}
+
+	// Never auto-update local builds (e.g. "make build" on a feature branch).
+	if isLocalBuild(Version) {
 		return false
 	}
 
