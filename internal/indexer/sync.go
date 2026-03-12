@@ -29,12 +29,16 @@ func SyncFiles(ctx context.Context, idx *Indexer, paths []string, configDir stri
 	state.MigrateLegacy(branch)
 
 	// Auto-backpop UpdatedAt for existing nodes that lack it.
-	if needsUpdatedAtBackpop(ctx, idx.Store()) {
+	if !state.UpdatedAtBackpopDone {
 		count, err := BackpopUpdatedAt(ctx, idx.Store(), paths, idx.log)
 		if err != nil {
 			idx.log("Warning: UpdatedAt backpop: %v", err)
-		} else if count > 0 {
-			idx.log("Backpopulated UpdatedAt for %d file nodes", count)
+		} else {
+			if count > 0 {
+				idx.log("Backpopulated UpdatedAt for %d file nodes", count)
+			}
+			state.UpdatedAtBackpopDone = true
+			_ = state.Save(statePath)
 		}
 	}
 

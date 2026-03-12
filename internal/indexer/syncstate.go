@@ -22,6 +22,12 @@ type SyncState struct {
 	// FileTimes records file modification times for non-git directories.
 	FileTimes map[string]time.Time `json:"file_times,omitempty"`
 
+	// UpdatedAtBackpopDone indicates that UpdatedAt has been backpopulated
+	// for all existing file nodes. Persisted so the expensive backpop scan
+	// is not re-run on every sync (fallback-branch nodes with zero
+	// UpdatedAt would otherwise trigger it indefinitely).
+	UpdatedAtBackpopDone bool `json:"updated_at_backpop_done,omitempty"`
+
 	// ContentHashBackpopDone indicates that content_hash has been
 	// backpopulated for all existing file nodes. Persisted so the
 	// expensive backpop scan is not re-run on every sync.
