@@ -33,6 +33,7 @@ type FaceDetectHandler struct {
 	autoAccept    float64
 	bucketedIdx   *faces.BucketedIndex
 	exemplarCount int
+	repoRoots     []string
 }
 
 // NewFaceDetectHandler creates a face detection handler.
@@ -42,6 +43,7 @@ func NewFaceDetectHandler(
 	personStore PersonStore,
 	classifier *faces.KNNClassifier,
 	autoAcceptThreshold float64,
+	repoRoots []string,
 ) *FaceDetectHandler {
 	return &FaceDetectHandler{
 		detector:    detector,
@@ -49,6 +51,7 @@ func NewFaceDetectHandler(
 		personStore: personStore,
 		classifier:  classifier,
 		autoAccept:  autoAcceptThreshold,
+		repoRoots:   repoRoots,
 	}
 }
 
@@ -57,17 +60,20 @@ func (h *FaceDetectHandler) Handle(_ context.Context, job *Job) (json.RawMessage
 	if len(job.FilePaths) == 0 {
 		return nil, fmt.Errorf("face-detect job has no file paths")
 	}
-	imagePath := job.FilePaths[0]
+	relPath := job.FilePaths[0]
 
 	// Skip if already scanned.
-	if h.personStore.IsImageScanned(imagePath) {
-		return marshalFaceResult("skipped", imagePath, 0), nil
+	if h.personStore.IsImageScanned(relPath) {
+		return marshalFaceResult("skipped", relPath, 0), nil
 	}
 
+	// Resolve to absolute path for file I/O (OpenCV imread, EXIF reading).
+	absPath := resolveFilePath(relPath, h.repoRoots)
+
 	// Extract image metadata.
-	dateResult := faces.ExtractImageDate(imagePath)
+	dateResult := faces.ExtractImageDate(absPath)
 	meta := &embedded.ImageMetadata{
-		ImagePath:   imagePath,
+		ImagePath:   relPath,
 		DateTaken:   dateResult.DateTaken,
 		DateSource:  string(dateResult.DateSource),
 		FolderName:  dateResult.FolderName,
@@ -77,9 +83,9 @@ func (h *FaceDetectHandler) Handle(_ context.Context, job *Job) (json.RawMessage
 	}
 
 	// Detect faces.
-	result, err := h.detector.Detect(imagePath)
+	result, err := h.detector.Detect(absPath)
 	if err != nil {
-		return nil, fmt.Errorf("detect faces in %s: %w", imagePath, err)
+		return nil, fmt.Errorf("detect faces in %s: %w", relPath, err)
 	}
 
 	meta.FaceCount = len(result.Faces)
@@ -87,7 +93,7 @@ func (h *FaceDetectHandler) Handle(_ context.Context, job *Job) (json.RawMessage
 	// Store each detected face.
 	for i := range result.Faces {
 		if err := h.faceStore.StoreFace(&result.Faces[i]); err != nil {
-			return nil, fmt.Errorf("store face %d in %s: %w", i, imagePath, err)
+			return nil, fmt.Errorf("store face %d in %s: %w", i, relPath, err)
 		}
 	}
 
@@ -95,19 +101,19 @@ func (h *FaceDetectHandler) Handle(_ context.Context, job *Job) (json.RawMessage
 	if h.classifier != nil {
 		exemplars, _ := h.personStore.AllExemplars()
 		if len(exemplars) > 0 {
-			h.classifyFaces(imagePath, dateResult.DateTaken, result.Faces, exemplars)
+			h.classifyFaces(relPath, dateResult.DateTaken, result.Faces, exemplars)
 		}
 	}
 
 	// Index image metadata and mark as scanned.
 	if err := h.personStore.IndexImage(meta); err != nil {
-		return nil, fmt.Errorf("index image %s: %w", imagePath, err)
+		return nil, fmt.Errorf("index image %s: %w", relPath, err)
 	}
-	if err := h.personStore.MarkImageScanned(imagePath); err != nil {
-		return nil, fmt.Errorf("mark scanned %s: %w", imagePath, err)
+	if err := h.personStore.MarkImageScanned(relPath); err != nil {
+		return nil, fmt.Errorf("mark scanned %s: %w", relPath, err)
 	}
 
-	return marshalFaceResult("detected", imagePath, len(result.Faces)), nil
+	return marshalFaceResult("detected", relPath, len(result.Faces)), nil
 }
 
 func (h *FaceDetectHandler) classifyFaces(imagePath string, queryDate time.Time, detectedFaces []faces.FaceRecord, exemplars []*embedded.Exemplar) {
@@ -212,9 +218,10 @@ func RegisterFaceHandlers(
 	autoAcceptThreshold float64,
 	clusterSimThreshold float32,
 	minClusterSize int,
+	repoRoots []string,
 ) {
 	pool.Register(JobFaceDetect, NewFaceDetectHandler(
-		detector, faceStore, personStore, classifier, autoAcceptThreshold,
+		detector, faceStore, personStore, classifier, autoAcceptThreshold, repoRoots,
 	))
 	pool.Register(JobFaceCluster, NewFaceClusterHandler(
 		faceStore, clusterSimThreshold, minClusterSize,
