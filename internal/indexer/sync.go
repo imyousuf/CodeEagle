@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
+	"github.com/imyousuf/CodeEagle/internal/parser"
 )
 
 const syncStateFile = "sync.state"
@@ -221,6 +224,13 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 	const saveInterval = 10
 	filesSinceLastSave := 0
 	duplicatesSkipped := 0
+	// gcInterval controls how often we force GC during the walk.
+	// Image files (JPEG, PNG) decode into large RGBA pixel buffers (50-200MB
+	// per 20-40MB image) during DownscaleImage. In a tight sequential loop,
+	// Go's GC may not run frequently enough to collect these dead buffers
+	// before the next image is allocated, causing RSS to grow unboundedly.
+	const gcInterval = 50
+	filesSinceLastGC := 0
 
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -233,6 +243,14 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 		}
 
 		if info.IsDir() {
+			if idx.matcher.Match(path) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Skip excluded files.
+		if idx.matcher.Match(path) {
 			return nil
 		}
 
@@ -264,6 +282,19 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 
 		if progress != nil {
 			progress.tick(didIndex)
+		}
+
+		// Periodically force GC to reclaim large image pixel buffers.
+		// Without this, processing thousands of 20-40MB images causes
+		// RSS to grow unboundedly as Go's GC can't keep up with the
+		// allocation rate of 50-200MB RGBA decode buffers per image.
+		if didIndex {
+			filesSinceLastGC++
+			if filesSinceLastGC >= gcInterval {
+				runtime.GC()
+				debug.FreeOSMemory()
+				filesSinceLastGC = 0
+			}
 		}
 
 		// Periodically save sync state to avoid losing progress on crash.
@@ -311,30 +342,44 @@ func syncIndexFile(ctx context.Context, idx *Indexer, absPath, relPath string, m
 		return false, "" // no parser at all
 	}
 
+	// Pre-read skip: avoid expensive os.ReadFile for files the parser would skip
+	// (e.g., unknown binary formats like .CR3, .NEF in the generic parser).
+	if skipper, ok := p.(parser.FileSkipper); ok && skipper.ShouldSkipFile(absPath) {
+		return false, ""
+	}
+
 	isGeneric := p.Language() == "generic"
 
-	// For generic files, read content and compute hash before full indexing.
+	// For generic files, compute hash via streaming (O(1) memory) to check
+	// for duplicates BEFORE reading the full file content into memory.
+	// This prevents OOM when syncing directories with many large files.
 	if isGeneric {
-		content, err := os.ReadFile(absPath)
+		hash, err := computeContentHashFromFile(absPath)
 		if err != nil {
-			idx.log("Warning: read file %s: %v", absPath, err)
+			idx.log("Warning: hash file %s: %v", absPath, err)
 			return false, ""
 		}
 
-		hash := computeContentHash(content)
 		mimeType := detectMIMEType(relPath)
 
 		// Check if we've already seen this content hash.
 		if entry, exists := hashIndex[hash]; exists {
 			// Duplicate! Create minimal node + DuplicateOf edge.
+			// No need to read file content — saves significant memory.
 			if err := idx.IndexDuplicateFile(ctx, absPath, modTime, hash, mimeType, entry.canonicalNodeID); err != nil {
 				idx.log("Warning: index duplicate %s: %v", absPath, err)
 			}
 			return false, hash
 		}
 
-		// First occurrence — do full indexing.
-		if err := idx.IndexFileWithTimestamp(ctx, absPath, modTime); err != nil {
+		// First occurrence — read content for full parsing.
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			idx.log("Warning: read file %s: %v", absPath, err)
+			return false, ""
+		}
+
+		if err := idx.IndexFileWithContent(ctx, absPath, content, hash, modTime); err != nil {
 			idx.log("Warning: index file %s: %v", absPath, err)
 		}
 

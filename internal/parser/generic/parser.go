@@ -66,6 +66,13 @@ func (p *GenericParser) ShouldSkipFile(filePath string) bool {
 
 // ParseFile parses a non-code file and returns document + directory nodes.
 func (p *GenericParser) ParseFile(filePath string, content []byte) (*parser.ParseResult, error) {
+	contentHash := fmt.Sprintf("sha256:%x", sha256.Sum256(content))
+	return p.ParseFileWithHash(context.TODO(), filePath, content, contentHash)
+}
+
+// ParseFileWithHash parses a non-code file using a pre-computed content hash,
+// avoiding redundant SHA-256 computation.
+func (p *GenericParser) ParseFileWithHash(ctx context.Context, filePath string, content []byte, contentHash string) (*parser.ParseResult, error) {
 	class := Classify(filePath, p.excludeExts)
 	if class == FileClassSkip {
 		return &parser.ParseResult{FilePath: filePath, Language: LangGeneric}, nil
@@ -84,7 +91,6 @@ func (p *GenericParser) ParseFile(filePath string, content []byte) (*parser.Pars
 	// Build the document node.
 	fileName := filepath.Base(filePath)
 	nodeID := graph.NewNodeID(string(graph.NodeDocument), filePath, fileName)
-	contentHash := fmt.Sprintf("sha256:%x", sha256.Sum256(content))
 
 	// Determine kind and MIME type.
 	kind := "text"
@@ -114,7 +120,7 @@ func (p *GenericParser) ParseFile(filePath string, content []byte) (*parser.Pars
 	// Extract content and topics based on file class.
 	switch class {
 	case FileClassText:
-		extraction := p.extractTopics(filePath, contentHash, content)
+		extraction := p.extractTopicsWithCtx(ctx, filePath, contentHash, content)
 		if extraction != nil {
 			docNode.DocComment = extraction.Summary
 			topicNodes, topicEdges := CreateTopicNodes(extraction.Topics, nodeID)
@@ -124,7 +130,7 @@ func (p *GenericParser) ParseFile(filePath string, content []byte) (*parser.Pars
 			docNode.DocComment = ExtractText(filePath, content)
 		}
 	case FileClassImage:
-		extraction := p.describeImage(filePath, contentHash, content, mimeType)
+		extraction := p.describeImageWithCtx(ctx, filePath, contentHash, content, mimeType)
 		if extraction != nil {
 			docNode.DocComment = extraction.Summary
 			topicNodes, topicEdges := CreateTopicNodes(extraction.Topics, nodeID)
@@ -134,19 +140,27 @@ func (p *GenericParser) ParseFile(filePath string, content []byte) (*parser.Pars
 			docNode.DocComment = fmt.Sprintf("Image file: %s (%s, %d bytes)", fileName, mimeType, len(content))
 		}
 	case FileClassDocument:
-		text, err := ExtractDocument(filePath, content)
-		if err != nil || len(strings.TrimSpace(text)) < 10 {
-			docNode.DocComment = fmt.Sprintf("Document file: %s (%s, %d bytes)", fileName, mimeType, len(content))
+		// Check cache FIRST — skip expensive extraction if already processed.
+		if cached := p.checkCache(filePath, contentHash); cached != nil {
+			docNode.DocComment = cached.Summary
+			topicNodes, topicEdges := CreateTopicNodes(cached.Topics, nodeID)
+			result.Nodes = append(result.Nodes, topicNodes...)
+			result.Edges = append(result.Edges, topicEdges...)
 		} else {
-			// Feed extracted text through LLM topic extraction if available.
-			extraction := p.extractTopics(filePath, contentHash, []byte(text))
-			if extraction != nil {
-				docNode.DocComment = extraction.Summary
-				topicNodes, topicEdges := CreateTopicNodes(extraction.Topics, nodeID)
-				result.Nodes = append(result.Nodes, topicNodes...)
-				result.Edges = append(result.Edges, topicEdges...)
+			text, err := ExtractDocumentWithCtx(ctx, filePath, content)
+			if err != nil || len(strings.TrimSpace(text)) < 10 {
+				docNode.DocComment = fmt.Sprintf("Document file: %s (%s, %d bytes)", fileName, mimeType, len(content))
 			} else {
-				docNode.DocComment = text
+				// Feed extracted text through LLM topic extraction if available.
+				extraction := p.extractTopicsWithCtx(ctx, filePath, contentHash, []byte(text))
+				if extraction != nil {
+					docNode.DocComment = extraction.Summary
+					topicNodes, topicEdges := CreateTopicNodes(extraction.Topics, nodeID)
+					result.Nodes = append(result.Nodes, topicNodes...)
+					result.Edges = append(result.Edges, topicEdges...)
+				} else {
+					docNode.DocComment = text
+				}
 			}
 		}
 	}
@@ -162,22 +176,37 @@ func (p *GenericParser) ParseFile(filePath string, content []byte) (*parser.Pars
 	return result, nil
 }
 
-// extractTopics tries to extract topics via LLM, using the cache for dedup.
+// checkCache checks the docs cache for a previously extracted result.
+// Returns nil if no cache, no match, or previously skipped.
+func (p *GenericParser) checkCache(filePath, contentHash string) *docs.ExtractionResult {
+	if p.docsCache == nil {
+		return nil
+	}
+	cached, err := p.docsCache.Check(filePath, contentHash)
+	if err == nil && cached != nil {
+		return cached
+	}
+	return nil
+}
+
+// isCacheSkipped returns true if extraction was previously skipped for this hash.
+func (p *GenericParser) isCacheSkipped(contentHash string) bool {
+	return p.docsCache != nil && p.docsCache.IsSkipped(contentHash)
+}
+
+// extractTopicsWithCtx tries to extract topics via LLM, using the cache for dedup.
 // Returns nil if no provider is available or extraction fails.
-func (p *GenericParser) extractTopics(filePath, contentHash string, content []byte) *docs.ExtractionResult {
+func (p *GenericParser) extractTopicsWithCtx(ctx context.Context, filePath, contentHash string, content []byte) *docs.ExtractionResult {
 	if p.docsProvider == nil {
 		return nil
 	}
 
 	// Check cache first.
-	if p.docsCache != nil {
-		cached, err := p.docsCache.Check(filePath, contentHash)
-		if err == nil && cached != nil {
-			return cached
-		}
-		if p.docsCache.IsSkipped(contentHash) {
-			return nil // previously failed, skip
-		}
+	if cached := p.checkCache(filePath, contentHash); cached != nil {
+		return cached
+	}
+	if p.isCacheSkipped(contentHash) {
+		return nil
 	}
 
 	text := ExtractText(filePath, content)
@@ -185,7 +214,6 @@ func (p *GenericParser) extractTopics(filePath, contentHash string, content []by
 		return nil // too short for meaningful extraction
 	}
 
-	ctx := context.TODO()
 	extraction, err := p.docsProvider.ExtractTopics(ctx, text)
 	if err != nil {
 		if p.docsCache != nil {
@@ -203,22 +231,19 @@ func (p *GenericParser) extractTopics(filePath, contentHash string, content []by
 	return extraction
 }
 
-// describeImage tries to describe an image via LLM, using the cache for dedup.
+// describeImageWithCtx tries to describe an image via LLM, using the cache for dedup.
 // Returns nil if no provider is available or description fails.
-func (p *GenericParser) describeImage(filePath, contentHash string, content []byte, mimeType string) *docs.ExtractionResult {
+func (p *GenericParser) describeImageWithCtx(ctx context.Context, filePath, contentHash string, content []byte, mimeType string) *docs.ExtractionResult {
 	if p.docsProvider == nil {
 		return nil
 	}
 
 	// Check cache first.
-	if p.docsCache != nil {
-		cached, err := p.docsCache.Check(filePath, contentHash)
-		if err == nil && cached != nil {
-			return cached
-		}
-		if p.docsCache.IsSkipped(contentHash) {
-			return nil
-		}
+	if cached := p.checkCache(filePath, contentHash); cached != nil {
+		return cached
+	}
+	if p.isCacheSkipped(contentHash) {
+		return nil
 	}
 
 	// Downscale image for LLM consumption.
@@ -228,7 +253,6 @@ func (p *GenericParser) describeImage(filePath, contentHash string, content []by
 		return nil
 	}
 
-	ctx := context.TODO()
 	extraction, err := p.docsProvider.DescribeImage(ctx, imgData, "image/jpeg")
 	if err != nil {
 		if p.docsCache != nil {

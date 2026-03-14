@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -167,13 +169,34 @@ func (idx *Indexer) IndexFileWithTimestamp(ctx context.Context, filePath string,
 		return fmt.Errorf("read file %s: %w", filePath, err)
 	}
 
+	contentHash := computeContentHash(content)
+	return idx.IndexFileWithContent(ctx, filePath, content, contentHash, updatedAt)
+}
+
+// IndexFileWithContent parses a single file using pre-read content and a
+// pre-computed content hash, updating the knowledge graph.
+// This avoids redundant file reads and hash computations when the caller
+// has already read the file (e.g., during sync with duplicate detection).
+func (idx *Indexer) IndexFileWithContent(ctx context.Context, filePath string, content []byte, contentHash string, updatedAt time.Time) error {
+	p, ok := idx.registry.ParserForFile(filePath)
+	if !ok {
+		return nil // no parser for this file
+	}
+
 	relPath := idx.toRelativePath(filePath)
 
 	if idx.verbose {
 		idx.log("Parsing %s (%s)...", relPath, p.Language())
 	}
 
-	result, err := p.ParseFile(relPath, content)
+	// Use ContentHashParser if available to avoid re-hashing in the parser.
+	var result *parser.ParseResult
+	var err error
+	if chp, ok := p.(parser.ContentHashParser); ok {
+		result, err = chp.ParseFileWithHash(ctx, relPath, content, contentHash)
+	} else {
+		result, err = p.ParseFile(relPath, content)
+	}
 	if err != nil {
 		return fmt.Errorf("parse file %s: %w", relPath, err)
 	}
@@ -183,7 +206,6 @@ func (idx *Indexer) IndexFileWithTimestamp(ctx context.Context, filePath string,
 	result = classifier.Classify(result)
 
 	// Inject content_hash and mime_type into file-type nodes that lack them.
-	contentHash := computeContentHash(content)
 	mimeType := detectMIMEType(relPath)
 	for _, node := range result.Nodes {
 		if isFileTypeNode(node.Type) && node.Type != graph.NodeDirectory {
@@ -338,6 +360,9 @@ func (idx *Indexer) IndexDirectory(ctx context.Context, dirPath string) error {
 		progress = newSyncProgress(totalFiles, "index", idx.log)
 	}
 
+	const gcInterval = 50
+	filesIndexedSinceGC := 0
+
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // skip inaccessible entries
@@ -371,6 +396,14 @@ func (idx *Indexer) IndexDirectory(ctx context.Context, dirPath string) error {
 			idx.errors = append(idx.errors, fmt.Sprintf("%s: %v", path, err))
 			idx.mu.Unlock()
 			// Continue indexing other files.
+		}
+
+		// Periodically force GC to reclaim large image pixel buffers.
+		filesIndexedSinceGC++
+		if filesIndexedSinceGC >= gcInterval {
+			runtime.GC()
+			debug.FreeOSMemory()
+			filesIndexedSinceGC = 0
 		}
 
 		if progress != nil {

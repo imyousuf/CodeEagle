@@ -9,6 +9,7 @@ import (
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/google/uuid"
+	"github.com/imyousuf/CodeEagle/internal/badgerutil"
 )
 
 // JobType identifies the kind of enrichment work.
@@ -92,8 +93,7 @@ type Store struct {
 
 // Open opens a queue store at the given path.
 func Open(dbPath string) (*Store, error) {
-	opts := badger.DefaultOptions(dbPath)
-	opts.Logger = nil
+	opts := badgerutil.TunedOptions(dbPath, badgerutil.DBRoleTertiary)
 	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, fmt.Errorf("open queue store: %w", err)

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/dgraph-io/badger/v4"
+	"github.com/imyousuf/CodeEagle/internal/badgerutil"
 	"github.com/imyousuf/CodeEagle/internal/graph"
 )
 
@@ -35,8 +36,7 @@ type BranchStore struct {
 // the given write branch and read branches (ordered by priority).
 // The DB is opened in read-write mode with an exclusive lock.
 func NewBranchStore(dbPath, writeBranch string, readBranches []string) (*BranchStore, error) {
-	opts := badger.DefaultOptions(dbPath)
-	opts.Logger = nil // suppress badger logs
+	opts := badgerutil.TunedOptions(dbPath, badgerutil.DBRolePrimary)
 	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, fmt.Errorf("open badger db: %w", err)
@@ -60,9 +60,7 @@ func NewReadOnlyBranchStore(dbPath, writeBranch string, readBranches []string) (
 // recovery (ErrTruncateNeeded), it briefly opens in read-write mode to flush the
 // WAL, closes, and retries read-only.
 func openBadgerReadOnly(dbPath string) (*badger.DB, error) {
-	opts := badger.DefaultOptions(dbPath)
-	opts.Logger = nil
-	opts.ReadOnly = true
+	opts := badgerutil.TunedOptionsReadOnly(dbPath, badgerutil.DBRolePrimary)
 
 	db, err := badger.Open(opts)
 	if err == nil {
@@ -76,8 +74,7 @@ func openBadgerReadOnly(dbPath string) (*badger.DB, error) {
 
 	// WAL needs recovery — briefly open in write mode to let BadgerDB
 	// auto-recover the WAL, then close and retry read-only.
-	repairOpts := badger.DefaultOptions(dbPath)
-	repairOpts.Logger = nil
+	repairOpts := badgerutil.TunedOptions(dbPath, badgerutil.DBRolePrimary)
 	repairDB, repairErr := badger.Open(repairOpts)
 	if repairErr != nil {
 		return nil, fmt.Errorf("repair badger WAL: %w", repairErr)

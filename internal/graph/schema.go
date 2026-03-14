@@ -75,22 +75,22 @@ const (
 type EdgeType string
 
 const (
-	EdgeContains   EdgeType = "Contains"
-	EdgeImports    EdgeType = "Imports"
-	EdgeDependsOn  EdgeType = "DependsOn"
-	EdgeCalls      EdgeType = "Calls"
-	EdgeImplements EdgeType = "Implements"
-	EdgeExposes    EdgeType = "Exposes"
-	EdgeConsumes   EdgeType = "Consumes"
-	EdgeDocuments  EdgeType = "Documents"
-	EdgeTests      EdgeType = "Tests"
-	EdgeMigrates   EdgeType = "Migrates"
-	EdgeConfigures EdgeType = "Configures"
-	EdgeHasTopic   EdgeType = "HasTopic"
-	EdgeAppearsIn    EdgeType = "AppearsIn"
-	EdgeUpdatedOn    EdgeType = "UpdatedOn"
-	EdgeDuplicateOf  EdgeType = "DuplicateOf"
-	EdgeSymLink      EdgeType = "SymLink"
+	EdgeContains    EdgeType = "Contains"
+	EdgeImports     EdgeType = "Imports"
+	EdgeDependsOn   EdgeType = "DependsOn"
+	EdgeCalls       EdgeType = "Calls"
+	EdgeImplements  EdgeType = "Implements"
+	EdgeExposes     EdgeType = "Exposes"
+	EdgeConsumes    EdgeType = "Consumes"
+	EdgeDocuments   EdgeType = "Documents"
+	EdgeTests       EdgeType = "Tests"
+	EdgeMigrates    EdgeType = "Migrates"
+	EdgeConfigures  EdgeType = "Configures"
+	EdgeHasTopic    EdgeType = "HasTopic"
+	EdgeAppearsIn   EdgeType = "AppearsIn"
+	EdgeUpdatedOn   EdgeType = "UpdatedOn"
+	EdgeDuplicateOf EdgeType = "DuplicateOf"
+	EdgeSymLink     EdgeType = "SymLink"
 )
 
 // Node represents a source code or documentation entity in the knowledge graph.

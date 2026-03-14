@@ -3,6 +3,7 @@ package generic
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -372,7 +373,7 @@ func TestExtractODP(t *testing.T) {
 
 func TestExtractPDF(t *testing.T) {
 	content := createTestPDF()
-	text, err := extractPDF(content)
+	text, err := extractPDF(context.Background(), content)
 	if err != nil {
 		t.Fatalf("extractPDF() error: %v", err)
 	}
@@ -389,7 +390,7 @@ func TestExtractPDF_LargeFile(t *testing.T) {
 		t.Skipf("large PDF test fixture not available: %v", err)
 	}
 
-	text, err := extractPDF(content)
+	text, err := extractPDF(context.Background(), content)
 	if err != nil {
 		t.Fatalf("extractPDF() error on large file: %v", err)
 	}
@@ -419,7 +420,7 @@ func TestExtractPDF_LargeFile(t *testing.T) {
 
 func TestExtractPDF_PageMarkers(t *testing.T) {
 	content := createTestPDF()
-	text, err := extractPDF(content)
+	text, err := extractPDF(context.Background(), content)
 	if err != nil {
 		t.Fatalf("extractPDF() error: %v", err)
 	}

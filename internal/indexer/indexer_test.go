@@ -497,3 +497,108 @@ func TestChangedFilesUnsupportedExtensionNotTracked(t *testing.T) {
 		t.Error("expected HasChanges=false after indexing unsupported file type")
 	}
 }
+
+func TestIndexFileWithContent(t *testing.T) {
+	idx, store := setupTestIndexer(t)
+	ctx := context.Background()
+
+	// Create a temp Go file.
+	tmpDir := t.TempDir()
+	goFile := filepath.Join(tmpDir, "calc.go")
+	content := []byte(`package calc
+
+func Add(a, b int) int {
+	return a + b
+}
+`)
+	if err := os.WriteFile(goFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(goFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-compute hash.
+	hash := computeContentHash(content)
+
+	// Index using IndexFileWithContent.
+	if err := idx.IndexFileWithContent(ctx, goFile, content, hash, info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify nodes are in the graph.
+	stats, _ := store.Stats(ctx)
+	if stats.NodeCount == 0 {
+		t.Error("expected nodes in graph after IndexFileWithContent, got 0")
+	}
+	if stats.NodesByType[graph.NodeFunction] == 0 {
+		t.Error("expected Function node from IndexFileWithContent")
+	}
+
+	// Verify content_hash was injected.
+	nodes, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeFile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) == 0 {
+		t.Fatal("expected at least 1 File node")
+	}
+	if got := nodes[0].Properties[graph.PropContentHash]; got != hash {
+		t.Errorf("content_hash = %q, want %q", got, hash)
+	}
+
+	// Verify FilesIndexed was incremented.
+	idxStats := idx.Stats()
+	if idxStats.FilesIndexed != 1 {
+		t.Errorf("expected FilesIndexed=1, got %d", idxStats.FilesIndexed)
+	}
+}
+
+func TestIndexFileWithContent_MatchesIndexFileWithTimestamp(t *testing.T) {
+	// Two indexers, same file — one uses IndexFileWithTimestamp, the other
+	// uses IndexFileWithContent. Both should produce the same nodes.
+	tmpDir := t.TempDir()
+	goFile := filepath.Join(tmpDir, "svc.go")
+	content := []byte(`package svc
+
+type Service struct{}
+
+func (s *Service) Run() {}
+`)
+	if err := os.WriteFile(goFile, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(goFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+
+	// Indexer A: IndexFileWithTimestamp
+	idxA, storeA := setupTestIndexer(t)
+	if err := idxA.IndexFileWithTimestamp(ctx, goFile, info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Indexer B: IndexFileWithContent
+	idxB, storeB := setupTestIndexer(t)
+	hash := computeContentHash(content)
+	if err := idxB.IndexFileWithContent(ctx, goFile, content, hash, info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+
+	statsA, _ := storeA.Stats(ctx)
+	statsB, _ := storeB.Stats(ctx)
+
+	if statsA.NodeCount != statsB.NodeCount {
+		t.Errorf("node count mismatch: IndexFileWithTimestamp=%d, IndexFileWithContent=%d",
+			statsA.NodeCount, statsB.NodeCount)
+	}
+	if statsA.EdgeCount != statsB.EdgeCount {
+		t.Errorf("edge count mismatch: IndexFileWithTimestamp=%d, IndexFileWithContent=%d",
+			statsA.EdgeCount, statsB.EdgeCount)
+	}
+}

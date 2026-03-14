@@ -154,3 +154,80 @@ func TestBackpopSkipsAlreadyPopulated(t *testing.T) {
 		t.Errorf("expected 0 updates for already-populated nodes, got %d", count)
 	}
 }
+
+func TestHasMatchingUpdatedAt(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	// No nodes — should return false.
+	if hasMatchingUpdatedAt(ctx, store, "nofile.go", now) {
+		t.Error("expected false for nonexistent file")
+	}
+
+	// Add a File node with matching UpdatedAt.
+	node := &graph.Node{
+		ID:        graph.NewNodeID(string(graph.NodeFile), "main.go", "main.go"),
+		Type:      graph.NodeFile,
+		Name:      "main.go",
+		FilePath:  "main.go",
+		UpdatedAt: now,
+	}
+	if err := store.AddNode(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+
+	if !hasMatchingUpdatedAt(ctx, store, "main.go", now) {
+		t.Error("expected true for matching mtime")
+	}
+
+	// Different mtime — should return false.
+	if hasMatchingUpdatedAt(ctx, store, "main.go", now.Add(time.Second)) {
+		t.Error("expected false for mismatched mtime")
+	}
+}
+
+func TestHasMatchingUpdatedAt_DocumentNode(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	// Add a Document node (not File) — should still match.
+	node := &graph.Node{
+		ID:        graph.NewNodeID(string(graph.NodeDocument), "photo.jpg", "photo.jpg"),
+		Type:      graph.NodeDocument,
+		Name:      "photo.jpg",
+		FilePath:  "photo.jpg",
+		UpdatedAt: now,
+	}
+	if err := store.AddNode(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+
+	if !hasMatchingUpdatedAt(ctx, store, "photo.jpg", now) {
+		t.Error("expected true for Document node with matching mtime")
+	}
+}
+
+func TestHasMatchingUpdatedAt_IgnoresNonFileTypeNodes(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	// Add a Function node (not a file-type) with matching UpdatedAt.
+	node := &graph.Node{
+		ID:        graph.NewNodeID(string(graph.NodeFunction), "main.go", "Add"),
+		Type:      graph.NodeFunction,
+		Name:      "Add",
+		FilePath:  "main.go",
+		UpdatedAt: now,
+	}
+	if err := store.AddNode(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should return false because NodeFunction is not a file-type node.
+	if hasMatchingUpdatedAt(ctx, store, "main.go", now) {
+		t.Error("expected false — Function nodes should not count as file-type nodes")
+	}
+}

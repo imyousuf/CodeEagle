@@ -87,16 +87,14 @@ func BackpopUpdatedAt(ctx context.Context, store graph.Store, repoRoots []string
 
 // hasMatchingUpdatedAt checks if any file-type node in the DB for the given
 // relative path has an UpdatedAt that matches the provided mtime.
+// Uses a single query by FilePath instead of 5 per-type queries.
 func hasMatchingUpdatedAt(ctx context.Context, store graph.Store, relPath string, modTime time.Time) bool {
-	for _, nodeType := range fileTypeNodes {
-		nodes, err := store.QueryNodes(ctx, graph.NodeFilter{
-			FilePath: relPath, Type: nodeType,
-		})
-		if err != nil {
-			continue
-		}
-		if len(nodes) > 0 && !nodes[0].UpdatedAt.IsZero() &&
-			nodes[0].UpdatedAt.Equal(modTime) {
+	nodes, err := store.QueryNodes(ctx, graph.NodeFilter{FilePath: relPath})
+	if err != nil {
+		return false
+	}
+	for _, node := range nodes {
+		if isFileTypeNode(node.Type) && !node.UpdatedAt.IsZero() && node.UpdatedAt.Equal(modTime) {
 			return true
 		}
 	}
