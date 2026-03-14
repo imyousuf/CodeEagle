@@ -16,17 +16,19 @@ import (
 
 // DocExtractHandler handles document text extraction and topic analysis.
 type DocExtractHandler struct {
-	provider docs.Provider
-	cache    *docs.Cache
-	store    graph.Store
+	provider  docs.Provider
+	cache     *docs.Cache
+	store     graph.Store
+	repoRoots []string
 }
 
 // NewDocExtractHandler creates a handler for doc-extract jobs.
-func NewDocExtractHandler(provider docs.Provider, cache *docs.Cache, store graph.Store) *DocExtractHandler {
+func NewDocExtractHandler(provider docs.Provider, cache *docs.Cache, store graph.Store, repoRoots []string) *DocExtractHandler {
 	return &DocExtractHandler{
-		provider: provider,
-		cache:    cache,
-		store:    store,
+		provider:  provider,
+		cache:     cache,
+		store:     store,
+		repoRoots: repoRoots,
 	}
 }
 
@@ -36,9 +38,11 @@ func (h *DocExtractHandler) Handle(ctx context.Context, job *Job) (json.RawMessa
 		return nil, fmt.Errorf("no file paths in job")
 	}
 
+	relPath := job.FilePaths[0]
+
 	// Check cache first.
 	if h.cache != nil {
-		cached, err := h.cache.Check(job.FilePaths[0], job.ContentHash)
+		cached, err := h.cache.Check(relPath, job.ContentHash)
 		if err == nil && cached != nil {
 			h.updateNodes(ctx, job, cached)
 			return marshalResult(cached)
@@ -48,26 +52,29 @@ func (h *DocExtractHandler) Handle(ctx context.Context, job *Job) (json.RawMessa
 		}
 	}
 
+	// Resolve to absolute path for file I/O.
+	absPath := resolveFilePath(relPath, h.repoRoots)
+
 	// Read file content.
-	content, err := os.ReadFile(job.FilePaths[0])
+	content, err := os.ReadFile(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
 
 	// Extract text based on file type.
-	fileClass := genericparser.Classify(job.FilePaths[0], nil)
+	fileClass := genericparser.Classify(relPath, nil)
 	var text string
 	switch fileClass {
 	case genericparser.FileClassDocument:
-		text, err = genericparser.ExtractDocument(job.FilePaths[0], content)
+		text, err = genericparser.ExtractDocument(relPath, content)
 		if err != nil {
 			if h.cache != nil {
-				_ = h.cache.MarkSkipped(job.FilePaths[0], job.ContentHash)
+				_ = h.cache.MarkSkipped(relPath, job.ContentHash)
 			}
 			return nil, fmt.Errorf("extract document: %w", err)
 		}
 	default:
-		text = genericparser.ExtractText(job.FilePaths[0], content)
+		text = genericparser.ExtractText(relPath, content)
 	}
 
 	if strings.TrimSpace(text) == "" {
@@ -82,14 +89,14 @@ func (h *DocExtractHandler) Handle(ctx context.Context, job *Job) (json.RawMessa
 	result, err := h.provider.ExtractTopics(ctx, text)
 	if err != nil {
 		if h.cache != nil {
-			_ = h.cache.MarkSkipped(job.FilePaths[0], job.ContentHash)
+			_ = h.cache.MarkSkipped(relPath, job.ContentHash)
 		}
 		return nil, fmt.Errorf("extract topics: %w", err)
 	}
 
 	// Store in cache.
 	if h.cache != nil {
-		_ = h.cache.Store(job.FilePaths[0], job.ContentHash, result)
+		_ = h.cache.Store(relPath, job.ContentHash, result)
 	}
 
 	// Update graph nodes.
@@ -119,10 +126,11 @@ type ImageDescribeHandler struct {
 	cache       *docs.Cache
 	store       graph.Store
 	maxImageRes int
+	repoRoots   []string
 }
 
 // NewImageDescribeHandler creates a handler for image-describe jobs.
-func NewImageDescribeHandler(provider docs.Provider, cache *docs.Cache, store graph.Store, maxImageRes int) *ImageDescribeHandler {
+func NewImageDescribeHandler(provider docs.Provider, cache *docs.Cache, store graph.Store, maxImageRes int, repoRoots []string) *ImageDescribeHandler {
 	if maxImageRes <= 0 {
 		maxImageRes = 1024
 	}
@@ -131,6 +139,7 @@ func NewImageDescribeHandler(provider docs.Provider, cache *docs.Cache, store gr
 		cache:       cache,
 		store:       store,
 		maxImageRes: maxImageRes,
+		repoRoots:   repoRoots,
 	}
 }
 
@@ -140,9 +149,11 @@ func (h *ImageDescribeHandler) Handle(ctx context.Context, job *Job) (json.RawMe
 		return nil, fmt.Errorf("no file paths in job")
 	}
 
+	relPath := job.FilePaths[0]
+
 	// Check cache first.
 	if h.cache != nil {
-		cached, err := h.cache.Check(job.FilePaths[0], job.ContentHash)
+		cached, err := h.cache.Check(relPath, job.ContentHash)
 		if err == nil && cached != nil {
 			h.updateNodes(ctx, job, cached)
 			return marshalResult(cached)
@@ -156,18 +167,21 @@ func (h *ImageDescribeHandler) Handle(ctx context.Context, job *Job) (json.RawMe
 		return nil, nil
 	}
 
+	// Resolve to absolute path for file I/O.
+	absPath := resolveFilePath(relPath, h.repoRoots)
+
 	// Read image file.
-	content, err := os.ReadFile(job.FilePaths[0])
+	content, err := os.ReadFile(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
 
 	// Detect MIME type and downscale.
-	mimeType := detectMIME(job.FilePaths[0])
+	mimeType := detectMIME(relPath)
 	imgData, _, _, err := genericparser.DownscaleImage(content, mimeType, h.maxImageRes)
 	if err != nil {
 		if h.cache != nil {
-			_ = h.cache.MarkSkipped(job.FilePaths[0], job.ContentHash)
+			_ = h.cache.MarkSkipped(relPath, job.ContentHash)
 		}
 		return nil, fmt.Errorf("downscale image: %w", err)
 	}
@@ -176,14 +190,14 @@ func (h *ImageDescribeHandler) Handle(ctx context.Context, job *Job) (json.RawMe
 	result, err := h.provider.DescribeImage(ctx, imgData, "image/jpeg")
 	if err != nil {
 		if h.cache != nil {
-			_ = h.cache.MarkSkipped(job.FilePaths[0], job.ContentHash)
+			_ = h.cache.MarkSkipped(relPath, job.ContentHash)
 		}
 		return nil, fmt.Errorf("describe image: %w", err)
 	}
 
 	// Store in cache.
 	if h.cache != nil {
-		_ = h.cache.Store(job.FilePaths[0], job.ContentHash, result)
+		_ = h.cache.Store(relPath, job.ContentHash, result)
 	}
 
 	// Update graph nodes.
@@ -229,6 +243,21 @@ func applyExtraction(ctx context.Context, store graph.Store, node *graph.Node, r
 	for _, te := range topicEdges {
 		_ = store.AddEdge(ctx, te)
 	}
+}
+
+// resolveFilePath converts a relative path to absolute using repo roots.
+// If the path is already absolute or no roots match, returns the path as-is.
+func resolveFilePath(relPath string, repoRoots []string) string {
+	if filepath.IsAbs(relPath) {
+		return relPath
+	}
+	for _, root := range repoRoots {
+		abs := filepath.Join(root, relPath)
+		if _, err := os.Stat(abs); err == nil {
+			return abs
+		}
+	}
+	return relPath // fallback to original (will fail at I/O with clear error)
 }
 
 // detectMIME returns the MIME type for a file based on its extension.

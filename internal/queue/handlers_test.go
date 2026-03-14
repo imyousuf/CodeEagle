@@ -148,7 +148,7 @@ func TestDocExtractHandler_CacheHit(t *testing.T) {
 		},
 	})
 
-	handler := NewDocExtractHandler(&mockProvider{}, cache, store)
+	handler := NewDocExtractHandler(&mockProvider{}, cache, store, nil)
 	job := &Job{
 		ContentHash: "sha256:abc",
 		FilePaths:   []string{filePath},
@@ -199,7 +199,7 @@ func TestDocExtractHandler_CacheMiss(t *testing.T) {
 		},
 	}
 
-	handler := NewDocExtractHandler(provider, cache, store)
+	handler := NewDocExtractHandler(provider, cache, store, nil)
 	job := &Job{
 		ContentHash: "sha256:newdoc",
 		FilePaths:   []string{filePath},
@@ -240,7 +240,7 @@ func TestDocExtractHandler_ProviderError(t *testing.T) {
 		},
 	}
 
-	handler := NewDocExtractHandler(provider, nil, store)
+	handler := NewDocExtractHandler(provider, nil, store, nil)
 	job := &Job{
 		ContentHash: "sha256:err",
 		FilePaths:   []string{filePath},
@@ -257,7 +257,7 @@ func TestDocExtractHandler_NilProvider(t *testing.T) {
 
 	filePath := createTestFile(t, "test.txt", "Some text content")
 
-	handler := NewDocExtractHandler(nil, nil, store)
+	handler := NewDocExtractHandler(nil, nil, store, nil)
 	job := &Job{
 		ContentHash: "sha256:noprov",
 		FilePaths:   []string{filePath},
@@ -293,7 +293,7 @@ func TestDocExtractHandler_MultiPath(t *testing.T) {
 		Properties: map[string]string{"content_hash": "sha256:same"},
 	})
 
-	handler := NewDocExtractHandler(&mockProvider{}, nil, store)
+	handler := NewDocExtractHandler(&mockProvider{}, nil, store, nil)
 	job := &Job{
 		ContentHash: "sha256:same",
 		FilePaths:   []string{path1, path2},
@@ -334,7 +334,7 @@ func TestImageDescribeHandler_CacheHit(t *testing.T) {
 		Properties: map[string]string{"content_hash": "sha256:img1"},
 	})
 
-	handler := NewImageDescribeHandler(&mockProvider{}, cache, store, 1024)
+	handler := NewImageDescribeHandler(&mockProvider{}, cache, store, 1024, nil)
 	job := &Job{
 		ContentHash: "sha256:img1",
 		FilePaths:   []string{filePath},
@@ -359,7 +359,7 @@ func TestImageDescribeHandler_NilProvider(t *testing.T) {
 
 	filePath := createTestFile(t, "photo.png", "fake png data")
 
-	handler := NewImageDescribeHandler(nil, nil, store, 1024)
+	handler := NewImageDescribeHandler(nil, nil, store, 1024, nil)
 	job := &Job{
 		ContentHash: "sha256:noimg",
 		FilePaths:   []string{filePath},

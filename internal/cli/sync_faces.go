@@ -88,7 +88,7 @@ func registerFaceHandlers(
 
 	queue.RegisterFaceHandlers(
 		pool, detector, faceStore, branchStore, classifier,
-		autoAccept, simThreshold, minCluster,
+		autoAccept, simThreshold, minCluster, repoPaths(cfg),
 	)
 
 	warnFn("[faces] Face handlers registered (K=%d, auto-accept=%.2f)", classifyK, autoAccept)

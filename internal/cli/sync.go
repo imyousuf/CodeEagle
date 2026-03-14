@@ -357,8 +357,9 @@ func runQueueEnrichment(
 	}
 
 	pool := queue.NewWorkerPool(qs, throttler, emitter)
-	pool.Register(queue.JobDocExtract, queue.NewDocExtractHandler(docsProvider, docsCache, graphStore))
-	pool.Register(queue.JobImageDescribe, queue.NewImageDescribeHandler(docsProvider, docsCache, graphStore, cfg.Docs.MaxImageRes))
+	paths := repoPaths(cfg)
+	pool.Register(queue.JobDocExtract, queue.NewDocExtractHandler(docsProvider, docsCache, graphStore, paths))
+	pool.Register(queue.JobImageDescribe, queue.NewImageDescribeHandler(docsProvider, docsCache, graphStore, cfg.Docs.MaxImageRes, paths))
 
 	cleanupFaces := registerFaceHandlers(pool, cfg, graphStore, warnFn)
 	defer cleanupFaces()
