@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/dgraph-io/badger/v4"
+	"github.com/imyousuf/CodeEagle/internal/badgerutil"
 )
 
 const (
@@ -37,8 +38,7 @@ type Store struct {
 
 // OpenStore opens (or creates) the face store at the given directory path.
 func OpenStore(dbPath string) (*Store, error) {
-	opts := badger.DefaultOptions(dbPath)
-	opts.Logger = nil
+	opts := badgerutil.TunedOptions(dbPath, badgerutil.DBRoleTertiary)
 	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, fmt.Errorf("open face store: %w", err)

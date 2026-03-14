@@ -13,6 +13,7 @@ import (
 
 	"github.com/coder/hnsw"
 	"github.com/dgraph-io/badger/v4"
+	"github.com/imyousuf/CodeEagle/internal/badgerutil"
 	"github.com/imyousuf/CodeEagle/internal/embedding"
 	"github.com/imyousuf/CodeEagle/internal/graph"
 )
@@ -69,9 +70,7 @@ type VectorStore struct {
 // openBadgerReadOnly tries to open BadgerDB in read-only mode. If the WAL needs
 // recovery, it briefly opens in write mode to flush, closes, and retries read-only.
 func openBadgerReadOnly(dbPath string) (*badger.DB, error) {
-	opts := badger.DefaultOptions(dbPath)
-	opts.Logger = nil
-	opts.ReadOnly = true
+	opts := badgerutil.TunedOptionsReadOnly(dbPath, badgerutil.DBRoleSecondary)
 
 	db, err := badger.Open(opts)
 	if err == nil {
@@ -83,8 +82,7 @@ func openBadgerReadOnly(dbPath string) (*badger.DB, error) {
 	}
 
 	// WAL needs recovery — briefly open in write mode.
-	repairOpts := badger.DefaultOptions(dbPath)
-	repairOpts.Logger = nil
+	repairOpts := badgerutil.TunedOptions(dbPath, badgerutil.DBRoleSecondary)
 	repairDB, repairErr := badger.Open(repairOpts)
 	if repairErr != nil {
 		return nil, fmt.Errorf("repair badger WAL: %w", repairErr)
@@ -116,8 +114,7 @@ func newVectorStore(graphDB graph.Store, embedder embedding.Provider, branch, id
 	if readOnly {
 		db, err = openBadgerReadOnly(dbPath)
 	} else {
-		opts := badger.DefaultOptions(dbPath)
-		opts.Logger = nil
+		opts := badgerutil.TunedOptions(dbPath, badgerutil.DBRoleSecondary)
 		db, err = badger.Open(opts)
 	}
 	if err != nil {

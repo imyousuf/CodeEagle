@@ -1,6 +1,7 @@
 package generic
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,11 @@ import (
 // ExtractDocument extracts plain text from a document file based on its extension.
 // Supports OOXML (DOCX, PPTX, XLSX), ODF (ODT, ODS, ODP), and PDF formats.
 func ExtractDocument(filePath string, content []byte) (string, error) {
+	return ExtractDocumentWithCtx(context.TODO(), filePath, content)
+}
+
+// ExtractDocumentWithCtx is like ExtractDocument but accepts a context for cancellation.
+func ExtractDocumentWithCtx(ctx context.Context, filePath string, content []byte) (string, error) {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {
 	case ".docx":
@@ -24,7 +30,7 @@ func ExtractDocument(filePath string, content []byte) (string, error) {
 	case ".odp":
 		return extractODP(content)
 	case ".pdf":
-		return extractPDF(content)
+		return extractPDF(ctx, content)
 	default:
 		return "", fmt.Errorf("unsupported document format: %s", ext)
 	}

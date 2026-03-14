@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/dgraph-io/badger/v4"
+	"github.com/imyousuf/CodeEagle/internal/badgerutil"
 )
 
 const (
@@ -24,8 +25,7 @@ type Cache struct {
 
 // OpenCache opens (or creates) the docs cache at the given directory path.
 func OpenCache(dbPath string) (*Cache, error) {
-	opts := badger.DefaultOptions(dbPath)
-	opts.Logger = nil
+	opts := badgerutil.TunedOptions(dbPath, badgerutil.DBRoleSecondary)
 	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, fmt.Errorf("open docs cache: %w", err)

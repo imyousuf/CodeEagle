@@ -45,10 +45,10 @@ func TestIsLocalBuild(t *testing.T) {
 		{"12b180f", true},
 		{"12b180f-dirty", true},
 		// Edge cases.
-		{"", true},         // empty version
-		{"v", false},       // just "v" with no digits — technically clean (degenerate)
-		{"1.0.0", true},    // no v prefix
-		{"latest", true},   // random string
+		{"", true},           // empty version
+		{"v", false},         // just "v" with no digits — technically clean (degenerate)
+		{"1.0.0", true},      // no v prefix
+		{"latest", true},     // random string
 		{"v1.0.0-rc1", true}, // pre-release suffix
 	}
 	for _, tt := range tests {

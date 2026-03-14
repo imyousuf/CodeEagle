@@ -71,14 +71,14 @@ func TestSyncStateFileHashes(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	original := &SyncState{
 		FileTimes: map[string]time.Time{
-			"Photos/IMG_001.jpg":   now,
-			"Backup/IMG_001.jpg":   now,
-			"Photos/document.pdf":  now,
+			"Photos/IMG_001.jpg":  now,
+			"Backup/IMG_001.jpg":  now,
+			"Photos/document.pdf": now,
 		},
 		FileHashes: map[string]string{
-			"Photos/IMG_001.jpg":   "sha256:abc123",
-			"Backup/IMG_001.jpg":   "sha256:abc123", // duplicate
-			"Photos/document.pdf":  "sha256:def456",
+			"Photos/IMG_001.jpg":  "sha256:abc123",
+			"Backup/IMG_001.jpg":  "sha256:abc123", // duplicate
+			"Photos/document.pdf": "sha256:def456",
 		},
 	}
 

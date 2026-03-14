@@ -2,7 +2,6 @@ package indexer
 
 import (
 	"context"
-	"os"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
 )
@@ -37,7 +36,9 @@ func BackpopContentHash(ctx context.Context, store graph.Store, repoRoots []stri
 				continue // file not found under any repo root
 			}
 
-			content, err := os.ReadFile(absPath)
+			// Use streaming hash to avoid loading entire file into memory.
+			// Large files (20-40MB images) would otherwise cause heap pressure.
+			hash, err := computeContentHashFromFile(absPath)
 			if err != nil {
 				continue // file no longer readable
 			}
@@ -45,7 +46,7 @@ func BackpopContentHash(ctx context.Context, store graph.Store, repoRoots []stri
 			if node.Properties == nil {
 				node.Properties = make(map[string]string)
 			}
-			node.Properties[graph.PropContentHash] = computeContentHash(content)
+			node.Properties[graph.PropContentHash] = hash
 			if node.Properties[graph.PropMimeType] == "" {
 				node.Properties[graph.PropMimeType] = detectMIMEType(node.FilePath)
 			}
