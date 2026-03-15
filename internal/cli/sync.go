@@ -351,8 +351,15 @@ func runQueueEnrichment(
 	var completed atomic.Int32
 	total := pending
 	emitter := func(event string, data ...any) {
-		if event == "sync:progress" {
+		switch event {
+		case "sync:progress":
 			completed.Add(1)
+		case "job:failed":
+			if len(data) > 0 {
+				if m, ok := data[0].(map[string]string); ok {
+					warnFn("[queue] %s failed for %s: %s", m["type"], m["file"], m["error"])
+				}
+			}
 		}
 	}
 
@@ -395,7 +402,10 @@ func runQueueEnrichment(
 	logFn("[queue] Enrichment complete: %d done, %d failed, %d skipped", stats.Done, stats.Failed, stats.Skipped)
 
 	if err := qs.PurgeCompleted(); err != nil {
-		warnFn("Warning: queue purge: %v", err)
+		warnFn("Warning: queue purge completed: %v", err)
+	}
+	if err := qs.PurgeFailed(); err != nil {
+		warnFn("Warning: queue purge failed: %v", err)
 	}
 
 	return nil

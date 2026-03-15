@@ -178,13 +178,25 @@ func (wp *WorkerPool) processJob(job *Job) {
 
 	result, err := handler.Handle(wp.ctx, job)
 	if err != nil {
+		errMsg := fmt.Sprintf("%v", err)
 		// Record failure (persists incremented attempts in the store).
-		_ = wp.queue.Fail(job.ID, fmt.Sprintf("%v", err))
+		_ = wp.queue.Fail(job.ID, errMsg)
 
 		// Check persisted state to decide on retry.
 		updated, _ := wp.queue.GetJob(job.ID)
 		if updated != nil && updated.Attempts < job.MaxRetries {
 			_ = wp.queue.Requeue(job.ID)
+		} else {
+			// Final failure — emit for logging.
+			filePath := ""
+			if len(job.FilePaths) > 0 {
+				filePath = job.FilePaths[0]
+			}
+			wp.emit("job:failed", map[string]string{
+				"type":  string(job.Type),
+				"file":  filePath,
+				"error": errMsg,
+			})
 		}
 		return
 	}

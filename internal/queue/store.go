@@ -613,6 +613,70 @@ func (s *Store) PurgeCompleted() error {
 	return nil
 }
 
+// PurgeFailed removes failed jobs that have exhausted their retries,
+// clearing their hash keys so they can be re-enqueued on the next run.
+func (s *Store) PurgeFailed() error {
+	type deleteSet struct {
+		jobKey  []byte
+		idxKey  []byte
+		hashKey []byte
+	}
+	var toDelete []deleteSet
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = true
+		opts.Prefix = []byte(prefixJob)
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek([]byte(prefixJob)); it.Valid(); it.Next() {
+			var job Job
+			err := it.Item().Value(func(val []byte) error {
+				return json.Unmarshal(val, &job)
+			})
+			if err != nil {
+				continue
+			}
+			if job.Status == StatusFailed && job.Attempts >= job.MaxRetries {
+				ds := deleteSet{
+					jobKey: it.Item().KeyCopy(nil),
+					idxKey: indexKey(job.Type, job.Status, job.Priority, job.ID),
+				}
+				if job.ContentHash != "" {
+					ds.hashKey = hashKey(job.ContentHash)
+				}
+				toDelete = append(toDelete, ds)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	const batchSize = 100
+	for i := 0; i < len(toDelete); i += batchSize {
+		end := min(i+batchSize, len(toDelete))
+		batch := toDelete[i:end]
+
+		err := s.db.Update(func(txn *badger.Txn) error {
+			for _, ds := range batch {
+				_ = txn.Delete(ds.jobKey)
+				_ = txn.Delete(ds.idxKey)
+				if ds.hashKey != nil {
+					_ = txn.Delete(ds.hashKey)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RecoverStalled resets any jobs stuck in "running" status back to "pending".
 // Called on startup to handle jobs orphaned by a crash.
 func (s *Store) RecoverStalled() error {
