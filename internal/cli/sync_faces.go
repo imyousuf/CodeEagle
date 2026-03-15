@@ -12,6 +12,8 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/queue"
 )
 
+func init() { facesAvailable = true }
+
 // registerFaceHandlers opens the face detector and face store, registers
 // face-detect and face-cluster handlers on the worker pool, and returns a
 // cleanup function. Compiled only with the "faces" build tag.

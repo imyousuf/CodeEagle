@@ -52,6 +52,11 @@ func (m *mockPersonStore) IndexImage(meta *embedded.ImageMetadata) error {
 	return nil
 }
 
+func (m *mockPersonStore) ClearAllImageScanned() error {
+	m.scanned = make(map[string]bool)
+	return nil
+}
+
 func TestMarshalFaceResult(t *testing.T) {
 	result := marshalFaceResult("detected", "/photo.jpg", 3)
 	if result == nil {

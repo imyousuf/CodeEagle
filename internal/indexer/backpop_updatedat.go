@@ -85,6 +85,26 @@ func BackpopUpdatedAt(ctx context.Context, store graph.Store, repoRoots []string
 	return updated, nil
 }
 
+// maxUpdatedAt returns the maximum UpdatedAt timestamp across all file-type
+// nodes in the graph. Used as a "high-water mark" during directory sync: any
+// file with mtime <= watermark can be assumed unchanged without a per-file DB
+// query. Returns zero time if no file-type nodes exist.
+func maxUpdatedAt(ctx context.Context, store graph.Store) (time.Time, error) {
+	var maxTime time.Time
+	for _, nodeType := range fileTypeNodes {
+		nodes, err := store.QueryNodes(ctx, graph.NodeFilter{Type: nodeType})
+		if err != nil {
+			return maxTime, err
+		}
+		for _, node := range nodes {
+			if node.UpdatedAt.After(maxTime) {
+				maxTime = node.UpdatedAt
+			}
+		}
+	}
+	return maxTime, nil
+}
+
 // hasMatchingUpdatedAt checks if any file-type node in the DB for the given
 // relative path has an UpdatedAt that matches the provided mtime.
 // Uses a single query by FilePath instead of 5 per-type queries.

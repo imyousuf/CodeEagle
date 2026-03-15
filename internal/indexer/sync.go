@@ -8,12 +8,14 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/parser"
+	"github.com/imyousuf/CodeEagle/internal/watcher"
 )
 
 const syncStateFile = "sync.state"
@@ -155,15 +157,107 @@ func syncGitRepo(ctx context.Context, idx *Indexer, repoPath string, state *Sync
 	return nil
 }
 
+// walkResult holds a file discovered during parallel directory walk.
+type walkResult struct {
+	absPath string
+	modTime time.Time
+}
+
+// syncWork represents a file that needs to be indexed during directory sync.
+type syncWork struct {
+	absPath string
+	relPath string
+	modTime time.Time
+}
+
+// parallelWalkDir concurrently walks a directory tree, returning all non-excluded
+// regular files with their modification times. Uses os.ReadDir for directory
+// listing (no stat per entry) and bounded goroutines for subdirectory traversal.
+// This is significantly faster than filepath.Walk on high-latency filesystems
+// (e.g., SSHFS) because stat() calls are parallelized across directories.
+func parallelWalkDir(ctx context.Context, root string, matcher *watcher.GitIgnoreMatcher, numWorkers int) ([]walkResult, error) {
+	var (
+		mu      sync.Mutex
+		results []walkResult
+		wg      sync.WaitGroup
+		sem     = make(chan struct{}, numWorkers)
+		walkErr error
+		errOnce sync.Once
+	)
+
+	var walkDir func(dir string)
+	walkDir = func(dir string) {
+		defer wg.Done()
+
+		// Check context cancellation.
+		select {
+		case <-ctx.Done():
+			errOnce.Do(func() { walkErr = ctx.Err() })
+			return
+		default:
+		}
+
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return // skip unreadable directories
+		}
+
+		for _, entry := range entries {
+			path := filepath.Join(dir, entry.Name())
+
+			if entry.IsDir() {
+				if matcher.Match(path) {
+					continue // skip excluded directory
+				}
+				wg.Add(1)
+				select {
+				case sem <- struct{}{}:
+					go func() {
+						defer func() { <-sem }()
+						walkDir(path)
+					}()
+				default:
+					// All workers busy — process inline to prevent deadlock.
+					walkDir(path)
+				}
+				continue
+			}
+
+			// Regular file — skip excluded.
+			if matcher.Match(path) {
+				continue
+			}
+
+			info, err := entry.Info() // stat()
+			if err != nil {
+				continue
+			}
+
+			mu.Lock()
+			results = append(results, walkResult{absPath: path, modTime: info.ModTime()})
+			mu.Unlock()
+		}
+	}
+
+	wg.Add(1)
+	sem <- struct{}{}
+	go func() {
+		defer func() { <-sem }()
+		walkDir(root)
+	}()
+	wg.Wait()
+
+	return results, walkErr
+}
+
 // syncDirectory performs mtime-based sync for a non-git directory.
 // State tracking uses relative paths (relative to repo roots) so the state
 // file is portable across machines.
 //
-// Content-hash dedup: tracks SHA-256 hashes per file in sync state. When a
-// file with the same content hash as an already-indexed file is encountered,
-// it creates a minimal duplicate node + DuplicateOf edge instead of full
-// parsing. This is a major optimization for directories with many duplicate
-// files (e.g., photos copied across folders).
+// The sync operates in three phases:
+//  1. Parallel walk — discover all files + mtimes concurrently (fast on SSHFS)
+//  2. Filter — apply state/watermark/DB skip logic to find files needing indexing
+//  3. Index — process changed files sequentially with content-hash dedup
 func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *SyncState, full bool, statePath string) error {
 	if full {
 		if idx.verbose {
@@ -195,7 +289,6 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 	}
 
 	// Build in-memory hash index from existing sync state for dedup.
-	// Maps content_hash → {canonicalNodeID, mimeType} for the first-seen file.
 	hashIndex := make(map[string]*hashEntry)
 	for relPath, hash := range state.FileHashes {
 		if _, exists := hashIndex[hash]; !exists {
@@ -208,87 +301,104 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 		}
 	}
 
-	// Pre-scan to count total files for progress reporting (-p flag).
-	var progress *syncProgress
-	if idx.showProgress {
-		idx.log("Sync %s: counting files...", dirPath)
-		totalFiles := countWalkableFiles(dirPath)
-		idx.log("Sync %s: %d files to process", dirPath, totalFiles)
-		progress = newSyncProgress(totalFiles, "sync", idx.log)
+	// Compute high-water mark to skip per-file DB queries when FileTimes is empty.
+	var watermark time.Time
+	if len(state.FileTimes) == 0 {
+		wm, err := maxUpdatedAt(ctx, idx.Store())
+		if err != nil {
+			idx.log("Warning: compute watermark: %v", err)
+		} else {
+			watermark = wm
+			if idx.verbose && !watermark.IsZero() {
+				idx.log("Sync watermark: %s (files older than this skipped without DB query)", watermark.Format(time.RFC3339))
+			}
+		}
 	}
 
-	// Track which relative paths still exist.
-	existing := make(map[string]struct{})
+	// ── Phase 1: Parallel walk ─────────────────────────────────────────
+	numWorkers := runtime.NumCPU()
+	if numWorkers > 8 {
+		numWorkers = 8
+	}
+	if idx.verbose {
+		idx.log("Scanning %s with %d workers...", dirPath, numWorkers)
+	}
 
-	// Periodic save: save sync state every N files to avoid losing progress on crash.
+	walkResults, err := parallelWalkDir(ctx, dirPath, idx.matcher, numWorkers)
+	if err != nil {
+		return err
+	}
+
+	if idx.verbose {
+		idx.log("Scan complete: %d files found", len(walkResults))
+	}
+
+	// ── Phase 2: Filter ────────────────────────────────────────────────
+	existing := make(map[string]struct{}, len(walkResults))
+	var toIndex []syncWork
+
+	for _, wr := range walkResults {
+		relPath := idx.toRelativePath(wr.absPath)
+		existing[relPath] = struct{}{}
+
+		prevTime, hasPrev := state.FileTimes[relPath]
+		if hasPrev && !wr.modTime.After(prevTime) {
+			// Unchanged per state — skip.
+			continue
+		}
+		if !hasPrev && !watermark.IsZero() && !wr.modTime.After(watermark) {
+			// Unchanged per watermark — skip without DB query.
+			state.FileTimes[relPath] = wr.modTime
+			continue
+		}
+		if !hasPrev && hasMatchingUpdatedAt(ctx, idx.Store(), relPath, wr.modTime) {
+			// Unchanged per DB — skip.
+			state.FileTimes[relPath] = wr.modTime
+			continue
+		}
+
+		toIndex = append(toIndex, syncWork{absPath: wr.absPath, relPath: relPath, modTime: wr.modTime})
+	}
+
+	if idx.verbose || idx.showProgress {
+		idx.log("Sync %s: %d files to index out of %d total", dirPath, len(toIndex), len(walkResults))
+	}
+
+	// ── Phase 3: Index (sequential) ────────────────────────────────────
+	var progress *syncProgress
+	if idx.showProgress && len(toIndex) > 0 {
+		progress = newSyncProgress(len(toIndex), "index", idx.log)
+	}
+
 	const saveInterval = 10
 	filesSinceLastSave := 0
 	duplicatesSkipped := 0
-	// gcInterval controls how often we force GC during the walk.
-	// Image files (JPEG, PNG) decode into large RGBA pixel buffers (50-200MB
-	// per 20-40MB image) during DownscaleImage. In a tight sequential loop,
-	// Go's GC may not run frequently enough to collect these dead buffers
-	// before the next image is allocated, causing RSS to grow unboundedly.
 	const gcInterval = 50
 	filesSinceLastGC := 0
 
-	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
+	for _, w := range toIndex {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
-		if info.IsDir() {
-			if idx.matcher.Match(path) {
-				return filepath.SkipDir
-			}
-			return nil
+		indexed, hash := syncIndexFile(ctx, idx, w.absPath, w.relPath, w.modTime, hashIndex)
+
+		state.FileTimes[w.relPath] = w.modTime
+		if hash != "" {
+			state.FileHashes[w.relPath] = hash
 		}
-
-		// Skip excluded files.
-		if idx.matcher.Match(path) {
-			return nil
-		}
-
-		relPath := idx.toRelativePath(path)
-		existing[relPath] = struct{}{}
-		modTime := info.ModTime()
-
-		prevTime, hasPrev := state.FileTimes[relPath]
-		didIndex := false
-		if hasPrev && !modTime.After(prevTime) {
-			// Unchanged per state — skip.
-		} else if !hasPrev && hasMatchingUpdatedAt(ctx, idx.Store(), relPath, modTime) {
-			// Unchanged per DB — skip.
-			state.FileTimes[relPath] = modTime
-		} else {
-			// File is new or changed — check for content duplicates.
-			indexed, hash := syncIndexFile(ctx, idx, path, relPath, modTime, hashIndex)
-			if indexed {
-				didIndex = true
-			} else if hash != "" {
-				// Was handled as a duplicate (skipped full parse).
-				duplicatesSkipped++
-			}
-			state.FileTimes[relPath] = modTime
-			if hash != "" {
-				state.FileHashes[relPath] = hash
-			}
+		if !indexed && hash != "" {
+			duplicatesSkipped++
 		}
 
 		if progress != nil {
-			progress.tick(didIndex)
+			progress.tick(indexed)
 		}
 
 		// Periodically force GC to reclaim large image pixel buffers.
-		// Without this, processing thousands of 20-40MB images causes
-		// RSS to grow unboundedly as Go's GC can't keep up with the
-		// allocation rate of 50-200MB RGBA decode buffers per image.
-		if didIndex {
+		if indexed {
 			filesSinceLastGC++
 			if filesSinceLastGC >= gcInterval {
 				runtime.GC()
@@ -297,17 +407,12 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 			}
 		}
 
-		// Periodically save sync state to avoid losing progress on crash.
+		// Periodically save sync state.
 		filesSinceLastSave++
 		if statePath != "" && filesSinceLastSave >= saveInterval {
 			_ = state.Save(statePath)
 			filesSinceLastSave = 0
 		}
-
-		return nil
-	})
-	if err != nil {
-		return err
 	}
 
 	if duplicatesSkipped > 0 && idx.showProgress {

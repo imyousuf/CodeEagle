@@ -2,8 +2,6 @@ package indexer
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -79,17 +77,3 @@ func (p *syncProgress) report(now time.Time) {
 	p.lastLog = now
 }
 
-// countWalkableFiles quickly counts all regular files in a directory tree.
-func countWalkableFiles(dirPath string) int {
-	count := 0
-	_ = filepath.Walk(dirPath, func(_ string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if !info.IsDir() {
-			count++
-		}
-		return nil
-	})
-	return count
-}
