@@ -301,18 +301,13 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 		}
 	}
 
-	// Compute high-water mark to skip per-file DB queries when FileTimes is empty.
-	var watermark time.Time
-	if len(state.FileTimes) == 0 {
-		wm, err := maxUpdatedAt(ctx, idx.Store())
-		if err != nil {
-			idx.log("Warning: compute watermark: %v", err)
-		} else {
-			watermark = wm
-			if idx.verbose && !watermark.IsZero() {
-				idx.log("Sync watermark: %s (files older than this skipped without DB query)", watermark.Format(time.RFC3339))
-			}
-		}
+	// Batch-load all indexed file paths + UpdatedAt from the DB into an
+	// in-memory map. This replaces both the watermark heuristic and per-file
+	// DB queries with a single scan + O(1) lookups — fast and correct even
+	// after partial data loss (e.g., interrupted sync that deleted nodes).
+	indexedTimes := loadIndexedFileTimes(ctx, idx.Store())
+	if idx.verbose {
+		idx.log("Loaded %d indexed file timestamps from DB", len(indexedTimes))
 	}
 
 	// ── Phase 1: Parallel walk ─────────────────────────────────────────
@@ -346,15 +341,12 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 			// Unchanged per state — skip.
 			continue
 		}
-		if !hasPrev && !watermark.IsZero() && !wr.modTime.After(watermark) {
-			// Unchanged per watermark — skip without DB query.
-			state.FileTimes[relPath] = wr.modTime
-			continue
-		}
-		if !hasPrev && hasMatchingUpdatedAt(ctx, idx.Store(), relPath, wr.modTime) {
-			// Unchanged per DB — skip.
-			state.FileTimes[relPath] = wr.modTime
-			continue
+		if !hasPrev {
+			if dbTime, inDB := indexedTimes[relPath]; inDB && dbTime.Equal(wr.modTime) {
+				// Confirmed in DB with matching timestamp — skip.
+				state.FileTimes[relPath] = wr.modTime
+				continue
+			}
 		}
 
 		toIndex = append(toIndex, syncWork{absPath: wr.absPath, relPath: relPath, modTime: wr.modTime})
@@ -419,15 +411,32 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 		idx.log("Sync %s: %d duplicate files detected (skipped full parsing)", dirPath, duplicatesSkipped)
 	}
 
-	// Delete nodes for files that no longer exist.
+	// Delete nodes for files that no longer exist under THIS directory.
+	// state.FileTimes is shared across all configured directories, so we must
+	// only consider entries whose relative path resolves under dirPath.
 	for relPath := range state.FileTimes {
-		if _, ok := existing[relPath]; !ok {
-			if err := idx.Store().DeleteByFile(ctx, relPath); err != nil {
-				idx.log("Warning: delete by file %s: %v", relPath, err)
-			}
-			delete(state.FileTimes, relPath)
-			delete(state.FileHashes, relPath)
+		if _, ok := existing[relPath]; ok {
+			continue // file still exists
 		}
+		// Check if this entry belongs to this directory by testing all repo
+		// roots. We don't use resolveAbsPath here because the file may have
+		// been deleted (no longer on disk).
+		belongsHere := false
+		for _, root := range idx.repoRoots {
+			candidate := filepath.Join(root, relPath)
+			if isSubPath(candidate, dirPath) {
+				belongsHere = true
+				break
+			}
+		}
+		if !belongsHere {
+			continue
+		}
+		if err := idx.Store().DeleteByFile(ctx, relPath); err != nil {
+			idx.log("Warning: delete by file %s: %v", relPath, err)
+		}
+		delete(state.FileTimes, relPath)
+		delete(state.FileHashes, relPath)
 	}
 
 	return nil
