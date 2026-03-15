@@ -108,6 +108,43 @@ func loadIndexedFileTimes(ctx context.Context, store graph.Store) map[string]tim
 	return result
 }
 
+// indexedFileState holds batch-loaded file state from the DB for sync decisions.
+type indexedFileState struct {
+	times  map[string]time.Time // FilePath → UpdatedAt
+	hashes map[string]string    // FilePath → content_hash
+}
+
+// loadIndexedFileState batch-loads all file-type nodes from the DB and returns
+// both file timestamps and content hashes. This provides all the information
+// needed for the sync filter phase (skip unchanged files) and duplicate
+// detection (seed the hash index) in a single scan.
+func loadIndexedFileState(ctx context.Context, store graph.Store) indexedFileState {
+	result := indexedFileState{
+		times:  make(map[string]time.Time),
+		hashes: make(map[string]string),
+	}
+	for _, nodeType := range fileTypeNodes {
+		nodes, err := store.QueryNodes(ctx, graph.NodeFilter{Type: nodeType})
+		if err != nil {
+			continue
+		}
+		for _, node := range nodes {
+			if node.FilePath == "" {
+				continue
+			}
+			if !node.UpdatedAt.IsZero() {
+				if existing, ok := result.times[node.FilePath]; !ok || node.UpdatedAt.After(existing) {
+					result.times[node.FilePath] = node.UpdatedAt
+				}
+			}
+			if hash := node.Properties[graph.PropContentHash]; hash != "" {
+				result.hashes[node.FilePath] = hash
+			}
+		}
+	}
+	return result
+}
+
 // resolveAbsPath finds the absolute path for a relative file path by checking
 // each repo root. Returns empty string if the file doesn't exist under any root.
 func resolveAbsPath(relPath string, repoRoots []string) string {

@@ -47,7 +47,6 @@ func setupSyncTestIndexer(t *testing.T, paths []string, excludePatterns []string
 
 func TestSyncDirectoryExcludesPatterns(t *testing.T) {
 	tmpDir := t.TempDir()
-	configDir := t.TempDir()
 
 	// Create files in an excluded directory.
 	excludedDir := filepath.Join(tmpDir, "vendor", "lib")
@@ -70,10 +69,7 @@ func TestSyncDirectoryExcludesPatterns(t *testing.T) {
 	idx, store := setupSyncTestIndexer(t, []string{tmpDir}, []string{"**/vendor/**"})
 	ctx := context.Background()
 
-	state := &SyncState{}
-	statePath := filepath.Join(configDir, syncStateFile)
-
-	if err := syncDirectory(ctx, idx, tmpDir, state, false, statePath); err != nil {
+	if err := syncDirectory(ctx, idx, tmpDir, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -100,7 +96,6 @@ func TestSyncDirectoryExcludesPatterns(t *testing.T) {
 
 func TestSyncDirectoryExcludesNestedPattern(t *testing.T) {
 	tmpDir := t.TempDir()
-	configDir := t.TempDir()
 
 	// Simulate the exact bug: **/Downloads/aws/** should exclude Downloads/aws/ subtree.
 	awsDir := filepath.Join(tmpDir, "Downloads", "aws", "dist", "examples")
@@ -119,10 +114,7 @@ func TestSyncDirectoryExcludesNestedPattern(t *testing.T) {
 	idx, store := setupSyncTestIndexer(t, []string{tmpDir}, []string{"**/Downloads/aws/**"})
 	ctx := context.Background()
 
-	state := &SyncState{}
-	statePath := filepath.Join(configDir, syncStateFile)
-
-	if err := syncDirectory(ctx, idx, tmpDir, state, false, statePath); err != nil {
+	if err := syncDirectory(ctx, idx, tmpDir, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -149,7 +141,6 @@ func TestSyncDirectoryExcludesNestedPattern(t *testing.T) {
 
 func TestSyncDirectoryExcludesFilePattern(t *testing.T) {
 	tmpDir := t.TempDir()
-	configDir := t.TempDir()
 
 	// Create a .so file (should be excluded by pattern).
 	if err := os.WriteFile(filepath.Join(tmpDir, "libfoo.so"), []byte("binary"), 0644); err != nil {
@@ -163,10 +154,7 @@ func TestSyncDirectoryExcludesFilePattern(t *testing.T) {
 	idx, store := setupSyncTestIndexer(t, []string{tmpDir}, []string{"**/*.so"})
 	ctx := context.Background()
 
-	state := &SyncState{}
-	statePath := filepath.Join(configDir, syncStateFile)
-
-	if err := syncDirectory(ctx, idx, tmpDir, state, false, statePath); err != nil {
+	if err := syncDirectory(ctx, idx, tmpDir, false); err != nil {
 		t.Fatal(err)
 	}
 

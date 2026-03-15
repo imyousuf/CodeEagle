@@ -149,12 +149,21 @@ func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, v
 		o(&sopts)
 	}
 
+	// Determine non-git roots for basename-prefixed paths.
+	nonGitRoots := make(map[string]bool)
+	for _, p := range paths {
+		if !indexer.IsGitRepo(p) {
+			nonGitRoots[p] = true
+		}
+	}
+
 	// Create indexer.
 	idx := indexer.NewIndexer(indexer.IndexerConfig{
 		GraphStore:     store,
 		ParserRegistry: registry,
 		WatcherConfig:  wcfg,
 		RepoRoots:      paths,
+		NonGitRoots:    nonGitRoots,
 		Verbose:        verboseMode,
 		ShowProgress:   sopts.showProgress,
 		Logger:         logFn,

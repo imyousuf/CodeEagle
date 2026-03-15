@@ -69,12 +69,12 @@ func SyncFiles(ctx context.Context, idx *Indexer, paths []string, configDir stri
 	}
 
 	for _, repoPath := range paths {
-		if isGitRepo(repoPath) {
+		if IsGitRepo(repoPath) {
 			if err := syncGitRepo(ctx, idx, repoPath, state, full, branch); err != nil {
 				return fmt.Errorf("sync git repo %s: %w", repoPath, err)
 			}
 		} else {
-			if err := syncDirectory(ctx, idx, repoPath, state, full, statePath); err != nil {
+			if err := syncDirectory(ctx, idx, repoPath, full); err != nil {
 				return fmt.Errorf("sync directory %s: %w", repoPath, err)
 			}
 		}
@@ -87,8 +87,8 @@ func SyncFiles(ctx context.Context, idx *Indexer, paths []string, configDir stri
 	return nil
 }
 
-// isGitRepo checks if the given path has a .git directory.
-func isGitRepo(path string) bool {
+// IsGitRepo checks if the given path has a .git directory.
+func IsGitRepo(path string) bool {
 	info, err := os.Stat(filepath.Join(path, ".git"))
 	return err == nil && info.IsDir()
 }
@@ -251,46 +251,35 @@ func parallelWalkDir(ctx context.Context, root string, matcher *watcher.GitIgnor
 }
 
 // syncDirectory performs mtime-based sync for a non-git directory.
-// State tracking uses relative paths (relative to repo roots) so the state
-// file is portable across machines.
+// Uses the DB as the single source of truth — no sync state file needed.
+// File paths are basename-prefixed (e.g., "Pictures/a.jpg") for unique
+// identity across directories.
 //
-// The sync operates in three phases:
+// The sync operates in four phases:
 //  1. Parallel walk — discover all files + mtimes concurrently (fast on SSHFS)
-//  2. Filter — apply state/watermark/DB skip logic to find files needing indexing
+//  2. Filter — skip unchanged files (DB timestamp match) and non-parseable files
 //  3. Index — process changed files sequentially with content-hash dedup
-func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *SyncState, full bool, statePath string) error {
+//  4. Cleanup — remove DB nodes for files deleted from disk (basename-scoped)
+func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, full bool) error {
 	if full {
 		if idx.verbose {
 			idx.log("Full index of %s (non-git)", dirPath)
 		}
-		// Clear file times and hashes for this dir.
-		if state.FileTimes != nil {
-			for k := range state.FileTimes {
-				if isSubPath(k, dirPath) || !filepath.IsAbs(k) {
-					delete(state.FileTimes, k)
-				}
-			}
-		}
-		if state.FileHashes != nil {
-			for k := range state.FileHashes {
-				if isSubPath(k, dirPath) || !filepath.IsAbs(k) {
-					delete(state.FileHashes, k)
-				}
-			}
-		}
 		return idx.IndexDirectory(ctx, dirPath)
 	}
 
-	if state.FileTimes == nil {
-		state.FileTimes = make(map[string]time.Time)
-	}
-	if state.FileHashes == nil {
-		state.FileHashes = make(map[string]string)
+	// Batch-load all indexed file state from the DB into memory.
+	// A single scan provides timestamps for skip decisions and content
+	// hashes for duplicate detection — no sync state file needed.
+	dbState := loadIndexedFileState(ctx, idx.Store())
+	indexedTimes := dbState.times
+	if idx.verbose {
+		idx.log("Loaded %d indexed file timestamps from DB", len(indexedTimes))
 	}
 
-	// Build in-memory hash index from existing sync state for dedup.
+	// Build in-memory hash index from existing DB content hashes for dedup.
 	hashIndex := make(map[string]*hashEntry)
-	for relPath, hash := range state.FileHashes {
+	for relPath, hash := range dbState.hashes {
 		if _, exists := hashIndex[hash]; !exists {
 			fileName := filepath.Base(relPath)
 			nodeID := graph.NewNodeID(string(graph.NodeDocument), relPath, fileName)
@@ -299,15 +288,6 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 				mimeType:        detectMIMEType(relPath),
 			}
 		}
-	}
-
-	// Batch-load all indexed file paths + UpdatedAt from the DB into an
-	// in-memory map. This replaces both the watermark heuristic and per-file
-	// DB queries with a single scan + O(1) lookups — fast and correct even
-	// after partial data loss (e.g., interrupted sync that deleted nodes).
-	indexedTimes := loadIndexedFileTimes(ctx, idx.Store())
-	if idx.verbose {
-		idx.log("Loaded %d indexed file timestamps from DB", len(indexedTimes))
 	}
 
 	// ── Phase 1: Parallel walk ─────────────────────────────────────────
@@ -336,17 +316,14 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 		relPath := idx.toRelativePath(wr.absPath)
 		existing[relPath] = struct{}{}
 
-		prevTime, hasPrev := state.FileTimes[relPath]
-		if hasPrev && !wr.modTime.After(prevTime) {
-			// Unchanged per state — skip.
+		// Skip if no parser registered for this file type.
+		if _, hasParser := idx.registry.ParserForFile(wr.absPath); !hasParser {
 			continue
 		}
-		if !hasPrev {
-			if dbTime, inDB := indexedTimes[relPath]; inDB && dbTime.Equal(wr.modTime) {
-				// Confirmed in DB with matching timestamp — skip.
-				state.FileTimes[relPath] = wr.modTime
-				continue
-			}
+
+		// Skip if DB has matching or newer timestamp — file hasn't changed.
+		if dbTime, inDB := indexedTimes[relPath]; inDB && !wr.modTime.After(dbTime) {
+			continue
 		}
 
 		toIndex = append(toIndex, syncWork{absPath: wr.absPath, relPath: relPath, modTime: wr.modTime})
@@ -362,8 +339,6 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 		progress = newSyncProgress(len(toIndex), "index", idx.log)
 	}
 
-	const saveInterval = 10
-	filesSinceLastSave := 0
 	duplicatesSkipped := 0
 	const gcInterval = 50
 	filesSinceLastGC := 0
@@ -377,10 +352,6 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 
 		indexed, hash := syncIndexFile(ctx, idx, w.absPath, w.relPath, w.modTime, hashIndex)
 
-		state.FileTimes[w.relPath] = w.modTime
-		if hash != "" {
-			state.FileHashes[w.relPath] = hash
-		}
 		if !indexed && hash != "" {
 			duplicatesSkipped++
 		}
@@ -398,45 +369,34 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *Syn
 				filesSinceLastGC = 0
 			}
 		}
-
-		// Periodically save sync state.
-		filesSinceLastSave++
-		if statePath != "" && filesSinceLastSave >= saveInterval {
-			_ = state.Save(statePath)
-			filesSinceLastSave = 0
-		}
 	}
 
 	if duplicatesSkipped > 0 && idx.showProgress {
 		idx.log("Sync %s: %d duplicate files detected (skipped full parsing)", dirPath, duplicatesSkipped)
 	}
 
-	// Delete nodes for files that no longer exist under THIS directory.
-	// state.FileTimes is shared across all configured directories, so we must
-	// only consider entries whose relative path resolves under dirPath.
-	for relPath := range state.FileTimes {
-		if _, ok := existing[relPath]; ok {
-			continue // file still exists
-		}
-		// Check if this entry belongs to this directory by testing all repo
-		// roots. We don't use resolveAbsPath here because the file may have
-		// been deleted (no longer on disk).
-		belongsHere := false
-		for _, root := range idx.repoRoots {
-			candidate := filepath.Join(root, relPath)
-			if isSubPath(candidate, dirPath) {
-				belongsHere = true
-				break
-			}
-		}
-		if !belongsHere {
+	// ── Phase 4: Cleanup deleted files ────────────────────────────────
+	// Diff walked files against DB entries scoped to this directory's basename.
+	// Only basename-scoped paths are checked, preventing cross-directory deletion.
+	basename := filepath.Base(dirPath)
+	prefix := basename + "/"
+	deletedCount := 0
+	for dbPath := range indexedTimes {
+		if !strings.HasPrefix(dbPath, prefix) {
 			continue
 		}
-		if err := idx.Store().DeleteByFile(ctx, relPath); err != nil {
-			idx.log("Warning: delete by file %s: %v", relPath, err)
+		if _, stillExists := existing[dbPath]; !stillExists {
+			if idx.verbose {
+				idx.log("Removing deleted file: %s", dbPath)
+			}
+			if err := idx.Store().DeleteByFile(ctx, dbPath); err != nil {
+				idx.log("Warning: delete %s: %v", dbPath, err)
+			}
+			deletedCount++
 		}
-		delete(state.FileTimes, relPath)
-		delete(state.FileHashes, relPath)
+	}
+	if deletedCount > 0 {
+		idx.log("Removed %d deleted file nodes from %s", deletedCount, dirPath)
 	}
 
 	return nil
@@ -606,13 +566,4 @@ func CleanupStaleBranches(ctx context.Context, store *embedded.BranchStore, repo
 	}
 
 	return nil
-}
-
-// isSubPath checks if child is under parent directory.
-func isSubPath(child, parent string) bool {
-	rel, err := filepath.Rel(parent, child)
-	if err != nil {
-		return false
-	}
-	return len(rel) > 0 && !strings.HasPrefix(rel, "..")
 }

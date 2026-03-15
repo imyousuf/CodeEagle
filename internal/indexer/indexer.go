@@ -22,7 +22,8 @@ type IndexerConfig struct {
 	GraphStore     graph.Store
 	ParserRegistry *parser.Registry
 	WatcherConfig  *watcher.WatcherConfig
-	RepoRoots      []string // repository root paths for abs→rel path conversion
+	RepoRoots      []string        // repository root paths for abs→rel path conversion
+	NonGitRoots    map[string]bool // non-git repo roots that need basename prefix in relative paths
 	Verbose        bool
 	Logger         func(format string, args ...any) // optional logger, defaults to fmt.Fprintf(os.Stderr, ...)
 	LLMClient      llm.Client                       // optional LLM client for auto-summarization
@@ -47,6 +48,7 @@ type Indexer struct {
 	wcfg          *watcher.WatcherConfig
 	matcher       *watcher.GitIgnoreMatcher
 	repoRoots     []string
+	nonGitRoots   map[string]bool // non-git repo roots needing basename prefix
 	verbose       bool
 	showProgress  bool
 	log           func(format string, args ...any)
@@ -90,6 +92,7 @@ func NewIndexer(cfg IndexerConfig) *Indexer {
 		wcfg:          cfg.WatcherConfig,
 		matcher:       matcher,
 		repoRoots:     cfg.RepoRoots,
+		nonGitRoots:   cfg.NonGitRoots,
 		verbose:       cfg.Verbose,
 		showProgress:  cfg.ShowProgress,
 		log:           logFn,
@@ -124,11 +127,17 @@ func (idx *Indexer) ChangedFiles() []string {
 }
 
 // toRelativePath converts an absolute file path to a path relative to the
-// first matching repo root. If no repo root matches, the path is returned as-is.
+// first matching repo root. For non-git roots, the path is prefixed with the
+// root's basename (e.g., "/home/user/Pictures/a.jpg" → "Pictures/a.jpg") to
+// ensure unique identity across directories.
+// If no repo root matches, the path is returned as-is.
 func (idx *Indexer) toRelativePath(absPath string) string {
 	for _, root := range idx.repoRoots {
 		rel, err := filepath.Rel(root, absPath)
 		if err == nil && !strings.HasPrefix(rel, "..") {
+			if idx.nonGitRoots[root] {
+				return filepath.Join(filepath.Base(root), rel)
+			}
 			return rel
 		}
 	}
