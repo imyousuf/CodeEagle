@@ -170,6 +170,23 @@ func (wp *WorkerPool) processJob(job *Job) {
 	defer wp.wg.Done()
 	defer wp.activeCount.Add(-1)
 
+	// Recover from panics so one bad job doesn't kill the process.
+	defer func() {
+		if r := recover(); r != nil {
+			errMsg := fmt.Sprintf("panic: %v", r)
+			_ = wp.queue.Fail(job.ID, errMsg)
+			filePath := ""
+			if len(job.FilePaths) > 0 {
+				filePath = job.FilePaths[0]
+			}
+			wp.emit("job:failed", map[string]string{
+				"type":  string(job.Type),
+				"file":  filePath,
+				"error": errMsg,
+			})
+		}
+	}()
+
 	handler, ok := wp.handlers[job.Type]
 	if !ok {
 		_ = wp.queue.Fail(job.ID, fmt.Sprintf("no handler for %s", job.Type))

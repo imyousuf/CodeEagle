@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"gocv.io/x/gocv"
 )
@@ -19,7 +20,9 @@ type DetectResult struct {
 }
 
 // Detector wraps OpenCV DNN models for face detection and embedding extraction.
+// DNN forward passes are serialized via mu because OpenCV Net is not thread-safe.
 type Detector struct {
+	mu       sync.Mutex
 	faceNet  gocv.Net
 	sfaceNet gocv.Net
 	minFace  int
@@ -66,12 +69,16 @@ func (d *Detector) Close() {
 }
 
 // Detect reads an image, detects faces at multiple scales, and extracts embeddings.
+// Serialized via mutex because OpenCV DNN Net::Forward is not thread-safe.
 func (d *Detector) Detect(imagePath string) (*DetectResult, error) {
 	img := gocv.IMRead(imagePath, gocv.IMReadColor)
 	if img.Empty() {
 		return nil, fmt.Errorf("failed to read image: %s", imagePath)
 	}
 	defer img.Close()
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
 
 	resized, scale := d.resizeImage(img)
 	defer resized.Close()
@@ -168,19 +175,32 @@ func (d *Detector) detectInRegion(region gocv.Mat, offsetX, offsetY, regionW, re
 	detection := d.faceNet.Forward("")
 	defer detection.Close()
 
-	nDets := detection.Total() / 7
+	total := detection.Total()
+	if total == 0 || total%7 != 0 {
+		return nil
+	}
+
+	// Reshape from 4D [1,1,N,7] to 2D [N,7] for safe row/col access.
+	det := detection.Reshape(1, total/7)
+	defer det.Close()
+
+	if det.Cols() < 7 {
+		return nil
+	}
+
+	nDets := det.Rows()
 	var dets []rawDetection
 
 	for i := range nDets {
-		confidence := detection.GetFloatAt(0, i*7+2)
+		confidence := det.GetFloatAt(i, 2)
 		if confidence < d.confThr {
 			continue
 		}
 
-		x1 := detection.GetFloatAt(0, i*7+3)
-		y1 := detection.GetFloatAt(0, i*7+4)
-		x2 := detection.GetFloatAt(0, i*7+5)
-		y2 := detection.GetFloatAt(0, i*7+6)
+		x1 := det.GetFloatAt(i, 3)
+		y1 := det.GetFloatAt(i, 4)
+		x2 := det.GetFloatAt(i, 5)
+		y2 := det.GetFloatAt(i, 6)
 
 		px1 := clampInt(int(x1*float32(regionW))+offsetX, 0, offsetX+regionW-1)
 		py1 := clampInt(int(y1*float32(regionH))+offsetY, 0, offsetY+regionH-1)
