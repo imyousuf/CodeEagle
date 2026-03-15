@@ -85,40 +85,27 @@ func BackpopUpdatedAt(ctx context.Context, store graph.Store, repoRoots []string
 	return updated, nil
 }
 
-// maxUpdatedAt returns the maximum UpdatedAt timestamp across all file-type
-// nodes in the graph. Used as a "high-water mark" during directory sync: any
-// file with mtime <= watermark can be assumed unchanged without a per-file DB
-// query. Returns zero time if no file-type nodes exist.
-func maxUpdatedAt(ctx context.Context, store graph.Store) (time.Time, error) {
-	var maxTime time.Time
+// loadIndexedFileTimes batch-loads all file-type nodes from the DB and returns
+// a map of FilePath → UpdatedAt. This single scan replaces both the watermark
+// heuristic and per-file hasMatchingUpdatedAt queries, giving O(1) lookups
+// during the filter phase.
+func loadIndexedFileTimes(ctx context.Context, store graph.Store) map[string]time.Time {
+	result := make(map[string]time.Time)
 	for _, nodeType := range fileTypeNodes {
 		nodes, err := store.QueryNodes(ctx, graph.NodeFilter{Type: nodeType})
 		if err != nil {
-			return maxTime, err
+			continue
 		}
 		for _, node := range nodes {
-			if node.UpdatedAt.After(maxTime) {
-				maxTime = node.UpdatedAt
+			if node.FilePath != "" && !node.UpdatedAt.IsZero() {
+				// Keep the latest UpdatedAt if multiple nodes share a path.
+				if existing, ok := result[node.FilePath]; !ok || node.UpdatedAt.After(existing) {
+					result[node.FilePath] = node.UpdatedAt
+				}
 			}
 		}
 	}
-	return maxTime, nil
-}
-
-// hasMatchingUpdatedAt checks if any file-type node in the DB for the given
-// relative path has an UpdatedAt that matches the provided mtime.
-// Uses a single query by FilePath instead of 5 per-type queries.
-func hasMatchingUpdatedAt(ctx context.Context, store graph.Store, relPath string, modTime time.Time) bool {
-	nodes, err := store.QueryNodes(ctx, graph.NodeFilter{FilePath: relPath})
-	if err != nil {
-		return false
-	}
-	for _, node := range nodes {
-		if isFileTypeNode(node.Type) && !node.UpdatedAt.IsZero() && node.UpdatedAt.Equal(modTime) {
-			return true
-		}
-	}
-	return false
+	return result
 }
 
 // resolveAbsPath finds the absolute path for a relative file path by checking

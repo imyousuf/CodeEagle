@@ -155,17 +155,18 @@ func TestBackpopSkipsAlreadyPopulated(t *testing.T) {
 	}
 }
 
-func TestHasMatchingUpdatedAt(t *testing.T) {
+func TestLoadIndexedFileTimes(t *testing.T) {
 	store := openTestStore(t)
 	ctx := context.Background()
 	now := time.Now()
 
-	// No nodes — should return false.
-	if hasMatchingUpdatedAt(ctx, store, "nofile.go", now) {
-		t.Error("expected false for nonexistent file")
+	// Empty store — should return empty map.
+	result := loadIndexedFileTimes(ctx, store)
+	if len(result) != 0 {
+		t.Errorf("expected empty map, got %d entries", len(result))
 	}
 
-	// Add a File node with matching UpdatedAt.
+	// Add a File node with UpdatedAt.
 	node := &graph.Node{
 		ID:        graph.NewNodeID(string(graph.NodeFile), "main.go", "main.go"),
 		Type:      graph.NodeFile,
@@ -177,22 +178,26 @@ func TestHasMatchingUpdatedAt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !hasMatchingUpdatedAt(ctx, store, "main.go", now) {
-		t.Error("expected true for matching mtime")
+	result = loadIndexedFileTimes(ctx, store)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(result))
+	}
+	if !result["main.go"].Equal(now) {
+		t.Error("expected matching UpdatedAt for main.go")
 	}
 
-	// Different mtime — should return false.
-	if hasMatchingUpdatedAt(ctx, store, "main.go", now.Add(time.Second)) {
-		t.Error("expected false for mismatched mtime")
+	// Nonexistent file — not in map.
+	if _, ok := result["nofile.go"]; ok {
+		t.Error("expected nofile.go not in map")
 	}
 }
 
-func TestHasMatchingUpdatedAt_DocumentNode(t *testing.T) {
+func TestLoadIndexedFileTimes_DocumentNode(t *testing.T) {
 	store := openTestStore(t)
 	ctx := context.Background()
 	now := time.Now()
 
-	// Add a Document node (not File) — should still match.
+	// Add a Document node (not File) — should be included.
 	node := &graph.Node{
 		ID:        graph.NewNodeID(string(graph.NodeDocument), "photo.jpg", "photo.jpg"),
 		Type:      graph.NodeDocument,
@@ -204,17 +209,20 @@ func TestHasMatchingUpdatedAt_DocumentNode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !hasMatchingUpdatedAt(ctx, store, "photo.jpg", now) {
-		t.Error("expected true for Document node with matching mtime")
+	result := loadIndexedFileTimes(ctx, store)
+	if dbTime, ok := result["photo.jpg"]; !ok {
+		t.Error("expected photo.jpg in map")
+	} else if !dbTime.Equal(now) {
+		t.Error("expected matching UpdatedAt for photo.jpg")
 	}
 }
 
-func TestHasMatchingUpdatedAt_IgnoresNonFileTypeNodes(t *testing.T) {
+func TestLoadIndexedFileTimes_IgnoresNonFileTypeNodes(t *testing.T) {
 	store := openTestStore(t)
 	ctx := context.Background()
 	now := time.Now()
 
-	// Add a Function node (not a file-type) with matching UpdatedAt.
+	// Add a Function node (not a file-type) with UpdatedAt.
 	node := &graph.Node{
 		ID:        graph.NewNodeID(string(graph.NodeFunction), "main.go", "Add"),
 		Type:      graph.NodeFunction,
@@ -226,8 +234,9 @@ func TestHasMatchingUpdatedAt_IgnoresNonFileTypeNodes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Should return false because NodeFunction is not a file-type node.
-	if hasMatchingUpdatedAt(ctx, store, "main.go", now) {
-		t.Error("expected false — Function nodes should not count as file-type nodes")
+	// Should not include Function nodes.
+	result := loadIndexedFileTimes(ctx, store)
+	if _, ok := result["main.go"]; ok {
+		t.Error("expected Function nodes to be excluded from indexed times")
 	}
 }
