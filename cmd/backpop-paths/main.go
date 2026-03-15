@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
+	"github.com/imyousuf/CodeEagle/internal/docs"
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 )
@@ -188,8 +189,35 @@ func main() {
 	fmt.Printf("Not found on disk (skipped): %d\n", notFound)
 	fmt.Printf("Collisions (dedup, will delete): %d\n", len(collidedOldIDs))
 
+	// ── Phase 1b: Migrate docs cache paths ──────────────────────────
+	cachePath := cfg.ConfigDir + "/docs.db"
+	docsCache, dcErr := docs.OpenCache(cachePath)
+	if dcErr != nil {
+		fmt.Printf("Warning: could not open docs cache at %s: %v\n", cachePath, dcErr)
+	} else {
+		defer docsCache.Close()
+		migrated, mcErr := docsCache.MigratePaths(func(oldPath string) (string, bool) {
+			parts := strings.SplitN(oldPath, "/", 2)
+			if len(parts) > 1 && basenames[parts[0]] {
+				return "", false // already prefixed
+			}
+			for root, base := range rootBasenames {
+				candidate := filepath.Join(root, oldPath)
+				if _, err := os.Stat(candidate); err == nil {
+					return base + "/" + oldPath, true
+				}
+			}
+			return "", false
+		})
+		if mcErr != nil {
+			fmt.Printf("Warning: docs cache migration: %v\n", mcErr)
+		} else {
+			fmt.Printf("Docs cache: %d path entries migrated\n", migrated)
+		}
+	}
+
 	if len(migrations) == 0 {
-		fmt.Println("Nothing to migrate.")
+		fmt.Println("Nothing to migrate (graph nodes).")
 		return
 	}
 
