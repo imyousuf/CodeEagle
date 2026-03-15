@@ -27,6 +27,7 @@ go.work.sum
 # Build output
 bin/
 codeeagle
+backpop-paths
 
 # Frontend build artifacts
 node_modules/

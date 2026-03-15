@@ -14,9 +14,6 @@ func TestLoadSyncStateMissingFile(t *testing.T) {
 	if state.LastCommit != "" {
 		t.Errorf("LastCommit = %q, want empty", state.LastCommit)
 	}
-	if state.FileTimes != nil {
-		t.Errorf("FileTimes = %v, want nil", state.FileTimes)
-	}
 }
 
 func TestSyncStateSaveAndLoad(t *testing.T) {
@@ -27,10 +24,6 @@ func TestSyncStateSaveAndLoad(t *testing.T) {
 	original := &SyncState{
 		BranchStates: map[string]*BranchSyncState{
 			"main": {LastCommit: "abc123def456", Timestamp: now},
-		},
-		FileTimes: map[string]time.Time{
-			"/path/to/file.go":  now.Add(-time.Hour),
-			"/path/to/other.py": now.Add(-2 * time.Hour),
 		},
 	}
 
@@ -46,87 +39,6 @@ func TestSyncStateSaveAndLoad(t *testing.T) {
 	bs := loaded.GetBranchState("main")
 	if bs.LastCommit != "abc123def456" {
 		t.Errorf("BranchStates[main].LastCommit = %q, want %q", bs.LastCommit, "abc123def456")
-	}
-
-	if len(loaded.FileTimes) != len(original.FileTimes) {
-		t.Fatalf("len(FileTimes) = %d, want %d", len(loaded.FileTimes), len(original.FileTimes))
-	}
-
-	for k, v := range original.FileTimes {
-		got, ok := loaded.FileTimes[k]
-		if !ok {
-			t.Errorf("missing FileTimes key %q", k)
-			continue
-		}
-		if !got.Equal(v) {
-			t.Errorf("FileTimes[%q] = %v, want %v", k, got, v)
-		}
-	}
-}
-
-func TestSyncStateFileHashes(t *testing.T) {
-	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "sync.state")
-
-	now := time.Now().Truncate(time.Second)
-	original := &SyncState{
-		FileTimes: map[string]time.Time{
-			"Photos/IMG_001.jpg":  now,
-			"Backup/IMG_001.jpg":  now,
-			"Photos/document.pdf": now,
-		},
-		FileHashes: map[string]string{
-			"Photos/IMG_001.jpg":  "sha256:abc123",
-			"Backup/IMG_001.jpg":  "sha256:abc123", // duplicate
-			"Photos/document.pdf": "sha256:def456",
-		},
-	}
-
-	if err := original.Save(path); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-
-	loaded, err := LoadSyncState(path)
-	if err != nil {
-		t.Fatalf("LoadSyncState: %v", err)
-	}
-
-	if len(loaded.FileHashes) != 3 {
-		t.Fatalf("len(FileHashes) = %d, want 3", len(loaded.FileHashes))
-	}
-
-	// Both paths should have the same hash (duplicate detection).
-	if loaded.FileHashes["Photos/IMG_001.jpg"] != loaded.FileHashes["Backup/IMG_001.jpg"] {
-		t.Error("duplicate files should have the same content hash")
-	}
-	if loaded.FileHashes["Photos/document.pdf"] != "sha256:def456" {
-		t.Errorf("FileHashes[document.pdf] = %q, want %q", loaded.FileHashes["Photos/document.pdf"], "sha256:def456")
-	}
-}
-
-func TestSyncStateBackwardCompatNoFileHashes(t *testing.T) {
-	// Verify that loading an old sync state without FileHashes still works.
-	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "sync.state")
-
-	old := &SyncState{
-		FileTimes: map[string]time.Time{
-			"file.txt": time.Now().Truncate(time.Second),
-		},
-	}
-	if err := old.Save(path); err != nil {
-		t.Fatal(err)
-	}
-
-	loaded, err := LoadSyncState(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.FileHashes != nil {
-		t.Errorf("FileHashes should be nil for old state, got %v", loaded.FileHashes)
-	}
-	if len(loaded.FileTimes) != 1 {
-		t.Errorf("FileTimes should have 1 entry, got %d", len(loaded.FileTimes))
 	}
 }
 

@@ -12,12 +12,14 @@ import (
 )
 
 func main() {
-	// Change to home dir so config.Load finds the home CodeEagle config.
-	if len(os.Args) > 1 {
-		if err := os.Chdir(os.Args[1]); err != nil {
-			fmt.Printf("chdir error: %v\n", err)
-			return
-		}
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: dbcheck <config-dir>")
+		fmt.Println("  config-dir: directory containing .CodeEagle/config.yaml")
+		os.Exit(1)
+	}
+	if err := os.Chdir(os.Args[1]); err != nil {
+		fmt.Printf("chdir %s: %v\n", os.Args[1], err)
+		os.Exit(1)
 	}
 
 	cfg, err := config.Load()
@@ -75,9 +77,9 @@ func main() {
 
 	// Check a specific Pictures file to see if it has UpdatedAt.
 	samplePaths := []string{
-		".Gloria/F95A0315.JPG",
-		"167_Robbinsville_Allentown_LotDimensions.png",
-		"Screenshots/Screenshot_20200101.png",
+		"Pictures/.Gloria/F95A0315.JPG",
+		"Pictures/167_Robbinsville_Allentown_LotDimensions.png",
+		"Documents/2020-cx-5-owners-manual.pdf",
 	}
 	fmt.Println("\n--- Sample node lookups ---")
 	for _, sp := range samplePaths {

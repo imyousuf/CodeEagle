@@ -76,4 +76,3 @@ func (p *syncProgress) report(now time.Time) {
 	p.logFn(msg)
 	p.lastLog = now
 }
-
