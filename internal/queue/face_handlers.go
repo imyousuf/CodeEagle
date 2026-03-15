@@ -21,6 +21,7 @@ type PersonStore interface {
 	MarkImageScanned(imagePath string) error
 	IsImageScanned(imagePath string) bool
 	IndexImage(meta *embedded.ImageMetadata) error
+	ClearAllImageScanned() error
 }
 
 // FaceDetectHandler detects faces in images, runs KNN classification, and

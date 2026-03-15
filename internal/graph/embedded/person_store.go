@@ -587,6 +587,66 @@ func (s *BranchStore) IsImageScanned(imagePath string) bool {
 	return err == nil
 }
 
+// ImageScannedAt returns the time an image was last scanned for faces.
+// Returns zero time and ErrKeyNotFound if the image has not been scanned.
+func (s *BranchStore) ImageScannedAt(imagePath string) (time.Time, error) {
+	var scannedAt time.Time
+	err := s.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(prefixImgScanned + imagePath))
+		if err != nil {
+			return err
+		}
+		return item.Value(func(val []byte) error {
+			t, err := time.Parse(time.RFC3339, string(val))
+			if err != nil {
+				return err
+			}
+			scannedAt = t
+			return nil
+		})
+	})
+	return scannedAt, err
+}
+
+// ClearAllImageScanned removes all face-scan markers, allowing all images
+// to be re-scanned. Used by --faces-only --force.
+func (s *BranchStore) ClearAllImageScanned() error {
+	prefix := []byte(prefixImgScanned)
+	var keys [][]byte
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		opts.Prefix = prefix
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(prefix); it.Valid(); it.Next() {
+			keys = append(keys, it.Item().KeyCopy(nil))
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	const batchSize = 100
+	for i := 0; i < len(keys); i += batchSize {
+		end := min(i+batchSize, len(keys))
+		batch := keys[i:end]
+		err := s.db.Update(func(txn *badger.Txn) error {
+			for _, key := range batch {
+				_ = txn.Delete(key)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // UnscannedImages returns image paths that haven't been scanned for faces.
 func (s *BranchStore) UnscannedImages() ([]string, error) {
 	var paths []string
