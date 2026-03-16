@@ -156,10 +156,10 @@ func (a *App) GetFaceStats() (*FaceStats, error) {
 	unscanned, _ := gr.store.UnscannedImages()
 	oldest, newest, _ := gr.store.DateRange()
 
-	// Count detected faces from the face store.
+	// Count detected faces from the face store (read-only to avoid lock contention).
 	var detectedFaces, imagesWithFaces int
 	faceStorePath := filepath.Join(a.cfg.ConfigDir, "faces.db")
-	fs, fsErr := faces.OpenStore(faceStorePath)
+	fs, fsErr := faces.OpenStoreReadOnly(faceStorePath)
 	if fsErr == nil {
 		defer fs.Close()
 		allFaces, err := fs.AllFaces()
@@ -245,10 +245,17 @@ type MergeSuggestion struct {
 // Face store helpers
 // ---------------------------------------------------------------------------
 
-// openFaceStore opens the face store at the configured path.
+// openFaceStore opens the face store in read-write mode.
 func (a *App) openFaceStore() (*faces.Store, error) {
 	p := filepath.Join(a.cfg.ConfigDir, "faces.db")
 	return faces.OpenStore(p)
+}
+
+// openFaceStoreRO opens the face store in read-only mode. Multiple concurrent
+// readers are allowed, avoiding BadgerDB lock contention.
+func (a *App) openFaceStoreRO() (*faces.Store, error) {
+	p := filepath.Join(a.cfg.ConfigDir, "faces.db")
+	return faces.OpenStoreReadOnly(p)
 }
 
 // ---------------------------------------------------------------------------
@@ -261,7 +268,7 @@ func (a *App) GetFaceThumbnail(imagePath string, faceIndex, size int) (string, e
 		size = 64
 	}
 
-	fs, err := a.openFaceStore()
+	fs, err := a.openFaceStoreRO()
 	if err != nil {
 		return "", fmt.Errorf("open face store: %w", err)
 	}
@@ -387,7 +394,7 @@ func decodeImageData(data []byte, mimeType string) (image.Image, error) {
 
 // GetClusters returns all face clusters with their faces.
 func (a *App) GetClusters() ([]ClusterDetail, error) {
-	fs, err := a.openFaceStore()
+	fs, err := a.openFaceStoreRO()
 	if err != nil {
 		return nil, fmt.Errorf("open face store: %w", err)
 	}
@@ -438,7 +445,7 @@ func (a *App) GetClusters() ([]ClusterDetail, error) {
 
 // GetNoiseFaces returns all faces not assigned to any cluster.
 func (a *App) GetNoiseFaces() ([]ClusterFace, error) {
-	fs, err := a.openFaceStore()
+	fs, err := a.openFaceStoreRO()
 	if err != nil {
 		return nil, fmt.Errorf("open face store: %w", err)
 	}
@@ -647,7 +654,7 @@ func (a *App) IsClusteringRunning() bool {
 
 // GetSuggestedMerges returns pairs of clusters with high centroid similarity.
 func (a *App) GetSuggestedMerges() ([]MergeSuggestion, error) {
-	fs, err := a.openFaceStore()
+	fs, err := a.openFaceStoreRO()
 	if err != nil {
 		return nil, fmt.Errorf("open face store: %w", err)
 	}
