@@ -46,6 +46,17 @@ func OpenStore(dbPath string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
+// OpenStoreReadOnly opens the face store in read-only mode. Multiple readers
+// can coexist with each other and with one read-write opener.
+func OpenStoreReadOnly(dbPath string) (*Store, error) {
+	opts := badgerutil.TunedOptionsReadOnly(dbPath, badgerutil.DBRoleTertiary)
+	db, err := badger.Open(opts)
+	if err != nil {
+		return nil, fmt.Errorf("open face store (ro): %w", err)
+	}
+	return &Store{db: db}, nil
+}
+
 // Close closes the underlying BadgerDB.
 func (s *Store) Close() error {
 	return s.db.Close()
