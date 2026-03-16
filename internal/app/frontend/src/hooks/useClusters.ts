@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { ClusterDetail, ClusterFace, MergeSuggestion } from '../types';
+import type { ClusterDetail, ClusterFace, MergeSuggestion, ClusteringProgress } from '../types';
 
 interface UseClustersReturn {
   clusters: ClusterDetail[];
@@ -7,6 +7,7 @@ interface UseClustersReturn {
   suggestions: MergeSuggestion[];
   loading: boolean;
   clusteringInProgress: boolean;
+  clusteringProgress: ClusteringProgress | null;
   error: string | null;
   refresh: () => void;
   runClustering: (simThreshold: number) => Promise<void>;
@@ -24,6 +25,7 @@ export function useClusters(): UseClustersReturn {
   const [suggestions, setSuggestions] = useState<MergeSuggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [clusteringInProgress, setClusteringInProgress] = useState(false);
+  const [clusteringProgress, setClusteringProgress] = useState<ClusteringProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -55,13 +57,24 @@ export function useClusters(): UseClustersReturn {
       cleanups.push(
         window.runtime.EventsOn('faces:clustering-started', () => {
           setClusteringInProgress(true);
+          setClusteringProgress(null);
           setError(null);
+        })
+      );
+
+      cleanups.push(
+        window.runtime.EventsOn('faces:clustering-progress', (...args: unknown[]) => {
+          const data = args[0] as ClusteringProgress | undefined;
+          if (data) {
+            setClusteringProgress(data);
+          }
         })
       );
 
       cleanups.push(
         window.runtime.EventsOn('faces:clustering-complete', () => {
           setClusteringInProgress(false);
+          setClusteringProgress(null);
           refresh();
         })
       );
@@ -69,6 +82,7 @@ export function useClusters(): UseClustersReturn {
       cleanups.push(
         window.runtime.EventsOn('faces:clustering-error', (...args: unknown[]) => {
           setClusteringInProgress(false);
+          setClusteringProgress(null);
           const msg = typeof args[0] === 'string' ? args[0] : 'Clustering failed';
           setError(msg);
         })
@@ -123,6 +137,7 @@ export function useClusters(): UseClustersReturn {
     suggestions,
     loading,
     clusteringInProgress,
+    clusteringProgress,
     error,
     refresh,
     runClustering,

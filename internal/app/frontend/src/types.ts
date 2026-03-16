@@ -275,6 +275,12 @@ export interface MergeSuggestion {
   face_count_b: number;
 }
 
+export interface ClusteringProgress {
+  phase: string;
+  current: number;
+  total: number;
+}
+
 export const defaultFilters: SearchFilters = {
   node_type: '',
   package: '',

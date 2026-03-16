@@ -77,18 +77,39 @@ export function useFaces(): UseFacesReturn {
   }, [refresh]);
 
   const createPerson = useCallback(async (name: string, relationships: string[]) => {
-    await window.go.app.App.CreatePerson(name, relationships);
-    refresh();
+    try {
+      await window.go.app.App.CreatePerson(name, relationships);
+      setError(null);
+      refresh();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      throw err;
+    }
   }, [refresh]);
 
   const updatePerson = useCallback(async (id: string, name: string, relationships: string[]) => {
-    await window.go.app.App.UpdatePerson(id, name, relationships);
-    refresh();
+    try {
+      await window.go.app.App.UpdatePerson(id, name, relationships);
+      setError(null);
+      refresh();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      throw err;
+    }
   }, [refresh]);
 
   const deletePerson = useCallback(async (id: string) => {
-    await window.go.app.App.DeletePerson(id);
-    refresh();
+    try {
+      await window.go.app.App.DeletePerson(id);
+      setError(null);
+      refresh();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      throw err;
+    }
   }, [refresh]);
 
   const resumeSync = useCallback(() => {

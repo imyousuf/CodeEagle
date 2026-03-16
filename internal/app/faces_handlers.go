@@ -584,19 +584,29 @@ func (a *App) RunClustering(simThreshold float64) error {
 		defer clusteringRunning.Store(false)
 		a.emit("faces:clustering-started", "")
 
+		progress := func(phase string, current, total int) {
+			a.emit("faces:clustering-progress", map[string]any{
+				"phase":   phase,
+				"current": current,
+				"total":   total,
+			})
+		}
+
 		fs, err := a.getFaceStore()
 		if err != nil {
 			a.emit("faces:clustering-error", err.Error())
 			return
 		}
 
+		progress("Loading faces", 0, 0)
 		allFaces, err := fs.AllFaces()
 		if err != nil {
 			a.emit("faces:clustering-error", err.Error())
 			return
 		}
 
-		if len(allFaces) == 0 {
+		nFaces := len(allFaces)
+		if nFaces == 0 {
 			a.emit("faces:clustering-complete", map[string]int{
 				"clusters": 0, "faces": 0, "noise": 0,
 			})
@@ -604,24 +614,28 @@ func (a *App) RunClustering(simThreshold float64) error {
 		}
 
 		// Build embedding + image path slices.
-		embeddings := make([][]float32, len(allFaces))
-		imagePaths := make([]string, len(allFaces))
+		progress("Preparing embeddings", 0, nFaces)
+		embeddings := make([][]float32, nFaces)
+		imagePaths := make([]string, nFaces)
 		for i, f := range allFaces {
 			embeddings[i] = f.Embedding
 			imagePaths[i] = f.ImagePath
 		}
 
 		// Run agglomerative clustering.
+		progress("Clustering faces", 0, nFaces)
 		labels := faces.AgglomerativeClustering(
 			embeddings, imagePaths, float32(simThreshold), 2,
 		)
 
 		// Absorb noise at 75% of threshold.
+		progress("Absorbing noise", 0, nFaces)
 		labels = faces.AbsorbNoise(
 			embeddings, imagePaths, labels, float32(simThreshold*0.75),
 		)
 
 		// Update cluster IDs in face store.
+		progress("Saving results", 0, nFaces)
 		clusterSet := make(map[int]bool)
 		noiseCount := 0
 		for i, lbl := range labels {
@@ -631,11 +645,14 @@ func (a *App) RunClustering(simThreshold float64) error {
 			} else {
 				clusterSet[lbl] = true
 			}
+			if (i+1)%500 == 0 || i == nFaces-1 {
+				progress("Saving results", i+1, nFaces)
+			}
 		}
 
 		a.emit("faces:clustering-complete", map[string]int{
 			"clusters": len(clusterSet),
-			"faces":    len(allFaces),
+			"faces":    nFaces,
 			"noise":    noiseCount,
 		})
 	}()
