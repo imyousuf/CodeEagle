@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -244,27 +243,26 @@ type MergeSuggestion struct {
 // Face store singleton
 // ---------------------------------------------------------------------------
 
-var (
-	faceStoreOnce sync.Once
-	faceStoreInst *faces.Store
-	faceStoreErr  error
-)
-
 // getFaceStore returns a shared face store instance. The store is opened once
 // on first call and reused for the lifetime of the app. BadgerDB is safe for
 // concurrent read/write access from multiple goroutines within a single
 // process, so there is no need for per-request open/close.
 func (a *App) getFaceStore() (*faces.Store, error) {
-	faceStoreOnce.Do(func() {
+	a.faceStoreOnce.Do(func() {
 		p := filepath.Join(a.cfg.ConfigDir, "faces.db")
-		faceStoreInst, faceStoreErr = faces.OpenStore(p)
-		if faceStoreErr == nil {
+		var fs *faces.Store
+		fs, a.faceStoreErr = faces.OpenStore(p)
+		if a.faceStoreErr == nil {
+			a.faceStoreInst = fs
 			a.shutdownHooks = append(a.shutdownHooks, func() {
-				faceStoreInst.Close()
+				fs.Close()
 			})
 		}
 	})
-	return faceStoreInst, faceStoreErr
+	if a.faceStoreInst == nil {
+		return nil, a.faceStoreErr
+	}
+	return a.faceStoreInst.(*faces.Store), a.faceStoreErr
 }
 
 // ---------------------------------------------------------------------------
