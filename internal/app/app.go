@@ -104,6 +104,26 @@ func (a *App) openGraph() (*graphResources, func(), error) {
 	return gr, func() { store.Close() }, nil
 }
 
+// openGraphRW opens a read-write graph store for a single request. The caller
+// must call the returned close function when done.
+func (a *App) openGraphRW() (*graphResources, func(), error) {
+	if a.syncing {
+		return nil, nil, fmt.Errorf("sync in progress — please wait")
+	}
+
+	store, branch, err := embedded.OpenReadWrite(a.cfg, a.repoPaths, "")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	gr := &graphResources{
+		store:      store,
+		ctxBuilder: agents.NewContextBuilder(store, a.repoPaths...),
+		branch:     branch,
+	}
+	return gr, func() { store.Close() }, nil
+}
+
 // openVector opens a read-only vector store for a single request. Returns
 // (nil, noop) if vector search is unavailable — this is not an error.
 func (a *App) openVector(bs *embedded.BranchStore, branch string) (*vectorstore.VectorStore, func()) {

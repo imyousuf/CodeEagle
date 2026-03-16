@@ -91,7 +91,7 @@ func (a *App) GetPersons() ([]PersonInfo, error) {
 
 // CreatePerson creates a new person with optional relationships.
 func (a *App) CreatePerson(name string, relationships []string) (*PersonInfo, error) {
-	gr, close, err := a.openGraph()
+	gr, close, err := a.openGraphRW()
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func (a *App) CreatePerson(name string, relationships []string) (*PersonInfo, er
 
 // UpdatePerson updates a person's name and relationships.
 func (a *App) UpdatePerson(id, name string, relationships []string) error {
-	gr, close, err := a.openGraph()
+	gr, close, err := a.openGraphRW()
 	if err != nil {
 		return err
 	}
@@ -130,7 +130,7 @@ func (a *App) UpdatePerson(id, name string, relationships []string) error {
 
 // DeletePerson removes a person and all associated face data.
 func (a *App) DeletePerson(id string) error {
-	gr, close, err := a.openGraph()
+	gr, close, err := a.openGraphRW()
 	if err != nil {
 		return err
 	}
@@ -196,7 +196,7 @@ func (a *App) ResumeSync() {
 
 // AssignFaceToPerson manually assigns a face to a person.
 func (a *App) AssignFaceToPerson(personID, imagePath string, faceIndex int, confidence float64) error {
-	gr, close, err := a.openGraph()
+	gr, close, err := a.openGraphRW()
 	if err != nil {
 		return err
 	}
@@ -517,7 +517,7 @@ func (a *App) AssignClusterToPerson(clusterID int, personID string) error {
 		return fmt.Errorf("open face store: %w", err)
 	}
 
-	gr, closeFn, err := a.openGraph()
+	gr, closeFn, err := a.openGraphRW()
 	if err != nil {
 		return err
 	}
