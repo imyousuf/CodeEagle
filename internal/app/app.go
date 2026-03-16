@@ -46,6 +46,10 @@ type App struct {
 	syncMu  sync.RWMutex // write-locked during sync
 	syncing bool         // quick check for sync state
 
+	faceStoreOnce sync.Once // guards lazy face store init
+	faceStoreInst any       // *faces.Store (typed in faces_handlers.go)
+	faceStoreErr  error     // cached error from face store init
+
 	shutdownHooks []func() // cleanup functions called on Shutdown
 }
 
