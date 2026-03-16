@@ -222,6 +222,7 @@ export default function Faces({ status }: FacesProps) {
     noiseFaces,
     suggestions,
     clusteringInProgress,
+    clusteringProgress,
     error: clusterError,
     refresh: refreshClusters,
     runClustering,
@@ -514,6 +515,52 @@ export default function Faces({ status }: FacesProps) {
                 </button>
               )}
             </div>
+
+            {/* Clustering progress indicator */}
+            {clusteringInProgress && (
+              <div style={{
+                background: '#181825',
+                border: '1px solid #313244',
+                borderRadius: '6px',
+                padding: '12px 16px',
+                marginBottom: '16px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: clusteringProgress?.total ? '8px' : '0' }}>
+                  <div style={{
+                    width: '14px',
+                    height: '14px',
+                    border: '2px solid #89b4fa',
+                    borderTopColor: 'transparent',
+                    borderRadius: '50%',
+                    animation: 'spin 1s linear infinite',
+                  }} />
+                  <span style={{ fontSize: '13px', color: '#cdd6f4', fontWeight: 600 }}>
+                    {clusteringProgress?.phase || 'Starting clustering...'}
+                  </span>
+                  {clusteringProgress?.total ? (
+                    <span style={{ fontSize: '12px', color: '#a6adc8' }}>
+                      {clusteringProgress.current.toLocaleString()} / {clusteringProgress.total.toLocaleString()}
+                    </span>
+                  ) : null}
+                </div>
+                {clusteringProgress?.total ? (
+                  <div style={{
+                    height: '4px',
+                    background: '#313244',
+                    borderRadius: '2px',
+                    overflow: 'hidden',
+                  }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${Math.round((clusteringProgress.current / clusteringProgress.total) * 100)}%`,
+                      background: '#89b4fa',
+                      borderRadius: '2px',
+                      transition: 'width 0.3s ease',
+                    }} />
+                  </div>
+                ) : null}
+              </div>
+            )}
 
             {/* Merge suggestions panel */}
             {showSuggestions && (
