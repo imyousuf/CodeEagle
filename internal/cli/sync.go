@@ -380,10 +380,16 @@ func runQueueEnrichment(
 	// Track completions for periodic progress reporting.
 	var completed atomic.Int32
 	total := pending
+	var pool *queue.WorkerPool
 	emitter := func(event string, data ...any) {
 		switch event {
 		case "sync:progress":
 			completed.Add(1)
+		case "sync:checkpoint":
+			// Auto-resume checkpoints in CLI mode (no UI to review).
+			if pool != nil {
+				pool.Resume()
+			}
 		case "job:failed":
 			if len(data) > 0 {
 				if m, ok := data[0].(map[string]string); ok {
@@ -393,7 +399,7 @@ func runQueueEnrichment(
 		}
 	}
 
-	pool := queue.NewWorkerPool(qs, throttler, emitter)
+	pool = queue.NewWorkerPool(qs, throttler, emitter)
 	paths := repoPaths(cfg)
 	pool.Register(queue.JobDocExtract, queue.NewDocExtractHandler(docsProvider, docsCache, graphStore, paths))
 	pool.Register(queue.JobImageDescribe, queue.NewImageDescribeHandler(docsProvider, docsCache, graphStore, cfg.Docs.MaxImageRes, paths))
@@ -629,10 +635,16 @@ func runFaceWorkerPool(
 	defer throttler.Stop()
 
 	var completed atomic.Int32
+	var pool *queue.WorkerPool
 	emitter := func(event string, data ...any) {
 		switch event {
 		case "sync:progress":
 			completed.Add(1)
+		case "sync:checkpoint":
+			// Auto-resume checkpoints in CLI mode (no UI to review).
+			if pool != nil {
+				pool.Resume()
+			}
 		case "job:failed":
 			if len(data) > 0 {
 				if m, ok := data[0].(map[string]string); ok {
@@ -642,7 +654,7 @@ func runFaceWorkerPool(
 		}
 	}
 
-	pool := queue.NewWorkerPool(qs, throttler, emitter)
+	pool = queue.NewWorkerPool(qs, throttler, emitter)
 	cleanupFaces := registerFaceHandlers(pool, cfg, graphStore, warnFn)
 	defer cleanupFaces()
 
