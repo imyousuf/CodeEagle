@@ -45,6 +45,8 @@ type App struct {
 	agentMu sync.Mutex   // serializes agent calls
 	syncMu  sync.RWMutex // write-locked during sync
 	syncing bool         // quick check for sync state
+
+	shutdownHooks []func() // cleanup functions called on Shutdown
 }
 
 // NewApp creates a new App. No resources are opened at construction time.
@@ -69,7 +71,9 @@ func (a *App) Startup(ctx context.Context) {
 
 // Shutdown is called by Wails when the app is closing.
 func (a *App) Shutdown(_ context.Context) {
-	// Nothing to close — resources are per-request.
+	for _, fn := range a.shutdownHooks {
+		fn()
+	}
 }
 
 // graphResources holds a graph store opened for the duration of a request.
