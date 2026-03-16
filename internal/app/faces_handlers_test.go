@@ -39,18 +39,26 @@ func TestClusterInfoFields(t *testing.T) {
 
 func TestFaceStatsFields(t *testing.T) {
 	s := FaceStats{
-		TotalPersons: 3,
-		TotalFaces:   15,
-		TotalImages:  100,
-		ScannedCount: 80,
-		OldestDate:   "2023-01-01",
-		NewestDate:   "2024-12-31",
+		TotalPersons:    3,
+		TotalFaces:      15,
+		DetectedFaces:   200,
+		ImagesWithFaces: 80,
+		TotalImages:     100,
+		ScannedCount:    80,
+		OldestDate:      "2023-01-01",
+		NewestDate:      "2024-12-31",
 	}
 	if s.TotalPersons != 3 {
 		t.Errorf("TotalPersons = %d, want 3", s.TotalPersons)
 	}
 	if s.ScannedCount != 80 {
 		t.Errorf("ScannedCount = %d, want 80", s.ScannedCount)
+	}
+	if s.DetectedFaces != 200 {
+		t.Errorf("DetectedFaces = %d, want 200", s.DetectedFaces)
+	}
+	if s.ImagesWithFaces != 80 {
+		t.Errorf("ImagesWithFaces = %d, want 80", s.ImagesWithFaces)
 	}
 }
 

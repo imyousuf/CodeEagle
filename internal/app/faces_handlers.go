@@ -4,8 +4,10 @@ package app
 
 import (
 	"fmt"
+	"path/filepath"
 	"time"
 
+	"github.com/imyousuf/CodeEagle/internal/faces"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 )
 
@@ -28,12 +30,14 @@ type ClusterInfo struct {
 
 // FaceStats holds face pipeline statistics.
 type FaceStats struct {
-	TotalPersons int    `json:"total_persons"`
-	TotalFaces   int    `json:"total_faces"`
-	TotalImages  int    `json:"total_images"`
-	ScannedCount int    `json:"scanned_count"`
-	OldestDate   string `json:"oldest_date"`
-	NewestDate   string `json:"newest_date"`
+	TotalPersons    int    `json:"total_persons"`
+	TotalFaces      int    `json:"total_faces"`
+	DetectedFaces   int    `json:"detected_faces"`
+	ImagesWithFaces int    `json:"images_with_faces"`
+	TotalImages     int    `json:"total_images"`
+	ScannedCount    int    `json:"scanned_count"`
+	OldestDate      string `json:"oldest_date"`
+	NewestDate      string `json:"newest_date"`
 }
 
 // FaceReviewItem represents a face pending manual review.
@@ -129,21 +133,40 @@ func (a *App) GetFaceStats() (*FaceStats, error) {
 	defer close()
 
 	persons, _ := gr.store.ListPersons()
-	totalFaces := 0
+	assignedFaces := 0
 	for _, p := range persons {
-		faces, _ := gr.store.FacesForPerson(p.ID)
-		totalFaces += len(faces)
+		pf, _ := gr.store.FacesForPerson(p.ID)
+		assignedFaces += len(pf)
 	}
 
 	imageCount := gr.store.ImageCount()
 	unscanned, _ := gr.store.UnscannedImages()
 	oldest, newest, _ := gr.store.DateRange()
 
+	// Count detected faces from the face store.
+	var detectedFaces, imagesWithFaces int
+	faceStorePath := filepath.Join(a.cfg.ConfigDir, "faces.db")
+	fs, fsErr := faces.OpenStore(faceStorePath)
+	if fsErr == nil {
+		defer fs.Close()
+		allFaces, err := fs.AllFaces()
+		if err == nil {
+			detectedFaces = len(allFaces)
+			imgSet := make(map[string]bool)
+			for _, f := range allFaces {
+				imgSet[f.ImagePath] = true
+			}
+			imagesWithFaces = len(imgSet)
+		}
+	}
+
 	stats := &FaceStats{
-		TotalPersons: len(persons),
-		TotalFaces:   totalFaces,
-		TotalImages:  imageCount,
-		ScannedCount: imageCount - len(unscanned),
+		TotalPersons:    len(persons),
+		TotalFaces:      assignedFaces,
+		DetectedFaces:   detectedFaces,
+		ImagesWithFaces: imagesWithFaces,
+		TotalImages:     imageCount,
+		ScannedCount:    imageCount - len(unscanned),
 	}
 	if !oldest.IsZero() {
 		stats.OldestDate = oldest.Format("2006-01-02")
