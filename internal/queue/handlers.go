@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/imyousuf/CodeEagle/internal/docs"
+	"github.com/imyousuf/CodeEagle/internal/faces"
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	genericparser "github.com/imyousuf/CodeEagle/internal/parser/generic"
 )
@@ -53,7 +54,7 @@ func (h *DocExtractHandler) Handle(ctx context.Context, job *Job) (json.RawMessa
 	}
 
 	// Resolve to absolute path for file I/O.
-	absPath := resolveFilePath(relPath, h.repoRoots)
+	absPath := faces.ResolveFilePath(relPath, h.repoRoots)
 
 	// Read file content.
 	content, err := os.ReadFile(absPath)
@@ -168,7 +169,7 @@ func (h *ImageDescribeHandler) Handle(ctx context.Context, job *Job) (json.RawMe
 	}
 
 	// Resolve to absolute path for file I/O.
-	absPath := resolveFilePath(relPath, h.repoRoots)
+	absPath := faces.ResolveFilePath(relPath, h.repoRoots)
 
 	// Read image file.
 	content, err := os.ReadFile(absPath)
@@ -243,33 +244,6 @@ func applyExtraction(ctx context.Context, store graph.Store, node *graph.Node, r
 	for _, te := range topicEdges {
 		_ = store.AddEdge(ctx, te)
 	}
-}
-
-// resolveFilePath converts a relative path to absolute using repo roots.
-// Handles basename-prefixed paths (e.g., "Pictures/sub/photo.jpg" where root
-// is "/home/user/Pictures") by stripping the matching basename prefix.
-// If the path is already absolute or no roots match, returns the path as-is.
-func resolveFilePath(relPath string, repoRoots []string) string {
-	if filepath.IsAbs(relPath) {
-		return relPath
-	}
-	for _, root := range repoRoots {
-		// Direct join (works for git repos with non-prefixed paths).
-		abs := filepath.Join(root, relPath)
-		if _, err := os.Stat(abs); err == nil {
-			return abs
-		}
-
-		// Basename-prefix: relPath starts with basename(root) + "/".
-		base := filepath.Base(root)
-		if prefix := base + "/"; len(relPath) > len(prefix) && relPath[:len(prefix)] == prefix {
-			abs = filepath.Join(root, relPath[len(prefix):])
-			if _, err := os.Stat(abs); err == nil {
-				return abs
-			}
-		}
-	}
-	return relPath // fallback to original (will fail at I/O with clear error)
 }
 
 // detectMIME returns the MIME type for a file based on its extension.

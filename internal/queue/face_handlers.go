@@ -69,7 +69,7 @@ func (h *FaceDetectHandler) Handle(_ context.Context, job *Job) (json.RawMessage
 	}
 
 	// Resolve to absolute path for file I/O (OpenCV imread, EXIF reading).
-	absPath := resolveFilePath(relPath, h.repoRoots)
+	absPath := faces.ResolveFilePath(relPath, h.repoRoots)
 
 	// Extract image metadata.
 	dateResult := faces.ExtractImageDate(absPath)
