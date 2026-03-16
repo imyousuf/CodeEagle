@@ -252,8 +252,16 @@ export default function Faces({ status }: FacesProps) {
             <div style={statLabel}>Persons</div>
           </div>
           <div style={statCard}>
+            <div style={statValue}>{stats.detected_faces}</div>
+            <div style={statLabel}>Faces Detected</div>
+          </div>
+          <div style={statCard}>
+            <div style={statValue}>{stats.images_with_faces}</div>
+            <div style={statLabel}>With Faces</div>
+          </div>
+          <div style={statCard}>
             <div style={statValue}>{stats.total_faces}</div>
-            <div style={statLabel}>Faces</div>
+            <div style={statLabel}>Assigned</div>
           </div>
           <div style={statCard}>
             <div style={statValue}>{stats.total_images}</div>

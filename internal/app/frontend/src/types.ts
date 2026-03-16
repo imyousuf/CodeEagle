@@ -215,6 +215,8 @@ export interface ClusterInfo {
 export interface FaceStats {
   total_persons: number;
   total_faces: number;
+  detected_faces: number;
+  images_with_faces: number;
   total_images: number;
   scanned_count: number;
   oldest_date: string;
