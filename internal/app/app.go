@@ -87,30 +87,11 @@ type graphResources struct {
 	branch     string
 }
 
-// openGraph opens a read-only graph store for a single request. The caller
-// must call the returned close function when done. Returns an error if a
-// sync is in progress (the write lock blocks concurrent reads).
+// openGraph opens the graph store for a single request. The caller must call
+// the returned close function when done. Returns an error if a sync is in
+// progress. Uses read-write mode because BadgerDB's read-only mode fails when
+// vlog files need compaction or are missing.
 func (a *App) openGraph() (*graphResources, func(), error) {
-	if a.syncing {
-		return nil, nil, fmt.Errorf("sync in progress — please wait")
-	}
-
-	store, branch, err := embedded.OpenReadOnly(a.cfg, a.repoPaths, "")
-	if err != nil {
-		return nil, nil, err
-	}
-
-	gr := &graphResources{
-		store:      store,
-		ctxBuilder: agents.NewContextBuilder(store, a.repoPaths...),
-		branch:     branch,
-	}
-	return gr, func() { store.Close() }, nil
-}
-
-// openGraphRW opens a read-write graph store for a single request. The caller
-// must call the returned close function when done.
-func (a *App) openGraphRW() (*graphResources, func(), error) {
 	if a.syncing {
 		return nil, nil, fmt.Errorf("sync in progress — please wait")
 	}
@@ -126,6 +107,11 @@ func (a *App) openGraphRW() (*graphResources, func(), error) {
 		branch:     branch,
 	}
 	return gr, func() { store.Close() }, nil
+}
+
+// openGraphRW is an alias for openGraph (both use read-write mode).
+func (a *App) openGraphRW() (*graphResources, func(), error) {
+	return a.openGraph()
 }
 
 // openVector opens a read-only vector store for a single request. Returns

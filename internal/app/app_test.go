@@ -39,23 +39,22 @@ func TestOpenGraph_NoConfigDir(t *testing.T) {
 	}
 }
 
-func TestOpenGraph_MissingDBDir(t *testing.T) {
+func TestOpenGraph_CreatesDBIfMissing(t *testing.T) {
 	cfg := &config.Config{
 		ConfigDir: t.TempDir(),
 		Graph:     config.GraphConfig{Storage: "embedded"},
 	}
 	a := NewApp(cfg, nil, "", nil, nil)
 
+	// OpenReadWrite creates the DB on first access.
 	gr, closer, err := a.openGraph()
-	if err == nil {
-		t.Fatal("openGraph should fail when graph.db doesn't exist")
+	if err != nil {
+		t.Fatalf("openGraph should succeed (creates DB): %v", err)
 	}
-	if gr != nil {
-		t.Error("graphResources should be nil on error")
+	if gr == nil {
+		t.Error("graphResources should not be nil")
 	}
-	if closer != nil {
-		t.Error("closer should be nil on error")
-	}
+	closer()
 }
 
 func TestOpenGraph_IndependentCalls(t *testing.T) {
@@ -64,14 +63,21 @@ func TestOpenGraph_IndependentCalls(t *testing.T) {
 	}
 	a := NewApp(cfg, nil, "", nil, nil)
 
-	// Two calls should both fail independently (no cached error).
-	_, _, err1 := a.openGraph()
-	_, _, err2 := a.openGraph()
-	if err1 == nil || err2 == nil {
-		t.Fatal("both calls should fail")
+	// Two calls should both succeed independently (per-request open).
+	gr1, closer1, err1 := a.openGraph()
+	if err1 != nil {
+		t.Fatalf("first openGraph: %v", err1)
 	}
-	if err1.Error() != err2.Error() {
-		t.Errorf("errors should match: %q != %q", err1, err2)
+	closer1()
+
+	gr2, closer2, err2 := a.openGraph()
+	if err2 != nil {
+		t.Fatalf("second openGraph: %v", err2)
+	}
+	closer2()
+
+	if gr1 == nil || gr2 == nil {
+		t.Error("both calls should return non-nil resources")
 	}
 }
 
