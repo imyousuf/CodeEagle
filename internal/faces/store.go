@@ -105,6 +105,25 @@ func (s *Store) UpdateCluster(imagePath string, faceIdx, clusterID int) error {
 	})
 }
 
+// GetFace returns a single face record by image path and face index.
+func (s *Store) GetFace(imagePath string, faceIdx int) (*FaceRecord, error) {
+	key := faceKey(imagePath, faceIdx)
+	var rec FaceRecord
+	err := s.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(prefixFaceBox + key))
+		if err != nil {
+			return err
+		}
+		return item.Value(func(val []byte) error {
+			return json.Unmarshal(val, &rec)
+		})
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get face %s:%d: %w", imagePath, faceIdx, err)
+	}
+	return &rec, nil
+}
+
 // AllFaces returns all face records from the store.
 func (s *Store) AllFaces() ([]FaceRecord, error) {
 	var faces []FaceRecord
