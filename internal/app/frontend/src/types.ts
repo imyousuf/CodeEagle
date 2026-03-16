@@ -189,6 +189,19 @@ declare global {
           GetFaceStats: () => Promise<FaceStats>;
           ResumeSync: () => Promise<void>;
           AssignFaceToPerson: (personID: string, imagePath: string, faceIndex: number, confidence: number) => Promise<void>;
+          // Cluster handlers
+          GetClusters: () => Promise<ClusterDetail[]>;
+          GetNoiseFaces: () => Promise<ClusterFace[]>;
+          GetFaceThumbnail: (imagePath: string, faceIndex: number, size: number) => Promise<string>;
+          GetImagePreview: (imagePath: string, maxRes: number) => Promise<string>;
+          RunClustering: (simThreshold: number) => Promise<void>;
+          IsClusteringRunning: () => Promise<boolean>;
+          RemoveFaceFromCluster: (imagePath: string, faceIndex: number) => Promise<void>;
+          MergeClusters: (targetID: number, sourceIDs: number[]) => Promise<number>;
+          SplitCluster: (clusterID: number, simThreshold: number) => Promise<Record<number, number>>;
+          SetClusterLabel: (clusterID: number, label: string) => Promise<void>;
+          AssignClusterToPerson: (clusterID: number, personID: string) => Promise<void>;
+          GetSuggestedMerges: () => Promise<MergeSuggestion[]>;
         };
       };
     };
@@ -235,6 +248,31 @@ export interface CheckpointData {
   clusters: ClusterInfo[];
   images_processed: number;
   total_images: number;
+}
+
+// Cluster types for face clustering UI
+
+export interface ClusterFace {
+  image_path: string;
+  face_index: number;
+}
+
+export interface ClusterDetail {
+  cluster_id: number;
+  label: string;
+  face_count: number;
+  faces: ClusterFace[];
+  person_id: string;
+}
+
+export interface MergeSuggestion {
+  cluster_a: number;
+  cluster_b: number;
+  label_a: string;
+  label_b: string;
+  similarity: number;
+  face_count_a: number;
+  face_count_b: number;
 }
 
 export const defaultFilters: SearchFilters = {
