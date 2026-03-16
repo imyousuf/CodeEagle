@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -156,12 +157,10 @@ func (a *App) GetFaceStats() (*FaceStats, error) {
 	unscanned, _ := gr.store.UnscannedImages()
 	oldest, newest, _ := gr.store.DateRange()
 
-	// Count detected faces from the face store (read-only to avoid lock contention).
+	// Count detected faces from the face store.
 	var detectedFaces, imagesWithFaces int
-	faceStorePath := filepath.Join(a.cfg.ConfigDir, "faces.db")
-	fs, fsErr := faces.OpenStoreReadOnly(faceStorePath)
+	fs, fsErr := a.getFaceStore()
 	if fsErr == nil {
-		defer fs.Close()
 		allFaces, err := fs.AllFaces()
 		if err == nil {
 			detectedFaces = len(allFaces)
@@ -242,20 +241,30 @@ type MergeSuggestion struct {
 }
 
 // ---------------------------------------------------------------------------
-// Face store helpers
+// Face store singleton
 // ---------------------------------------------------------------------------
 
-// openFaceStore opens the face store in read-write mode.
-func (a *App) openFaceStore() (*faces.Store, error) {
-	p := filepath.Join(a.cfg.ConfigDir, "faces.db")
-	return faces.OpenStore(p)
-}
+var (
+	faceStoreOnce sync.Once
+	faceStoreInst *faces.Store
+	faceStoreErr  error
+)
 
-// openFaceStoreRO opens the face store in read-only mode. Multiple concurrent
-// readers are allowed, avoiding BadgerDB lock contention.
-func (a *App) openFaceStoreRO() (*faces.Store, error) {
-	p := filepath.Join(a.cfg.ConfigDir, "faces.db")
-	return faces.OpenStoreReadOnly(p)
+// getFaceStore returns a shared face store instance. The store is opened once
+// on first call and reused for the lifetime of the app. BadgerDB is safe for
+// concurrent read/write access from multiple goroutines within a single
+// process, so there is no need for per-request open/close.
+func (a *App) getFaceStore() (*faces.Store, error) {
+	faceStoreOnce.Do(func() {
+		p := filepath.Join(a.cfg.ConfigDir, "faces.db")
+		faceStoreInst, faceStoreErr = faces.OpenStore(p)
+		if faceStoreErr == nil {
+			a.shutdownHooks = append(a.shutdownHooks, func() {
+				faceStoreInst.Close()
+			})
+		}
+	})
+	return faceStoreInst, faceStoreErr
 }
 
 // ---------------------------------------------------------------------------
@@ -268,11 +277,10 @@ func (a *App) GetFaceThumbnail(imagePath string, faceIndex, size int) (string, e
 		size = 64
 	}
 
-	fs, err := a.openFaceStoreRO()
+	fs, err := a.getFaceStore()
 	if err != nil {
 		return "", fmt.Errorf("open face store: %w", err)
 	}
-	defer fs.Close()
 
 	rec, err := fs.GetFace(imagePath, faceIndex)
 	if err != nil {
@@ -394,11 +402,10 @@ func decodeImageData(data []byte, mimeType string) (image.Image, error) {
 
 // GetClusters returns all face clusters with their faces.
 func (a *App) GetClusters() ([]ClusterDetail, error) {
-	fs, err := a.openFaceStoreRO()
+	fs, err := a.getFaceStore()
 	if err != nil {
 		return nil, fmt.Errorf("open face store: %w", err)
 	}
-	defer fs.Close()
 
 	allFaces, err := fs.AllFaces()
 	if err != nil {
@@ -445,11 +452,10 @@ func (a *App) GetClusters() ([]ClusterDetail, error) {
 
 // GetNoiseFaces returns all faces not assigned to any cluster.
 func (a *App) GetNoiseFaces() ([]ClusterFace, error) {
-	fs, err := a.openFaceStoreRO()
+	fs, err := a.getFaceStore()
 	if err != nil {
 		return nil, fmt.Errorf("open face store: %w", err)
 	}
-	defer fs.Close()
 
 	allFaces, err := fs.AllFaces()
 	if err != nil {
@@ -470,51 +476,46 @@ func (a *App) GetNoiseFaces() ([]ClusterFace, error) {
 
 // RemoveFaceFromCluster sets a face's cluster to -1 (noise).
 func (a *App) RemoveFaceFromCluster(imagePath string, faceIndex int) error {
-	fs, err := a.openFaceStore()
+	fs, err := a.getFaceStore()
 	if err != nil {
 		return fmt.Errorf("open face store: %w", err)
 	}
-	defer fs.Close()
 	return fs.UpdateCluster(imagePath, faceIndex, -1)
 }
 
 // MergeClusters merges source clusters into a target cluster.
 func (a *App) MergeClusters(targetID int, sourceIDs []int) (int, error) {
-	fs, err := a.openFaceStore()
+	fs, err := a.getFaceStore()
 	if err != nil {
 		return 0, fmt.Errorf("open face store: %w", err)
 	}
-	defer fs.Close()
 	return faces.Merge(fs, targetID, sourceIDs)
 }
 
 // SplitCluster re-clusters a single cluster at a tighter threshold.
 func (a *App) SplitCluster(clusterID int, simThreshold float64) (map[int]int, error) {
-	fs, err := a.openFaceStore()
+	fs, err := a.getFaceStore()
 	if err != nil {
 		return nil, fmt.Errorf("open face store: %w", err)
 	}
-	defer fs.Close()
 	return faces.Split(fs, clusterID, float32(simThreshold))
 }
 
 // SetClusterLabel assigns a label to a cluster.
 func (a *App) SetClusterLabel(clusterID int, label string) error {
-	fs, err := a.openFaceStore()
+	fs, err := a.getFaceStore()
 	if err != nil {
 		return fmt.Errorf("open face store: %w", err)
 	}
-	defer fs.Close()
 	return fs.SetLabel(clusterID, label)
 }
 
 // AssignClusterToPerson assigns all faces in a cluster to a person.
 func (a *App) AssignClusterToPerson(clusterID int, personID string) error {
-	fs, err := a.openFaceStore()
+	fs, err := a.getFaceStore()
 	if err != nil {
 		return fmt.Errorf("open face store: %w", err)
 	}
-	defer fs.Close()
 
 	gr, closeFn, err := a.openGraph()
 	if err != nil {
@@ -583,12 +584,11 @@ func (a *App) RunClustering(simThreshold float64) error {
 		defer clusteringRunning.Store(false)
 		a.emit("faces:clustering-started", "")
 
-		fs, err := a.openFaceStore()
+		fs, err := a.getFaceStore()
 		if err != nil {
 			a.emit("faces:clustering-error", err.Error())
 			return
 		}
-		defer fs.Close()
 
 		allFaces, err := fs.AllFaces()
 		if err != nil {
@@ -654,11 +654,10 @@ func (a *App) IsClusteringRunning() bool {
 
 // GetSuggestedMerges returns pairs of clusters with high centroid similarity.
 func (a *App) GetSuggestedMerges() ([]MergeSuggestion, error) {
-	fs, err := a.openFaceStoreRO()
+	fs, err := a.getFaceStore()
 	if err != nil {
 		return nil, fmt.Errorf("open face store: %w", err)
 	}
-	defer fs.Close()
 
 	allFaces, err := fs.AllFaces()
 	if err != nil {
