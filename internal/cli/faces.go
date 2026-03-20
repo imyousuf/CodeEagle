@@ -192,7 +192,7 @@ func newFacesScanCmd() *cobra.Command {
 
 			labels := faces.AgglomerativeClustering(embeddings, imgPaths, sim, 2)
 			absorbThr := sim * 0.75
-			labels = faces.AbsorbNoise(embeddings, imgPaths, labels, absorbThr)
+			labels = faces.AbsorbNoise(embeddings, imgPaths, labels, absorbThr, nil)
 
 			for i, f := range allFaces {
 				if err := store.UpdateCluster(f.ImagePath, f.FaceIdx, labels[i]); err != nil {

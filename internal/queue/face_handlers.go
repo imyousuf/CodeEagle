@@ -186,7 +186,7 @@ func (h *FaceClusterHandler) Handle(_ context.Context, _ *Job) (json.RawMessage,
 	}
 
 	labels := faces.AgglomerativeClustering(embeddings, imagePaths, h.simThreshold, h.minCluster)
-	labels = faces.AbsorbNoise(embeddings, imagePaths, labels, h.simThreshold-0.05)
+	labels = faces.AbsorbNoise(embeddings, imagePaths, labels, h.simThreshold-0.05, nil)
 
 	for i, label := range labels {
 		if err := h.faceStore.UpdateCluster(allFaces[i].ImagePath, allFaces[i].FaceIdx, label); err != nil {

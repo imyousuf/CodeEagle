@@ -21,13 +21,13 @@ func imageRect(minX, minY, maxX, maxY int) image.Rectangle {
 // ---------------------------------------------------------------------------
 
 // newTestApp creates an App backed by real BadgerDB stores in temp directories.
-// The graph store is pre-created so openGraphRW() works.
+// The graph store is pre-created so withGraph() works.
 func newTestApp(t *testing.T) *App {
 	t.Helper()
 	dir := t.TempDir()
 	cfgDir := filepath.Join(dir, ".CodeEagle")
 
-	// Pre-create the graph store so both openGraph and openGraphRW succeed.
+	// Pre-create the graph store so withGraph succeeds.
 	graphDBPath := filepath.Join(cfgDir, "graph.db")
 	gs, err := embedded.NewBranchStore(graphDBPath, "default", []string{"default"})
 	if err != nil {
@@ -42,7 +42,6 @@ func newTestApp(t *testing.T) *App {
 	}
 
 	a := NewApp(cfg, nil, "", nil, nil)
-	// Wire a no-op emitter (default from NewApp is already no-op).
 	t.Cleanup(func() { a.Shutdown(nil) })
 	return a
 }
@@ -229,23 +228,43 @@ func TestDeletePersonNotFound(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Face store singleton tests
+// withFaceStore tests
 // ---------------------------------------------------------------------------
 
-func TestGetFaceStoreSingleton(t *testing.T) {
+func TestWithFaceStore(t *testing.T) {
 	a := newTestApp(t)
 	seedFaceStore(t, a.cfg.ConfigDir)
 
-	fs1, err := a.getFaceStore()
+	var count int
+	err := a.withFaceStore(func(fs *faces.Store) error {
+		allFaces, err := fs.AllFaces()
+		if err != nil {
+			return err
+		}
+		count = len(allFaces)
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("getFaceStore 1: %v", err)
+		t.Fatalf("withFaceStore: %v", err)
 	}
-	fs2, err := a.getFaceStore()
-	if err != nil {
-		t.Fatalf("getFaceStore 2: %v", err)
+	if count != 6 {
+		t.Errorf("face count = %d, want 6", count)
 	}
-	if fs1 != fs2 {
-		t.Error("getFaceStore should return the same instance")
+}
+
+func TestWithFaceStoreIndependentCalls(t *testing.T) {
+	a := newTestApp(t)
+	seedFaceStore(t, a.cfg.ConfigDir)
+
+	// Two sequential calls should both succeed.
+	for i := 0; i < 2; i++ {
+		err := a.withFaceStore(func(fs *faces.Store) error {
+			_, err := fs.AllFaces()
+			return err
+		})
+		if err != nil {
+			t.Fatalf("withFaceStore call %d: %v", i+1, err)
+		}
 	}
 }
 

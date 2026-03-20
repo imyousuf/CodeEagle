@@ -14,9 +14,7 @@ func (a *App) GetStatus() AppStatus {
 	}
 
 	// Try graph.
-	gr, closeGraph, err := a.openGraph()
-	if err == nil && gr != nil {
-		defer closeGraph()
+	_ = a.withGraph(func(gr *graphResources) error {
 		stats, err := gr.store.Stats(context.Background())
 		if err == nil {
 			status.GraphReady = stats.NodeCount > 0
@@ -37,7 +35,8 @@ func (a *App) GetStatus() AppStatus {
 				}
 			}
 		}
-	}
+		return nil
+	})
 
 	// Try LLM.
 	client, closeLLM, err := a.openLLM()

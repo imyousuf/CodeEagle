@@ -77,22 +77,19 @@ func TestStartSync_ConcurrentReject(t *testing.T) {
 	t.Error("IsSyncing should be false after sync completes")
 }
 
-func TestOpenGraph_BlockedDuringSync(t *testing.T) {
+func TestWithGraph_BlockedDuringSync(t *testing.T) {
 	a := NewApp(&config.Config{}, nil, "", nil, nil)
 	a.syncing = true
 
-	gr, closer, err := a.openGraph()
+	err := a.withGraph(func(gr *graphResources) error {
+		t.Error("callback should not be called during sync")
+		return nil
+	})
 	if err == nil {
-		t.Fatal("openGraph should fail during sync")
+		t.Fatal("withGraph should fail during sync")
 	}
 	if !strings.Contains(err.Error(), "sync in progress") {
 		t.Errorf("unexpected error: %v", err)
-	}
-	if gr != nil {
-		t.Error("graphResources should be nil")
-	}
-	if closer != nil {
-		t.Error("closer should be nil")
 	}
 }
 
