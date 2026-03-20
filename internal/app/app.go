@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -30,8 +31,6 @@ type EventEmitter func(event string, data ...any)
 
 // App is the Wails-bound application struct that provides the Go backend
 // for the desktop app's Search, Ask, Sync, and Settings features.
-// Resources (graph store, vector store, LLM client) are opened per-request
-// and closed when the request completes — no persistent state to go stale.
 type App struct {
 	ctx       context.Context
 	cfg       *config.Config
@@ -45,12 +44,8 @@ type App struct {
 	agentMu sync.Mutex   // serializes agent calls
 	syncMu  sync.RWMutex // write-locked during sync
 	syncing bool         // quick check for sync state
-
-	faceStoreOnce sync.Once // guards lazy face store init
-	faceStoreInst any       // *faces.Store (typed in faces_handlers.go)
-	faceStoreErr  error     // cached error from face store init
-
-	shutdownHooks []func() // cleanup functions called on Shutdown
+	graphMu sync.Mutex   // serializes graph store open/close
+	facesMu sync.Mutex   // serializes face store open/close
 }
 
 // NewApp creates a new App. No resources are opened at construction time.
@@ -75,43 +70,47 @@ func (a *App) Startup(ctx context.Context) {
 
 // Shutdown is called by Wails when the app is closing.
 func (a *App) Shutdown(_ context.Context) {
-	for _, fn := range a.shutdownHooks {
-		fn()
-	}
+	// Nothing to close — all resources are per-request.
 }
 
-// graphResources holds a graph store opened for the duration of a request.
+// ---------------------------------------------------------------------------
+// Graph store repository
+// ---------------------------------------------------------------------------
+
+// graphResources holds a graph store opened for the duration of a callback.
 type graphResources struct {
 	store      *embedded.BranchStore
 	ctxBuilder *agents.ContextBuilder
 	branch     string
 }
 
-// openGraph opens the graph store for a single request. The caller must call
-// the returned close function when done. Returns an error if a sync is in
-// progress. Uses read-write mode because BadgerDB's read-only mode fails when
-// vlog files need compaction or are missing.
-func (a *App) openGraph() (*graphResources, func(), error) {
+// withGraph opens the graph store, calls fn, then closes it. A mutex ensures
+// only one graph store is open at a time (BadgerDB exclusive lock).
+func (a *App) withGraph(fn func(*graphResources) error) error {
 	if a.syncing {
-		return nil, nil, fmt.Errorf("sync in progress — please wait")
+		return fmt.Errorf("sync in progress — please wait")
 	}
+
+	a.graphMu.Lock()
+	defer a.graphMu.Unlock()
 
 	store, branch, err := embedded.OpenReadWrite(a.cfg, a.repoPaths, "")
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
+	defer store.Close()
 
 	gr := &graphResources{
 		store:      store,
 		ctxBuilder: agents.NewContextBuilder(store, a.repoPaths...),
 		branch:     branch,
 	}
-	return gr, func() { store.Close() }, nil
+	return fn(gr)
 }
 
-// openGraphRW is an alias for openGraph (both use read-write mode).
-func (a *App) openGraphRW() (*graphResources, func(), error) {
-	return a.openGraph()
+// faceStorePath returns the path to the face store database.
+func (a *App) faceStorePath() string {
+	return filepath.Join(a.cfg.ConfigDir, "faces.db")
 }
 
 // openVector opens a read-only vector store for a single request. Returns

@@ -66,43 +66,33 @@ func (a *App) AskAgent(agentType, query string) error {
 		}
 		defer closeLLM()
 
-		// Open graph.
-		gr, closeGraph, err := a.openGraph()
-		if err != nil {
-			a.emit("agent:error", map[string]string{
-				"agent": agentType,
-				"error": fmt.Sprintf("knowledge graph not available: %v — run 'codeeagle sync' first", err),
+		// Open graph and run agent within the callback.
+		if err := a.withGraph(func(gr *graphResources) error {
+			// Open vector (optional).
+			vs, closeVector := a.openVector(gr.store, gr.branch)
+			defer closeVector()
+
+			agent, err := createAgent(agentType, llmClient, gr.ctxBuilder, vs, a.repoPaths)
+			if err != nil {
+				return err
+			}
+
+			resp, err := agent.Ask(context.Background(), query)
+			if err != nil {
+				return err
+			}
+
+			a.emit("agent:response", map[string]string{
+				"agent":   agentType,
+				"content": resp,
 			})
-			return
-		}
-		defer closeGraph()
-
-		// Open vector (optional).
-		vs, closeVector := a.openVector(gr.store, gr.branch)
-		defer closeVector()
-
-		agent, err := createAgent(agentType, llmClient, gr.ctxBuilder, vs, a.repoPaths)
-		if err != nil {
-			a.emit("agent:error", map[string]string{
-				"agent": agentType,
-				"error": err.Error(),
-			})
-			return
-		}
-
-		resp, err := agent.Ask(context.Background(), query)
-		if err != nil {
+			return nil
+		}); err != nil {
 			a.emit("agent:error", map[string]string{
 				"agent": agentType,
 				"error": err.Error(),
 			})
-			return
 		}
-
-		a.emit("agent:response", map[string]string{
-			"agent":   agentType,
-			"content": resp,
-		})
 	}()
 
 	return nil

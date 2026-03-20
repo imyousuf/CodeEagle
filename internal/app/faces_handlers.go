@@ -61,131 +61,141 @@ type FaceReviewItem struct {
 	Confidence float64 `json:"confidence"`
 }
 
+// ---------------------------------------------------------------------------
+// Face store access (repo pattern)
+// ---------------------------------------------------------------------------
+
+// withFaceStore opens the face store, calls fn, then closes it. A mutex
+// ensures only one face store is open at a time (BadgerDB exclusive lock).
+func (a *App) withFaceStore(fn func(*faces.Store) error) error {
+	a.facesMu.Lock()
+	defer a.facesMu.Unlock()
+
+	fs, err := faces.OpenStore(a.faceStorePath())
+	if err != nil {
+		return err
+	}
+	defer fs.Close()
+	return fn(fs)
+}
+
+// ---------------------------------------------------------------------------
+// Person CRUD (graph store)
+// ---------------------------------------------------------------------------
+
 // GetPersons returns all known persons with face counts.
 func (a *App) GetPersons() ([]PersonInfo, error) {
-	gr, close, err := a.openGraph()
-	if err != nil {
-		return nil, err
-	}
-	defer close()
-
-	persons, err := gr.store.ListPersons()
-	if err != nil {
-		return nil, fmt.Errorf("list persons: %w", err)
-	}
-
 	var result []PersonInfo
-	for _, p := range persons {
-		faces, _ := gr.store.FacesForPerson(p.ID)
-		result = append(result, PersonInfo{
-			ID:            p.ID,
-			Name:          p.Name,
-			Relationships: p.Relationships,
-			FaceCount:     len(faces),
-			CreatedAt:     p.CreatedAt.Format(time.RFC3339),
-		})
-	}
-	return result, nil
+	err := a.withGraph(func(gr *graphResources) error {
+		persons, err := gr.store.ListPersons()
+		if err != nil {
+			return fmt.Errorf("list persons: %w", err)
+		}
+		for _, p := range persons {
+			pf, _ := gr.store.FacesForPerson(p.ID)
+			result = append(result, PersonInfo{
+				ID:            p.ID,
+				Name:          p.Name,
+				Relationships: p.Relationships,
+				FaceCount:     len(pf),
+				CreatedAt:     p.CreatedAt.Format(time.RFC3339),
+			})
+		}
+		return nil
+	})
+	return result, err
 }
 
 // CreatePerson creates a new person with optional relationships.
 func (a *App) CreatePerson(name string, relationships []string) (*PersonInfo, error) {
-	gr, close, err := a.openGraphRW()
-	if err != nil {
-		return nil, err
-	}
-	defer close()
-
-	p := &embedded.Person{Name: name, Relationships: relationships}
-	if err := gr.store.CreatePerson(p); err != nil {
-		return nil, fmt.Errorf("create person: %w", err)
-	}
-
-	return &PersonInfo{
-		ID:            p.ID,
-		Name:          p.Name,
-		Relationships: p.Relationships,
-		CreatedAt:     p.CreatedAt.Format(time.RFC3339),
-	}, nil
+	var info *PersonInfo
+	err := a.withGraph(func(gr *graphResources) error {
+		p := &embedded.Person{Name: name, Relationships: relationships}
+		if err := gr.store.CreatePerson(p); err != nil {
+			return fmt.Errorf("create person: %w", err)
+		}
+		info = &PersonInfo{
+			ID:            p.ID,
+			Name:          p.Name,
+			Relationships: p.Relationships,
+			CreatedAt:     p.CreatedAt.Format(time.RFC3339),
+		}
+		return nil
+	})
+	return info, err
 }
 
 // UpdatePerson updates a person's name and relationships.
 func (a *App) UpdatePerson(id, name string, relationships []string) error {
-	gr, close, err := a.openGraphRW()
-	if err != nil {
-		return err
-	}
-	defer close()
-
-	p, err := gr.store.GetPerson(id)
-	if err != nil || p == nil {
-		return fmt.Errorf("person %s not found", id)
-	}
-
-	p.Name = name
-	p.Relationships = relationships
-	return gr.store.UpdatePerson(p)
+	return a.withGraph(func(gr *graphResources) error {
+		p, err := gr.store.GetPerson(id)
+		if err != nil || p == nil {
+			return fmt.Errorf("person %s not found", id)
+		}
+		p.Name = name
+		p.Relationships = relationships
+		return gr.store.UpdatePerson(p)
+	})
 }
 
 // DeletePerson removes a person and all associated face data.
 func (a *App) DeletePerson(id string) error {
-	gr, close, err := a.openGraphRW()
-	if err != nil {
-		return err
-	}
-	defer close()
-	return gr.store.DeletePerson(id)
+	return a.withGraph(func(gr *graphResources) error {
+		return gr.store.DeletePerson(id)
+	})
 }
+
+// ---------------------------------------------------------------------------
+// Face stats (graph + face stores, sequential)
+// ---------------------------------------------------------------------------
 
 // GetFaceStats returns aggregate face pipeline statistics.
 func (a *App) GetFaceStats() (*FaceStats, error) {
-	gr, close, err := a.openGraph()
-	if err != nil {
+	var stats FaceStats
+
+	// Get graph data first.
+	if err := a.withGraph(func(gr *graphResources) error {
+		persons, _ := gr.store.ListPersons()
+		assignedFaces := 0
+		for _, p := range persons {
+			pf, _ := gr.store.FacesForPerson(p.ID)
+			assignedFaces += len(pf)
+		}
+		imageCount := gr.store.ImageCount()
+		unscanned, _ := gr.store.UnscannedImages()
+		oldest, newest, _ := gr.store.DateRange()
+
+		stats.TotalPersons = len(persons)
+		stats.TotalFaces = assignedFaces
+		stats.TotalImages = imageCount
+		stats.ScannedCount = imageCount - len(unscanned)
+		if !oldest.IsZero() {
+			stats.OldestDate = oldest.Format("2006-01-02")
+		}
+		if !newest.IsZero() {
+			stats.NewestDate = newest.Format("2006-01-02")
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	defer close()
 
-	persons, _ := gr.store.ListPersons()
-	assignedFaces := 0
-	for _, p := range persons {
-		pf, _ := gr.store.FacesForPerson(p.ID)
-		assignedFaces += len(pf)
-	}
-
-	imageCount := gr.store.ImageCount()
-	unscanned, _ := gr.store.UnscannedImages()
-	oldest, newest, _ := gr.store.DateRange()
-
-	// Count detected faces from the face store.
-	var detectedFaces, imagesWithFaces int
-	fs, fsErr := a.getFaceStore()
-	if fsErr == nil {
+	// Then get face store data (best-effort — ignore errors).
+	_ = a.withFaceStore(func(fs *faces.Store) error {
 		allFaces, err := fs.AllFaces()
-		if err == nil {
-			detectedFaces = len(allFaces)
-			imgSet := make(map[string]bool)
-			for _, f := range allFaces {
-				imgSet[f.ImagePath] = true
-			}
-			imagesWithFaces = len(imgSet)
+		if err != nil {
+			return err
 		}
-	}
+		stats.DetectedFaces = len(allFaces)
+		imgSet := make(map[string]bool)
+		for _, f := range allFaces {
+			imgSet[f.ImagePath] = true
+		}
+		stats.ImagesWithFaces = len(imgSet)
+		return nil
+	})
 
-	stats := &FaceStats{
-		TotalPersons:    len(persons),
-		TotalFaces:      assignedFaces,
-		DetectedFaces:   detectedFaces,
-		ImagesWithFaces: imagesWithFaces,
-		TotalImages:     imageCount,
-		ScannedCount:    imageCount - len(unscanned),
-	}
-	if !oldest.IsZero() {
-		stats.OldestDate = oldest.Format("2006-01-02")
-	}
-	if !newest.IsZero() {
-		stats.NewestDate = newest.Format("2006-01-02")
-	}
-	return stats, nil
+	return &stats, nil
 }
 
 // ResumeSync unblocks a face checkpoint pause.
@@ -195,17 +205,13 @@ func (a *App) ResumeSync() {
 
 // AssignFaceToPerson manually assigns a face to a person.
 func (a *App) AssignFaceToPerson(personID, imagePath string, faceIndex int, confidence float64) error {
-	gr, close, err := a.openGraphRW()
-	if err != nil {
-		return err
-	}
-	defer close()
-
-	return gr.store.AssignFaceToPerson(&embedded.FaceAssignment{
-		PersonID:   personID,
-		ImagePath:  imagePath,
-		FaceIndex:  faceIndex,
-		Confidence: confidence,
+	return a.withGraph(func(gr *graphResources) error {
+		return gr.store.AssignFaceToPerson(&embedded.FaceAssignment{
+			PersonID:   personID,
+			ImagePath:  imagePath,
+			FaceIndex:  faceIndex,
+			Confidence: confidence,
+		})
 	})
 }
 
@@ -240,32 +246,6 @@ type MergeSuggestion struct {
 }
 
 // ---------------------------------------------------------------------------
-// Face store singleton
-// ---------------------------------------------------------------------------
-
-// getFaceStore returns a shared face store instance. The store is opened once
-// on first call and reused for the lifetime of the app. BadgerDB is safe for
-// concurrent read/write access from multiple goroutines within a single
-// process, so there is no need for per-request open/close.
-func (a *App) getFaceStore() (*faces.Store, error) {
-	a.faceStoreOnce.Do(func() {
-		p := filepath.Join(a.cfg.ConfigDir, "faces.db")
-		var fs *faces.Store
-		fs, a.faceStoreErr = faces.OpenStore(p)
-		if a.faceStoreErr == nil {
-			a.faceStoreInst = fs
-			a.shutdownHooks = append(a.shutdownHooks, func() {
-				fs.Close()
-			})
-		}
-	})
-	if a.faceStoreInst == nil {
-		return nil, a.faceStoreErr
-	}
-	return a.faceStoreInst.(*faces.Store), a.faceStoreErr
-}
-
-// ---------------------------------------------------------------------------
 // Image serving handlers
 // ---------------------------------------------------------------------------
 
@@ -275,16 +255,20 @@ func (a *App) GetFaceThumbnail(imagePath string, faceIndex, size int) (string, e
 		size = 64
 	}
 
-	fs, err := a.getFaceStore()
-	if err != nil {
-		return "", fmt.Errorf("open face store: %w", err)
+	// Read the face bounding box (short lock).
+	var bbox image.Rectangle
+	if err := a.withFaceStore(func(fs *faces.Store) error {
+		rec, err := fs.GetFace(imagePath, faceIndex)
+		if err != nil {
+			return fmt.Errorf("get face record: %w", err)
+		}
+		bbox = rec.BBox
+		return nil
+	}); err != nil {
+		return "", err
 	}
 
-	rec, err := fs.GetFace(imagePath, faceIndex)
-	if err != nil {
-		return "", fmt.Errorf("get face record: %w", err)
-	}
-
+	// Image processing outside the lock.
 	absPath := faces.ResolveFilePath(imagePath, a.repoPaths)
 	data, err := os.ReadFile(absPath)
 	if err != nil {
@@ -298,7 +282,7 @@ func (a *App) GetFaceThumbnail(imagePath string, faceIndex, size int) (string, e
 	}
 
 	// Crop face with 20% padding.
-	crop := padRect(rec.BBox, src.Bounds(), 0.2)
+	crop := padRect(bbox, src.Bounds(), 0.2)
 	cropped := src.(interface {
 		SubImage(r image.Rectangle) image.Image
 	}).SubImage(crop)
@@ -387,179 +371,186 @@ func detectImageMIME(filePath string) string {
 
 // decodeImageData decodes image data from bytes using the MIME type.
 func decodeImageData(data []byte, mimeType string) (image.Image, error) {
-	// Use genericparser.DownscaleImage logic path: decode based on mime.
-	// But we need the raw image, not re-encoded. Use image.Decode with registered decoders.
 	_ = mimeType // all standard formats are registered via imports
 	img, _, err := image.Decode(bytes.NewReader(data))
 	return img, err
 }
 
 // ---------------------------------------------------------------------------
-// Cluster data handlers
+// Cluster data handlers (face store)
 // ---------------------------------------------------------------------------
 
 // GetClusters returns all face clusters with their faces.
 func (a *App) GetClusters() ([]ClusterDetail, error) {
-	fs, err := a.getFaceStore()
-	if err != nil {
-		return nil, fmt.Errorf("open face store: %w", err)
-	}
-
-	allFaces, err := fs.AllFaces()
-	if err != nil {
-		return nil, fmt.Errorf("list faces: %w", err)
-	}
-
-	labels, _ := fs.AllLabels()
-
-	// Group by cluster ID, excluding noise.
-	clusterMap := make(map[int][]ClusterFace)
-	for _, f := range allFaces {
-		if f.ClusterID < 0 {
-			continue
-		}
-		clusterMap[f.ClusterID] = append(clusterMap[f.ClusterID], ClusterFace{
-			ImagePath: f.ImagePath,
-			FaceIndex: f.FaceIdx,
-		})
-	}
-
 	var result []ClusterDetail
-	for cid, cfaces := range clusterMap {
-		detail := ClusterDetail{
-			ClusterID: cid,
-			Label:     labels[cid],
-			FaceCount: len(cfaces),
+	err := a.withFaceStore(func(fs *faces.Store) error {
+		allFaces, err := fs.AllFaces()
+		if err != nil {
+			return fmt.Errorf("list faces: %w", err)
 		}
-		// Limit faces to first 20 for preview.
-		if len(cfaces) > 20 {
-			detail.Faces = cfaces[:20]
-		} else {
-			detail.Faces = cfaces
-		}
-		result = append(result, detail)
-	}
 
-	// Sort by face count descending.
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].FaceCount > result[j].FaceCount
-	})
+		labels, _ := fs.AllLabels()
 
-	return result, nil
-}
-
-// GetNoiseFaces returns all faces not assigned to any cluster.
-func (a *App) GetNoiseFaces() ([]ClusterFace, error) {
-	fs, err := a.getFaceStore()
-	if err != nil {
-		return nil, fmt.Errorf("open face store: %w", err)
-	}
-
-	allFaces, err := fs.AllFaces()
-	if err != nil {
-		return nil, fmt.Errorf("list faces: %w", err)
-	}
-
-	var noise []ClusterFace
-	for _, f := range allFaces {
-		if f.ClusterID < 0 {
-			noise = append(noise, ClusterFace{
+		// Group by cluster ID, excluding noise.
+		clusterMap := make(map[int][]ClusterFace)
+		for _, f := range allFaces {
+			if f.ClusterID < 0 {
+				continue
+			}
+			clusterMap[f.ClusterID] = append(clusterMap[f.ClusterID], ClusterFace{
 				ImagePath: f.ImagePath,
 				FaceIndex: f.FaceIdx,
 			})
 		}
-	}
-	return noise, nil
+
+		for cid, cfaces := range clusterMap {
+			detail := ClusterDetail{
+				ClusterID: cid,
+				Label:     labels[cid],
+				FaceCount: len(cfaces),
+			}
+			// Limit faces to first 20 for preview.
+			if len(cfaces) > 20 {
+				detail.Faces = cfaces[:20]
+			} else {
+				detail.Faces = cfaces
+			}
+			result = append(result, detail)
+		}
+
+		// Sort by face count descending.
+		sort.Slice(result, func(i, j int) bool {
+			return result[i].FaceCount > result[j].FaceCount
+		})
+		return nil
+	})
+	return result, err
+}
+
+// GetNoiseFaces returns all faces not assigned to any cluster.
+func (a *App) GetNoiseFaces() ([]ClusterFace, error) {
+	var noise []ClusterFace
+	err := a.withFaceStore(func(fs *faces.Store) error {
+		allFaces, err := fs.AllFaces()
+		if err != nil {
+			return fmt.Errorf("list faces: %w", err)
+		}
+		for _, f := range allFaces {
+			if f.ClusterID < 0 {
+				noise = append(noise, ClusterFace{
+					ImagePath: f.ImagePath,
+					FaceIndex: f.FaceIdx,
+				})
+			}
+		}
+		return nil
+	})
+	return noise, err
 }
 
 // RemoveFaceFromCluster sets a face's cluster to -1 (noise).
 func (a *App) RemoveFaceFromCluster(imagePath string, faceIndex int) error {
-	fs, err := a.getFaceStore()
-	if err != nil {
-		return fmt.Errorf("open face store: %w", err)
-	}
-	return fs.UpdateCluster(imagePath, faceIndex, -1)
+	return a.withFaceStore(func(fs *faces.Store) error {
+		return fs.UpdateCluster(imagePath, faceIndex, -1)
+	})
 }
 
 // MergeClusters merges source clusters into a target cluster.
 func (a *App) MergeClusters(targetID int, sourceIDs []int) (int, error) {
-	fs, err := a.getFaceStore()
-	if err != nil {
-		return 0, fmt.Errorf("open face store: %w", err)
-	}
-	return faces.Merge(fs, targetID, sourceIDs)
+	var moved int
+	err := a.withFaceStore(func(fs *faces.Store) error {
+		var err error
+		moved, err = faces.Merge(fs, targetID, sourceIDs)
+		return err
+	})
+	return moved, err
 }
 
 // SplitCluster re-clusters a single cluster at a tighter threshold.
 func (a *App) SplitCluster(clusterID int, simThreshold float64) (map[int]int, error) {
-	fs, err := a.getFaceStore()
-	if err != nil {
-		return nil, fmt.Errorf("open face store: %w", err)
-	}
-	return faces.Split(fs, clusterID, float32(simThreshold))
+	var result map[int]int
+	err := a.withFaceStore(func(fs *faces.Store) error {
+		var err error
+		result, err = faces.Split(fs, clusterID, float32(simThreshold))
+		return err
+	})
+	return result, err
 }
 
 // SetClusterLabel assigns a label to a cluster.
 func (a *App) SetClusterLabel(clusterID int, label string) error {
-	fs, err := a.getFaceStore()
-	if err != nil {
-		return fmt.Errorf("open face store: %w", err)
-	}
-	return fs.SetLabel(clusterID, label)
+	return a.withFaceStore(func(fs *faces.Store) error {
+		return fs.SetLabel(clusterID, label)
+	})
 }
 
 // AssignClusterToPerson assigns all faces in a cluster to a person.
 func (a *App) AssignClusterToPerson(clusterID int, personID string) error {
-	fs, err := a.getFaceStore()
-	if err != nil {
-		return fmt.Errorf("open face store: %w", err)
+	// Step 1: Read faces from face store.
+	type faceInfo struct {
+		imagePath string
+		faceIdx   int
+		embedding []float32
 	}
-
-	gr, closeFn, err := a.openGraphRW()
-	if err != nil {
+	var clusterFaces []faceInfo
+	if err := a.withFaceStore(func(fs *faces.Store) error {
+		allFaces, err := fs.AllFaces()
+		if err != nil {
+			return fmt.Errorf("list faces: %w", err)
+		}
+		for _, f := range allFaces {
+			if f.ClusterID == clusterID {
+				clusterFaces = append(clusterFaces, faceInfo{
+					imagePath: f.ImagePath,
+					faceIdx:   f.FaceIdx,
+					embedding: f.Embedding,
+				})
+			}
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
-	defer closeFn()
 
-	// Get person to set label.
-	person, err := gr.store.GetPerson(personID)
-	if err != nil || person == nil {
-		return fmt.Errorf("person %s not found", personID)
+	// Step 2: Assign in graph store.
+	var personName string
+	if err := a.withGraph(func(gr *graphResources) error {
+		person, err := gr.store.GetPerson(personID)
+		if err != nil || person == nil {
+			return fmt.Errorf("person %s not found", personID)
+		}
+		personName = person.Name
+
+		var addedExemplar bool
+		for _, f := range clusterFaces {
+			if err := gr.store.AssignFaceToPerson(&embedded.FaceAssignment{
+				PersonID:   personID,
+				ImagePath:  f.imagePath,
+				FaceIndex:  f.faceIdx,
+				Confidence: 1.0,
+			}); err != nil {
+				continue
+			}
+			// Add the first face as an exemplar for future KNN classification.
+			if !addedExemplar && len(f.embedding) > 0 {
+				_ = gr.store.AddExemplar(&embedded.Exemplar{
+					PersonID:  personID,
+					Hash:      fmt.Sprintf("cluster:%d", clusterID),
+					Embedding: f.embedding,
+					ImagePath: f.imagePath,
+				})
+				addedExemplar = true
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
-	allFaces, err := fs.AllFaces()
-	if err != nil {
-		return fmt.Errorf("list faces: %w", err)
-	}
-
-	var addedExemplar bool
-	for _, f := range allFaces {
-		if f.ClusterID != clusterID {
-			continue
-		}
-		if err := gr.store.AssignFaceToPerson(&embedded.FaceAssignment{
-			PersonID:   personID,
-			ImagePath:  f.ImagePath,
-			FaceIndex:  f.FaceIdx,
-			Confidence: 1.0,
-		}); err != nil {
-			continue
-		}
-		// Add the first face as an exemplar for future KNN classification.
-		if !addedExemplar && len(f.Embedding) > 0 {
-			_ = gr.store.AddExemplar(&embedded.Exemplar{
-				PersonID:  personID,
-				Hash:      fmt.Sprintf("cluster:%d", clusterID),
-				Embedding: f.Embedding,
-				ImagePath: f.ImagePath,
-			})
-			addedExemplar = true
-		}
-	}
-
-	// Set cluster label to person name.
-	_ = fs.SetLabel(clusterID, person.Name)
-	return nil
+	// Step 3: Set cluster label in face store.
+	return a.withFaceStore(func(fs *faces.Store) error {
+		return fs.SetLabel(clusterID, personName)
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -590,15 +581,14 @@ func (a *App) RunClustering(simThreshold float64) error {
 			})
 		}
 
-		fs, err := a.getFaceStore()
-		if err != nil {
-			a.emit("faces:clustering-error", err.Error())
-			return
-		}
-
+		// Step 1: Read all faces (short lock).
 		progress("Loading faces", 0, 0)
-		allFaces, err := fs.AllFaces()
-		if err != nil {
+		var allFaces []faces.FaceRecord
+		if err := a.withFaceStore(func(fs *faces.Store) error {
+			var err error
+			allFaces, err = fs.AllFaces()
+			return err
+		}); err != nil {
 			a.emit("faces:clustering-error", err.Error())
 			return
 		}
@@ -611,7 +601,7 @@ func (a *App) RunClustering(simThreshold float64) error {
 			return
 		}
 
-		// Build embedding + image path slices.
+		// Step 2: Cluster (no DB lock held — pure computation).
 		progress("Preparing embeddings", 0, nFaces)
 		embeddings := make([][]float32, nFaces)
 		imagePaths := make([]string, nFaces)
@@ -620,32 +610,42 @@ func (a *App) RunClustering(simThreshold float64) error {
 			imagePaths[i] = f.ImagePath
 		}
 
-		// Run agglomerative clustering.
+		// Use DBSCAN (O(n²)) instead of agglomerative (O(n³)) for large datasets.
 		progress("Clustering faces", 0, nFaces)
-		labels := faces.AgglomerativeClustering(
+		labels := faces.DBSCANClustering(
 			embeddings, imagePaths, float32(simThreshold), 2,
+			func(phase string, current, total int) {
+				progress(phase, current, total)
+			},
 		)
 
-		// Absorb noise at 75% of threshold.
-		progress("Absorbing noise", 0, nFaces)
 		labels = faces.AbsorbNoise(
 			embeddings, imagePaths, labels, float32(simThreshold*0.75),
+			func(phase string, current, total int) {
+				progress(phase, current, total)
+			},
 		)
 
-		// Update cluster IDs in face store.
+		// Step 3: Write results back (lock held for writes).
 		progress("Saving results", 0, nFaces)
 		clusterSet := make(map[int]bool)
 		noiseCount := 0
-		for i, lbl := range labels {
-			_ = fs.UpdateCluster(allFaces[i].ImagePath, allFaces[i].FaceIdx, lbl)
-			if lbl < 0 {
-				noiseCount++
-			} else {
-				clusterSet[lbl] = true
+		if err := a.withFaceStore(func(fs *faces.Store) error {
+			for i, lbl := range labels {
+				_ = fs.UpdateCluster(allFaces[i].ImagePath, allFaces[i].FaceIdx, lbl)
+				if lbl < 0 {
+					noiseCount++
+				} else {
+					clusterSet[lbl] = true
+				}
+				if (i+1)%500 == 0 || i == nFaces-1 {
+					progress("Saving results", i+1, nFaces)
+				}
 			}
-			if (i+1)%500 == 0 || i == nFaces-1 {
-				progress("Saving results", i+1, nFaces)
-			}
+			return nil
+		}); err != nil {
+			a.emit("faces:clustering-error", err.Error())
+			return
 		}
 
 		a.emit("faces:clustering-complete", map[string]int{
@@ -669,38 +669,40 @@ func (a *App) IsClusteringRunning() bool {
 
 // GetSuggestedMerges returns pairs of clusters with high centroid similarity.
 func (a *App) GetSuggestedMerges() ([]MergeSuggestion, error) {
-	fs, err := a.getFaceStore()
-	if err != nil {
-		return nil, fmt.Errorf("open face store: %w", err)
-	}
-
-	allFaces, err := fs.AllFaces()
-	if err != nil {
-		return nil, fmt.Errorf("list faces: %w", err)
-	}
-
-	labels, _ := fs.AllLabels()
-
-	// Group embeddings by cluster.
+	// Read face data (short lock).
 	type clusterData struct {
 		embeddings [][]float32
 		imagePaths []string
 	}
-	clusters := make(map[int]*clusterData)
-	for _, f := range allFaces {
-		if f.ClusterID < 0 {
-			continue
+	var clusters map[int]*clusterData
+	var allLabels map[int]string
+
+	if err := a.withFaceStore(func(fs *faces.Store) error {
+		allFaces, err := fs.AllFaces()
+		if err != nil {
+			return fmt.Errorf("list faces: %w", err)
 		}
-		cd, ok := clusters[f.ClusterID]
-		if !ok {
-			cd = &clusterData{}
-			clusters[f.ClusterID] = cd
+		allLabels, _ = fs.AllLabels()
+
+		clusters = make(map[int]*clusterData)
+		for _, f := range allFaces {
+			if f.ClusterID < 0 {
+				continue
+			}
+			cd, ok := clusters[f.ClusterID]
+			if !ok {
+				cd = &clusterData{}
+				clusters[f.ClusterID] = cd
+			}
+			cd.embeddings = append(cd.embeddings, f.Embedding)
+			cd.imagePaths = append(cd.imagePaths, f.ImagePath)
 		}
-		cd.embeddings = append(cd.embeddings, f.Embedding)
-		cd.imagePaths = append(cd.imagePaths, f.ImagePath)
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
-	// Compute centroids.
+	// Compute centroids (no lock — pure computation).
 	type centroid struct {
 		id        int
 		embedding []float32
@@ -742,8 +744,8 @@ func (a *App) GetSuggestedMerges() ([]MergeSuggestion, error) {
 			suggestions = append(suggestions, MergeSuggestion{
 				ClusterA:   centroids[i].id,
 				ClusterB:   centroids[j].id,
-				LabelA:     labels[centroids[i].id],
-				LabelB:     labels[centroids[j].id],
+				LabelA:     allLabels[centroids[i].id],
+				LabelB:     allLabels[centroids[j].id],
 				Similarity: sim,
 				FaceCountA: centroids[i].count,
 				FaceCountB: centroids[j].count,

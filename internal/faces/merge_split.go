@@ -72,7 +72,7 @@ func Split(store *Store, clusterID int, simThreshold float32) (map[int]int, erro
 		imgPaths[i] = faces[idx].ImagePath
 	}
 
-	subLabels := DBSCANClustering(embeddings, imgPaths, simThreshold, 2)
+	subLabels := DBSCANClustering(embeddings, imgPaths, simThreshold, 2, nil)
 
 	// Find next available cluster ID.
 	maxID := 0

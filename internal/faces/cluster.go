@@ -4,9 +4,14 @@ package faces
 
 import "sort"
 
+// ClusterProgress is called to report clustering progress.
+// phase describes the current stage, current/total track progress.
+type ClusterProgress func(phase string, current, total int)
+
 // AgglomerativeClustering performs hierarchical agglomerative clustering
 // with average linkage and same-photo constraint.
 // Faces in singleton clusters below minClusterSize are labeled noise (-1).
+// WARNING: O(n³) — only suitable for small datasets (< 1000 faces).
 func AgglomerativeClustering(embeddings [][]float32, imagePaths []string, simThreshold float32, minClusterSize int) []int {
 	n := len(embeddings)
 
@@ -107,7 +112,7 @@ func AgglomerativeClustering(embeddings [][]float32, imagePaths []string, simThr
 
 // AbsorbNoise assigns noise faces (label == -1) to their best-matching cluster.
 // Single-pass to prevent chaining through absorbed faces.
-func AbsorbNoise(embeddings [][]float32, imagePaths []string, labels []int, absorbThreshold float32) []int {
+func AbsorbNoise(embeddings [][]float32, imagePaths []string, labels []int, absorbThreshold float32, progress ClusterProgress) []int {
 	result := make([]int, len(labels))
 	copy(result, labels)
 
@@ -127,15 +132,29 @@ func AbsorbNoise(embeddings [][]float32, imagePaths []string, labels []int, abso
 		return result
 	}
 
+	// Count noise faces for progress reporting.
+	noiseCount := 0
+	for _, l := range result {
+		if l == -1 {
+			noiseCount++
+		}
+	}
+
 	type absorption struct {
 		faceIdx int
 		cluster int
 	}
 	var absorptions []absorption
 
+	processed := 0
 	for i, l := range result {
 		if l != -1 {
 			continue
+		}
+		processed++
+
+		if progress != nil && (processed%100 == 0 || processed == noiseCount) {
+			progress("Absorbing noise", processed, noiseCount)
 		}
 
 		bestCluster := 0
@@ -166,14 +185,19 @@ func AbsorbNoise(embeddings [][]float32, imagePaths []string, labels []int, abso
 	return result
 }
 
-// DBSCANClustering runs DBSCAN for re-clustering (used by split command).
-func DBSCANClustering(embeddings [][]float32, imagePaths []string, simThreshold float32, minPts int) []int {
+// DBSCANClustering runs DBSCAN clustering on face embeddings using cosine
+// similarity. O(n²) — suitable for large datasets (20K+ faces).
+func DBSCANClustering(embeddings [][]float32, imagePaths []string, simThreshold float32, minPts int, progress ClusterProgress) []int {
 	n := len(embeddings)
 	labels := make([]int, n)
 	clusterID := 0
 	clusterImages := make(map[int]map[string]bool)
 
 	for i := range n {
+		if progress != nil && i%200 == 0 {
+			progress("Clustering", i, n)
+		}
+
 		if labels[i] != 0 {
 			continue
 		}
@@ -212,6 +236,10 @@ func DBSCANClustering(embeddings [][]float32, imagePaths []string, simThreshold 
 				seeds = append(seeds, qNeighbors...)
 			}
 		}
+	}
+
+	if progress != nil {
+		progress("Clustering", n, n)
 	}
 
 	return labels

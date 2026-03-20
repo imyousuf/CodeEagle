@@ -23,61 +23,77 @@ func TestNewApp_NoState(t *testing.T) {
 	}
 }
 
-func TestOpenGraph_NoConfigDir(t *testing.T) {
+func TestWithGraph_NoConfigDir(t *testing.T) {
 	cfg := &config.Config{}
 	a := NewApp(cfg, nil, "", nil, nil)
 
-	gr, closer, err := a.openGraph()
+	err := a.withGraph(func(gr *graphResources) error {
+		return nil
+	})
 	if err == nil {
-		t.Fatal("openGraph should fail with no config dir")
-	}
-	if gr != nil {
-		t.Error("graphResources should be nil on error")
-	}
-	if closer != nil {
-		t.Error("closer should be nil on error")
+		t.Fatal("withGraph should fail with no config dir")
 	}
 }
 
-func TestOpenGraph_CreatesDBIfMissing(t *testing.T) {
+func TestWithGraph_CreatesDBIfMissing(t *testing.T) {
 	cfg := &config.Config{
 		ConfigDir: t.TempDir(),
 		Graph:     config.GraphConfig{Storage: "embedded"},
 	}
 	a := NewApp(cfg, nil, "", nil, nil)
 
-	// OpenReadWrite creates the DB on first access.
-	gr, closer, err := a.openGraph()
+	var called bool
+	err := a.withGraph(func(gr *graphResources) error {
+		called = true
+		if gr == nil {
+			t.Error("graphResources should not be nil")
+		}
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("openGraph should succeed (creates DB): %v", err)
+		t.Fatalf("withGraph should succeed (creates DB): %v", err)
 	}
-	if gr == nil {
-		t.Error("graphResources should not be nil")
+	if !called {
+		t.Error("callback should have been called")
 	}
-	closer()
 }
 
-func TestOpenGraph_IndependentCalls(t *testing.T) {
+func TestWithGraph_IndependentCalls(t *testing.T) {
 	cfg := &config.Config{
 		ConfigDir: t.TempDir(),
 	}
 	a := NewApp(cfg, nil, "", nil, nil)
 
 	// Two calls should both succeed independently (per-request open).
-	gr1, closer1, err1 := a.openGraph()
-	if err1 != nil {
-		t.Fatalf("first openGraph: %v", err1)
+	callCount := 0
+	for i := 0; i < 2; i++ {
+		if err := a.withGraph(func(gr *graphResources) error {
+			callCount++
+			if gr == nil {
+				t.Error("graphResources should not be nil")
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("withGraph call %d: %v", i+1, err)
+		}
 	}
-	closer1()
-
-	gr2, closer2, err2 := a.openGraph()
-	if err2 != nil {
-		t.Fatalf("second openGraph: %v", err2)
+	if callCount != 2 {
+		t.Errorf("callback called %d times, want 2", callCount)
 	}
-	closer2()
+}
 
-	if gr1 == nil || gr2 == nil {
-		t.Error("both calls should return non-nil resources")
+func TestWithGraph_PropagatesError(t *testing.T) {
+	cfg := &config.Config{
+		ConfigDir: t.TempDir(),
+	}
+	a := NewApp(cfg, nil, "", nil, nil)
+
+	want := fmt.Errorf("test error")
+	err := a.withGraph(func(gr *graphResources) error {
+		return want
+	})
+	if err != want {
+		t.Errorf("withGraph error = %v, want %v", err, want)
 	}
 }
 
