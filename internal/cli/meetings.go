@@ -124,6 +124,9 @@ meetings costs nothing for the ones already done.`,
 				Roster:        tc.Roster,
 				ExcludeNames:  tc.ExcludeNames,
 				MinConfidence: tc.MinConfidence,
+				// People found earlier in the run become known names for the
+				// meetings analysed after them.
+				KnownPeople: people.Names,
 			})
 			writer := transcript.NewWriter(store, people, transcript.WriterOptions{
 				MinConfidence: tc.MinConfidence,

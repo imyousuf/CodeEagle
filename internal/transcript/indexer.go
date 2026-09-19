@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -76,8 +77,14 @@ func NewIndexer(store graph.Store, analyzer *Analyzer, writer *Writer, opts Inde
 	return &Indexer{analyzer: analyzer, writer: writer, store: store, opts: opts}
 }
 
-// DiscoverSessions returns the transcript files under a directory, oldest
-// first so that a partial run covers a contiguous stretch of history.
+// DiscoverSessions returns the transcript files under a directory in the order
+// the meetings happened.
+//
+// Chronological order is deliberate. A batch feeds the people it has
+// identified back into later meetings, so processing in real time order means
+// a colleague recognized in January is a known name by March. Sorting on file
+// modification time would not do: copying a corpus rewrites every mtime at
+// once, and the meeting's own timestamp is the only reliable ordering.
 func DiscoverSessions(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -85,8 +92,8 @@ func DiscoverSessions(dir string) ([]string, error) {
 	}
 
 	type candidate struct {
-		path string
-		mod  time.Time
+		path    string
+		started time.Time
 	}
 	var found []candidate
 	for _, e := range entries {
@@ -94,19 +101,48 @@ func DiscoverSessions(dir string) ([]string, error) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name(), SessionFileName)
-		info, err := os.Stat(path)
+		started, err := sessionStartTime(path)
 		if err != nil {
 			continue
 		}
-		found = append(found, candidate{path: path, mod: info.ModTime()})
+		found = append(found, candidate{path: path, started: started})
 	}
-	sort.Slice(found, func(i, j int) bool { return found[i].mod.Before(found[j].mod) })
+	sort.Slice(found, func(i, j int) bool {
+		if !found[i].started.Equal(found[j].started) {
+			return found[i].started.Before(found[j].started)
+		}
+		return found[i].path < found[j].path
+	})
 
 	paths := make([]string, len(found))
 	for i, c := range found {
 		paths[i] = c.path
 	}
 	return paths, nil
+}
+
+// startTimeProbe reads only the timestamp, so ordering the corpus does not
+// require decoding every segment of every transcript.
+type startTimeProbe struct {
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// sessionStartTime returns when a recording began, falling back to the file's
+// modification time if the transcript does not say.
+func sessionStartTime(path string) (time.Time, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	var probe startTimeProbe
+	if err := json.Unmarshal(data, &probe); err == nil && !probe.CreatedAt.IsZero() {
+		return probe.CreatedAt, nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return info.ModTime(), nil
 }
 
 // job carries one recording through the pipeline.

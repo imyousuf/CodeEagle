@@ -181,7 +181,7 @@ func (c *basetenClient) Chat(ctx context.Context, systemPrompt string, messages 
 		MaxTokens:       c.maxTokens,
 		Temperature:     c.temperature,
 		ReasoningEffort: c.reasoningEffort,
-	})
+	}, false)
 }
 
 // ChatWithTools sends a prompt with tool definitions available.
@@ -193,7 +193,7 @@ func (c *basetenClient) ChatWithTools(ctx context.Context, systemPrompt string, 
 		Temperature:     c.temperature,
 		ReasoningEffort: c.reasoningEffort,
 		Tools:           toBasetenTools(tools),
-	})
+	}, false)
 }
 
 // ChatJSON constrains the reply to a JSON Schema, so callers can unmarshal the
@@ -218,11 +218,13 @@ func (c *basetenClient) ChatJSON(ctx context.Context, systemPrompt string, messa
 	} else {
 		req.ResponseFormat = &responseFormat{Type: "json_object"}
 	}
-	return c.do(ctx, req)
+	// A JSON reply must be complete to be worth anything, so truncation is
+	// reported rather than handed back as half a document.
+	return c.do(ctx, req, true)
 }
 
 // do sends a request, retrying transient failures with exponential backoff.
-func (c *basetenClient) do(ctx context.Context, reqBody basetenRequest) (*llm.Response, error) {
+func (c *basetenClient) do(ctx context.Context, reqBody basetenRequest, requireComplete bool) (*llm.Response, error) {
 	data, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal chat request: %w", err)
@@ -236,7 +238,7 @@ func (c *basetenClient) do(ctx context.Context, reqBody basetenRequest) (*llm.Re
 			}
 		}
 
-		resp, retryAfter, err := c.attempt(ctx, data)
+		resp, retryAfter, err := c.attempt(ctx, data, requireComplete)
 		if err == nil {
 			return resp, nil
 		}
@@ -279,13 +281,19 @@ type emptyResponseError struct {
 	finishReason    string
 	reasoningChars  int
 	completionToken int
+	// truncated distinguishes an answer cut off mid-way from one never begun.
+	truncated bool
 }
 
 func (e *emptyResponseError) Error() string {
+	what := "produced no content"
+	if e.truncated {
+		what = "produced an incomplete answer"
+	}
 	return fmt.Sprintf(
-		"model produced no content (finish_reason=%q, ~%d reasoning tokens, %d completion tokens): "+
-			"its token budget was consumed by reasoning",
-		e.finishReason, e.reasoningChars/4, e.completionToken)
+		"model %s (finish_reason=%q, ~%d reasoning tokens, %d completion tokens): "+
+			"its token budget ran out",
+		what, e.finishReason, e.reasoningChars/4, e.completionToken)
 }
 
 // reasoningDisabled reports whether a request has already switched reasoning off.
@@ -306,7 +314,7 @@ func (e *retryableError) Unwrap() error { return e.err }
 
 // attempt performs one request. It returns a retryAfter hint when the server
 // supplied one.
-func (c *basetenClient) attempt(ctx context.Context, body []byte) (*llm.Response, time.Duration, error) {
+func (c *basetenClient) attempt(ctx context.Context, body []byte, requireComplete bool) (*llm.Response, time.Duration, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, fmt.Errorf("create chat request: %w", err)
@@ -347,14 +355,17 @@ func (c *basetenClient) attempt(ctx context.Context, body []byte) (*llm.Response
 	}
 
 	choice := parsed.Choices[0]
-	if choice.Message.Content == "" {
-		// An empty answer means the model spent its whole budget deliberating
-		// and never began the answer. Report it as its own condition so the
-		// caller can fall back rather than merely fail.
+	// Two ways the token budget bites: the model deliberates until nothing is
+	// left for the answer, or it starts the answer and is cut off mid-way.
+	// Both leave a JSON caller with nothing usable, and both are fixed the
+	// same way, so they are reported as one condition.
+	truncated := requireComplete && choice.FinishReason == "length"
+	if choice.Message.Content == "" || truncated {
 		return nil, 0, &emptyResponseError{
 			finishReason:    choice.FinishReason,
 			reasoningChars:  len(choice.Message.ReasoningContent),
 			completionToken: parsed.Usage.CompletionTokens,
+			truncated:       truncated && choice.Message.Content != "",
 		}
 	}
 	out := &llm.Response{

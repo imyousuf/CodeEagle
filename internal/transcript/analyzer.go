@@ -35,6 +35,10 @@ type Options struct {
 	// ExcludeNames lists terms never to treat as people, such as product and
 	// team names that read like names in conversation.
 	ExcludeNames []string
+	// KnownPeople supplies names discovered so far in a batch, so a person
+	// recognized in one meeting is a known name for the rest of the run. It
+	// may be nil, and is called once per meeting.
+	KnownPeople func() []string
 	// MinConfidence is the bar for accepting an identification.
 	MinConfidence float64
 	// MaxTranscriptChars bounds how much transcript is sent in one request.
@@ -197,13 +201,38 @@ func (a *Analyzer) sanitizeName(name string) string {
 	return cleaned
 }
 
-// knownPeople is the roster plus the owner and their aliases.
+// knownPeople is the owner, the configured roster, and anyone already
+// identified during this run, de-duplicated.
 func (a *Analyzer) knownPeople() []string {
 	var out []string
-	if a.opts.Owner != "" {
-		out = append(out, a.opts.Owner)
+	seen := make(map[string]bool)
+	add := func(name string) {
+		key := NormalizeName(name)
+		if key == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, name)
 	}
-	out = append(out, a.opts.Roster...)
+
+	if a.opts.Owner != "" {
+		add(a.opts.Owner)
+	}
+	for _, n := range a.opts.Roster {
+		add(n)
+	}
+	if a.opts.KnownPeople != nil {
+		for _, n := range a.opts.KnownPeople() {
+			add(n)
+		}
+	}
+
+	// A very long list stops being a hint and starts being noise, so the
+	// configured roster and owner are kept and the discovered tail is capped.
+	const maxKnown = 60
+	if len(out) > maxKnown {
+		out = out[:maxKnown]
+	}
 	return out
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
 )
@@ -22,6 +23,9 @@ import (
 // same convention face recognition uses. A person identified by voice in a
 // meeting and by face in a photograph therefore converge on one node.
 type PersonRegistry struct {
+	// mu guards the maps. Enrichment workers read the roster concurrently
+	// while the writer goroutine adds people to it.
+	mu    sync.RWMutex
 	store graph.Store
 	// byNormalized indexes people by their normalized name and by every alias
 	// recorded for them.
@@ -79,7 +83,29 @@ func aliasesOf(n *graph.Node) []string {
 }
 
 // Created reports how many new people this registry added.
-func (r *PersonRegistry) Created() int { return r.created }
+func (r *PersonRegistry) Created() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.created
+}
+
+// Names lists everyone currently known, most recently confirmed spelling
+// first.
+//
+// A batch feeds this back into identification as it goes, so a colleague
+// recognized in January's meeting is a known name by the time March's is
+// analysed. That both improves recall on people who are never introduced by
+// name again and settles on one spelling for them.
+func (r *PersonRegistry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.people))
+	for _, p := range r.people {
+		out = append(out, p.Name)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // Resolve returns the person a name refers to, creating them if they are new.
 //
@@ -91,6 +117,9 @@ func (r *PersonRegistry) Resolve(ctx context.Context, name string) (*graph.Node,
 		return nil, fmt.Errorf("not a usable person name: %q", name)
 	}
 	norm := NormalizeName(cleaned)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	// Exact match on a name or a known alias.
 	if n, ok := r.byNormalized[norm]; ok {
@@ -172,6 +201,8 @@ func (r *PersonRegistry) addAlias(ctx context.Context, n *graph.Node, alias stri
 
 // MarkOwner flags a person as the one whose microphone made the recordings.
 func (r *PersonRegistry) MarkOwner(ctx context.Context, n *graph.Node) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if n.Properties != nil && n.Properties[graph.PropIsOwner] == "true" {
 		return nil
 	}
