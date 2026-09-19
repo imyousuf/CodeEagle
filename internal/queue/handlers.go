@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/imyousuf/CodeEagle/internal/docs"
-	"github.com/imyousuf/CodeEagle/internal/faces"
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	genericparser "github.com/imyousuf/CodeEagle/internal/parser/generic"
 )
@@ -54,7 +53,7 @@ func (h *DocExtractHandler) Handle(ctx context.Context, job *Job) (json.RawMessa
 	}
 
 	// Resolve to absolute path for file I/O.
-	absPath := faces.ResolveFilePath(relPath, h.repoRoots)
+	absPath := resolveFilePath(relPath, h.repoRoots)
 
 	// Read file content.
 	content, err := os.ReadFile(absPath)
@@ -169,7 +168,7 @@ func (h *ImageDescribeHandler) Handle(ctx context.Context, job *Job) (json.RawMe
 	}
 
 	// Resolve to absolute path for file I/O.
-	absPath := faces.ResolveFilePath(relPath, h.repoRoots)
+	absPath := resolveFilePath(relPath, h.repoRoots)
 
 	// Read image file.
 	content, err := os.ReadFile(absPath)
