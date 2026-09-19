@@ -535,10 +535,10 @@ func extractJSON(s string) string {
 	if start < 0 {
 		return ""
 	}
-	open := rune(s[start])
-	close := '}'
-	if open == '[' {
-		close = ']'
+	opener := rune(s[start])
+	closer := '}'
+	if opener == '[' {
+		closer = ']'
 	}
 	// Scan for the matching close, ignoring braces inside string literals.
 	depth := 0
@@ -554,9 +554,9 @@ func extractJSON(s string) string {
 			inString = !inString
 		case inString:
 			// Braces inside a string are not structural.
-		case r == open:
+		case r == opener:
 			depth++
-		case r == close:
+		case r == closer:
 			depth--
 			if depth == 0 {
 				return s[start : start+i+len(string(r))]
