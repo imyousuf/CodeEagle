@@ -327,11 +327,83 @@ func TestTopicMeetingCountCountsEachMeetingOnce(t *testing.T) {
 
 func TestTargetGroups(t *testing.T) {
 	tests := []struct{ in, want int }{
-		{1, 3}, {4, 3}, {9, 3}, {25, 5}, {100, 10}, {1000, 20}, {5000, 20},
+		{1, 3}, {4, 3}, {9, 3}, {25, 5}, {100, 10}, {1000, 32}, {3630, 61}, {100000, 80},
 	}
 	for _, tt := range tests {
 		if got := targetGroups(tt.in); got != tt.want {
 			t.Errorf("targetGroups(%d) = %d, want %d", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestIsCatchAll(t *testing.T) {
+	// A model reaches for these when asked to place everything; they look like
+	// structure while telling a reader nothing.
+	for _, bad := range []string{"Unplaced", "Other", "Miscellaneous", "misc", "General", "Uncategorized", "unknown"} {
+		if !isCatchAll(bad) {
+			t.Errorf("isCatchAll(%q) = false, want true", bad)
+		}
+	}
+	for _, good := range []string{"OAuth", "Authentication", "Data residency", "MCP"} {
+		if isCatchAll(good) {
+			t.Errorf("isCatchAll(%q) = true, want false", good)
+		}
+	}
+}
+
+func TestApplyLevelRejectsCatchAll(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	reg, _ := LoadTopicRegistry(ctx, store)
+
+	var items []TopicUsage
+	for _, n := range []string{"Token lifetimes", "Canvas sharing"} {
+		node, _ := reg.Resolve(ctx, n)
+		items = append(items, TopicUsage{Node: node, Name: node.Name, Weight: 1})
+	}
+
+	tax := &Taxonomy{Themes: []Theme{
+		{Name: "Unplaced", Members: []string{"Token lifetimes", "Canvas sharing"}},
+	}}
+	created, _, err := applyLevel(ctx, store, items, tax, 1)
+	if err != nil {
+		t.Fatalf("apply level: %v", err)
+	}
+	if created != 0 {
+		t.Errorf("created %d concepts from a catch-all, want 0", created)
+	}
+}
+
+func TestClearTaxonomyKeepsSubjects(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	reg, _ := LoadTopicRegistry(ctx, store)
+
+	var items []TopicUsage
+	for _, n := range []string{"Token lifetimes", "Token revocation"} {
+		node, _ := reg.Resolve(ctx, n)
+		items = append(items, TopicUsage{Node: node, Name: node.Name, Weight: 1})
+	}
+	if _, _, err := applyLevel(ctx, store, items,
+		&Taxonomy{Themes: []Theme{{Name: "OAuth", Members: []string{"Token lifetimes", "Token revocation"}}}}, 1); err != nil {
+		t.Fatalf("apply level: %v", err)
+	}
+
+	removed, err := ClearTaxonomy(ctx, store)
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("removed %d concepts, want 1", removed)
+	}
+
+	// The subjects meetings produced must survive; only the grouping goes.
+	topics, _ := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeTopic})
+	if len(topics) != 2 {
+		t.Errorf("topic count = %d after clearing, want the 2 subjects", len(topics))
+	}
+	roots, _ := TopicRoots(ctx, store)
+	if len(roots) != 2 {
+		t.Errorf("roots = %d, want both subjects ungrouped again", len(roots))
 	}
 }

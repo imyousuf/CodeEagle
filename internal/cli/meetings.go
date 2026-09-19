@@ -1122,7 +1122,10 @@ is safe to run twice.`,
 // --- taxonomy ---
 
 func newMeetingsTaxonomyCmd() *cobra.Command {
-	var show bool
+	var (
+		show    bool
+		rebuild bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "taxonomy",
@@ -1167,6 +1170,17 @@ fixed ontology. Re-run as the corpus grows.`,
 				return nil
 			}
 
+			if rebuild {
+				removed, err := transcript.ClearTaxonomy(ctx, pipeline.store)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "Cleared %d existing concepts.\n", removed)
+				if roots, err = transcript.TopicRoots(ctx, pipeline.store); err != nil {
+					return err
+				}
+			}
+
 			fmt.Fprintf(out, "Organizing %d topics using %s\n\n", len(roots), pipeline.client.Model())
 			st, err := pipeline.analyzer.BuildTaxonomy(ctx, pipeline.store, func(format string, args ...any) {
 				fmt.Fprintf(out, format+"\n", args...)
@@ -1185,6 +1199,8 @@ fixed ontology. Re-run as the corpus grows.`,
 	}
 
 	cmd.Flags().BoolVar(&show, "show", false, "print the existing taxonomy without rebuilding it")
+	cmd.Flags().BoolVar(&rebuild, "rebuild", false,
+		"discard the existing concepts and group from scratch, rather than extending")
 	return cmd
 }
 

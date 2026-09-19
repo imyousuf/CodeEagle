@@ -105,9 +105,13 @@ are facets of.
 The topics come from real meetings, so several different labels usually
 describe parts of one larger subject. Your job is to name those subjects.
 
-- A concept names ONE thing, not two joined by "and". "Authentication", not
-  "Authentication and token flows". If you are tempted to join two words with
-  "and", they are two concepts and belong as separate groups.
+- A concept names ONE thing. Never join two subjects with "and", "&", "/" or a
+  comma: "Authentication", not "Authentication & token flows", not "GEO/AEO and
+  marketing". If you want to join two words, they are two concepts and belong as
+  two separate groups.
+- Never create a catch-all. "Unplaced", "Other", "Miscellaneous" and "General"
+  are not concepts. A label with no home is left out of your answer entirely —
+  that is what "left out" means, and it is a normal outcome.
 - Two to four words, a noun phrase. Prefer the term this field actually uses:
   "OAuth", "MCP", "Tenancy", "Rate limiting".
 - Every member you list must be copied from the supplied list exactly,
@@ -141,6 +145,13 @@ natural home. Aim for roughly %d groups.`, targetGroups(count))
 // targetGroups suggests how many groups a level should produce. Roughly the
 // square root keeps each group small enough to read while still reducing the
 // list meaningfully.
+//
+// The ceiling has to be generous. A model asked for twenty groups over several
+// thousand topics fills those twenty and abandons the rest, so the level
+// absorbs a fraction of its input and the tree comes out lopsided — which is
+// exactly what happened at 20 over 3,630 topics. Letting the count follow the
+// square root lets one level cover its whole input, and the next level reduces
+// those groups in turn.
 func targetGroups(count int) int {
 	n := 1
 	for n*n < count {
@@ -149,16 +160,40 @@ func targetGroups(count int) int {
 	if n < 3 {
 		n = 3
 	}
-	if n > 20 {
-		n = 20
+	if n > 80 {
+		n = 80
 	}
 	return n
 }
 
+const (
+	// singlePassLimit is the largest list grouped in one request.
+	//
+	// The reply has to name every label it places, so output grows with input:
+	// a few thousand labels in one call exhausts the token budget before the
+	// answer is finished, and a model asked for more groups than it can fill
+	// abandons the remainder. Past this size the work is split.
+	singlePassLimit = 400
+
+	// proposeSampleSize is how many labels are shown when proposing concepts. A
+	// sample is enough to see the shape of a corpus, and keeping it small keeps
+	// the proposal cheap.
+	proposeSampleSize = 700
+
+	// assignBatchSize is how many labels are placed per request: small enough
+	// that the reply always completes, large enough that a corpus of thousands
+	// takes a manageable number of calls.
+	assignBatchSize = 150
+)
+
 // DistillLevel groups one level of topics.
 //
-// It reads topic labels rather than transcripts, so it costs one request per
-// level regardless of how many meetings were indexed.
+// Small lists are grouped in a single request. Larger ones are split in two
+// stages — propose the concepts from a sample, then place every label against
+// that fixed list in batches. Two reasons: the reply must name each label it
+// places, so one call's output grows with the corpus and eventually truncates
+// mid-answer; and a single call fills the groups it proposed and abandons the
+// remainder, while batched assignment is asked about every label.
 func (a *Analyzer) DistillLevel(ctx context.Context, items []TopicUsage, depth int) (*Taxonomy, Usage, error) {
 	var usage Usage
 	if len(items) == 0 {
@@ -171,6 +206,14 @@ func (a *Analyzer) DistillLevel(ctx context.Context, items []TopicUsage, depth i
 		items = items[:maxItemsPerPass]
 	}
 
+	if len(items) <= singlePassLimit {
+		return a.distillSinglePass(ctx, items, depth, &usage)
+	}
+	return a.distillBatched(ctx, items, depth, &usage)
+}
+
+// distillSinglePass groups a short list in one request.
+func (a *Analyzer) distillSinglePass(ctx context.Context, items []TopicUsage, depth int, usage *Usage) (*Taxonomy, Usage, error) {
 	var b strings.Builder
 	b.WriteString(levelGuidance(depth, len(items)))
 	fmt.Fprintf(&b, "\n\nTOPICS (%d), with how many meetings each covers:\n\n", len(items))
@@ -180,10 +223,206 @@ func (a *Analyzer) DistillLevel(ctx context.Context, items []TopicUsage, depth i
 	b.WriteString("\nCopy each member label exactly as written above.\n")
 
 	var out Taxonomy
-	if err := a.chatJSON(ctx, taxonomySystemPrompt, b.String(), taxonomySchema(), &out, &usage); err != nil {
-		return nil, usage, err
+	if err := a.chatJSON(ctx, taxonomySystemPrompt, b.String(), taxonomySchema(), &out, usage); err != nil {
+		return nil, *usage, err
 	}
-	return &out, usage, nil
+	return &out, *usage, nil
+}
+
+// distillBatched proposes the concepts once, then places every label against
+// that fixed list.
+func (a *Analyzer) distillBatched(ctx context.Context, items []TopicUsage, depth int, usage *Usage) (*Taxonomy, Usage, error) {
+	concepts, err := a.proposeConcepts(ctx, items, depth, usage)
+	if err != nil {
+		return nil, *usage, fmt.Errorf("propose concepts: %w", err)
+	}
+	if len(concepts.Concepts) == 0 {
+		return &Taxonomy{}, *usage, nil
+	}
+
+	// Index the concepts so an assignment naming something that was never
+	// proposed is dropped rather than creating a concept nobody described.
+	byName := make(map[string]*ProposedConcept, len(concepts.Concepts))
+	members := make(map[string][]string, len(concepts.Concepts))
+	for i := range concepts.Concepts {
+		c := &concepts.Concepts[i]
+		byName[NormalizeName(c.Name)] = c
+	}
+
+	for start := 0; start < len(items); start += assignBatchSize {
+		end := min(start+assignBatchSize, len(items))
+		batch := items[start:end]
+
+		placed, err := a.assignConcepts(ctx, batch, concepts, usage)
+		if err != nil {
+			// A failed batch costs its own labels, not the level: they stay
+			// ungrouped and a later run can place them.
+			continue
+		}
+		for _, p := range placed.Assignments {
+			c, ok := byName[NormalizeName(p.Concept)]
+			if !ok {
+				continue
+			}
+			key := NormalizeName(c.Name)
+			members[key] = append(members[key], p.Topic)
+		}
+	}
+
+	out := &Taxonomy{}
+	for _, c := range concepts.Concepts {
+		out.Themes = append(out.Themes, Theme{
+			Name:        c.Name,
+			Description: c.Description,
+			Members:     members[NormalizeName(c.Name)],
+		})
+	}
+	return out, *usage, nil
+}
+
+// ProposedConcept is a concept name suggested before any label is placed.
+type ProposedConcept struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// ConceptProposal is the fixed set of concepts a level will use.
+type ConceptProposal struct {
+	Concepts []ProposedConcept `json:"concepts"`
+}
+
+const proposeSystemPrompt = `You name the concepts that a body of meeting topics is about.
+
+You are shown a sample of the topic labels meetings produced. Propose the set of
+concepts these topics are facets of. You are not placing anything yet — only
+naming the groups.
+
+- A concept names ONE thing. Never join two subjects with "and", "&", "/" or a
+  comma: "Authentication", not "Authentication & token flows".
+- Two to four words, a noun phrase. Prefer the term this field actually uses:
+  "OAuth", "MCP", "Tenancy", "Rate limiting".
+- Cover the range of what you were shown. The sample stands for a longer list,
+  so a topic that would fit none of your concepts is a gap.
+- Never propose a catch-all. "Unplaced", "Other", "Miscellaneous" and "General"
+  are not concepts.
+- Concepts must not overlap: a topic should have one obvious home among them.`
+
+// proposeConcepts asks for the concept list a level will use.
+func (a *Analyzer) proposeConcepts(ctx context.Context, items []TopicUsage, depth int, usage *Usage) (*ConceptProposal, error) {
+	sample := items
+	if len(sample) > proposeSampleSize {
+		// The list arrives heaviest-first, so an evenly spaced sample covers
+		// the long tail as well as the common subjects.
+		step := len(sample) / proposeSampleSize
+		if step < 1 {
+			step = 1
+		}
+		var spread []TopicUsage
+		for i := 0; i < len(sample); i += step {
+			spread = append(spread, sample[i])
+		}
+		sample = spread
+	}
+
+	var b strings.Builder
+	b.WriteString(levelGuidance(depth, len(items)))
+	fmt.Fprintf(&b, "\n\nThere are %d topics in total. Here is a sample of %d:\n\n", len(items), len(sample))
+	for _, it := range sample {
+		fmt.Fprintf(&b, "- %s\n", it.Name)
+	}
+	fmt.Fprintf(&b, "\nPropose roughly %d concepts covering this material.\n", targetGroups(len(items)))
+
+	schema := &llm.JSONSchema{
+		Name:   "concept_proposal",
+		Strict: true,
+		Schema: object(map[string]any{
+			"concepts": map[string]any{
+				"type": "array",
+				"items": object(map[string]any{
+					"name": map[string]any{
+						"type":        "string",
+						"description": "a two-to-four word noun phrase naming ONE concept",
+					},
+					"description": map[string]any{
+						"type":        "string",
+						"description": "one sentence saying what belongs under it",
+					},
+				}, "name", "description"),
+			},
+		}, "concepts"),
+	}
+
+	var out ConceptProposal
+	if err := a.chatJSON(ctx, proposeSystemPrompt, b.String(), schema, &out, usage); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Assignment places one topic under one concept.
+type Assignment struct {
+	Topic   string `json:"topic"`
+	Concept string `json:"concept"`
+}
+
+// AssignmentResult is one batch of placements.
+type AssignmentResult struct {
+	Assignments []Assignment `json:"assignments"`
+}
+
+const assignSystemPrompt = `You place each topic under the concept it belongs to.
+
+You are given a fixed list of concepts and a list of topics. For every topic,
+name the one concept it best belongs under.
+
+- Use only the concepts given. Do not invent new ones.
+- Copy each topic label exactly as written, character for character.
+- A topic that fits none of the concepts is left out of your answer. Do not
+  force it, and do not invent a catch-all for it.
+- One concept per topic. Pick the best fit.`
+
+// assignConcepts places one batch of labels against the proposed concepts.
+func (a *Analyzer) assignConcepts(ctx context.Context, batch []TopicUsage, concepts *ConceptProposal, usage *Usage) (*AssignmentResult, error) {
+	var b strings.Builder
+	b.WriteString("CONCEPTS:\n")
+	for _, c := range concepts.Concepts {
+		if c.Description != "" {
+			fmt.Fprintf(&b, "- %s — %s\n", c.Name, c.Description)
+			continue
+		}
+		fmt.Fprintf(&b, "- %s\n", c.Name)
+	}
+	fmt.Fprintf(&b, "\nTOPICS (%d):\n", len(batch))
+	for _, it := range batch {
+		fmt.Fprintf(&b, "- %s\n", it.Name)
+	}
+	b.WriteString("\nPlace every topic you can under one of the concepts above.\n")
+
+	schema := &llm.JSONSchema{
+		Name:   "concept_assignments",
+		Strict: true,
+		Schema: object(map[string]any{
+			"assignments": map[string]any{
+				"type": "array",
+				"items": object(map[string]any{
+					"topic": map[string]any{
+						"type":        "string",
+						"description": "the topic label, copied exactly",
+					},
+					"concept": map[string]any{
+						"type":        "string",
+						"description": "the concept it belongs under, from the list given",
+					},
+				}, "topic", "concept"),
+			},
+		}, "assignments"),
+	}
+
+	var out AssignmentResult
+	if err := a.chatJSON(ctx, assignSystemPrompt, b.String(), schema, &out, usage); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func taxonomySchema() *llm.JSONSchema {
@@ -342,7 +581,10 @@ func applyLevel(ctx context.Context, store graph.Store, items []TopicUsage, tax 
 	claimed := make(map[string]bool)
 	for _, theme := range tax.Themes {
 		name := CleanTopic(theme.Name)
-		if name == "" {
+		// A catch-all is worse than leaving topics ungrouped: it looks like
+		// structure while telling a reader nothing, and it absorbs exactly the
+		// topics that most needed a real home.
+		if name == "" || isCatchAll(name) {
 			continue
 		}
 
@@ -469,6 +711,50 @@ func RenderTaxonomy(ctx context.Context, store graph.Store, maxLines int) (strin
 		walk(r.Node, 0)
 	}
 	return b.String(), nil
+}
+
+// catchAllNames are labels that pretend to be concepts. A model reaches for
+// them when asked to place everything, which is why the prompt says not to and
+// this check enforces it.
+var catchAllNames = map[string]bool{
+	"unplaced": true, "unsorted": true, "uncategorized": true, "unassigned": true,
+	"other": true, "others": true, "miscellaneous": true, "misc": true,
+	"general": true, "various": true, "assorted": true, "ungrouped": true,
+	"unknown": true, "everything else": true, "remaining": true, "leftover": true,
+	"topics": true, "subjects": true, "concepts": true,
+}
+
+// isCatchAll reports whether a proposed concept is really a bucket for
+// everything the model could not place.
+func isCatchAll(name string) bool {
+	return catchAllNames[NormalizeName(name)]
+}
+
+// ClearTaxonomy removes every induced concept and the links beneath it,
+// leaving the subjects meetings produced untouched.
+//
+// Rebuilding rather than extending is sometimes the right call: the grouping
+// reflects the corpus it was induced from, and after a corpus doubles the old
+// concepts can carve it up worse than a fresh pass would.
+func ClearTaxonomy(ctx context.Context, store graph.Store) (int, error) {
+	topics, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeTopic})
+	if err != nil {
+		return 0, fmt.Errorf("query topics: %w", err)
+	}
+
+	removed := 0
+	for _, t := range topics {
+		if t.Properties[PropTopicLevel] != LevelTheme {
+			continue
+		}
+		// Deleting the node takes its edges with it, so the subjects beneath
+		// simply become roots again.
+		if err := store.DeleteNode(ctx, t.ID); err != nil {
+			return removed, fmt.Errorf("remove concept %q: %w", t.Name, err)
+		}
+		removed++
+	}
+	return removed, nil
 }
 
 // TopicMeetingCount returns how many distinct meetings a topic covers,
