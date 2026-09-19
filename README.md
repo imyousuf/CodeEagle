@@ -149,6 +149,10 @@ codeeagle meetings list --since 2026-03-01 # Meetings after a date
 codeeagle meetings show <meeting-id>       # Participants, topics, decisions, follow-ups
 codeeagle meetings people                  # People, with speaking time and follow-up counts
 codeeagle meetings topics                  # Topics discussed, by meeting count
+codeeagle meetings topics --themes         # The induced topic hierarchy
+codeeagle meetings taxonomy                # Group topics into concepts (re-runnable)
+codeeagle meetings taxonomy --rebuild      # Group from scratch instead of extending
+codeeagle meetings migrate --from <branch> # Move a corpus indexed by an older version
 codeeagle meetings actions --person Kevin  # Follow-ups owned by someone
 codeeagle meetings actions --unassigned    # Follow-ups nobody owns
 
@@ -188,6 +192,52 @@ another are kept apart.
 
 People discovered in earlier meetings are fed back as known names for later
 ones, so recordings are processed in the order the meetings happened.
+
+#### How topics become a hierarchy
+
+A meeting names its subject in whatever words suited that conversation, so a
+flat vocabulary never converges: four meetings on one subject produce four
+labels, each used once, and `HasTopic` indexes nothing.
+
+Merging those labels into each other is the obvious fix and the wrong one. Fuse
+"MCP server vs OAuth architecture" with "OBO token concern" and two different
+discussions are misrepresented; leave them apart and neither is findable. The
+dilemma only exists because one label is being asked to serve as both the
+precise description and the searchable subject.
+
+So the specific phrases stay as leaves, and each is placed under the concept it
+is a facet of:
+
+```
+MCP (4)
+  MCP authentication (3)
+    - OAuth token revocation      1
+    - OAuth token lifetimes       1
+  - MCP tool access               3
+```
+
+Three mechanisms build this, and the third is what makes it hold:
+
+1. Topic labels are asked for as reusable subjects — two to four words — with
+   everything specific to the meeting going in the topic's summary.
+2. A registry canonicalizes wordings, so "authentication for MCP" and "MCP
+   authentication" resolve to one node.
+3. **Each meeting is shown the current hierarchy** and names the concept its
+   topics sit under. The tree therefore grows while meetings are indexed rather
+   than needing a bulk rebuild, and a model extending a structure it can see
+   produces a far better one than a model naming things blind.
+
+`meetings taxonomy` also groups in bulk, applying one operation repeatedly:
+group what is ungrouped, then group the groups. For large corpora it proposes
+the concepts from a sample and then places every label against that fixed list
+in batches, because a single request must name every label it places and its
+output would otherwise truncate mid-answer.
+
+It defaults to two rounds of grouping. A third measurably made things worse on a
+real corpus: two rounds produced concepts worth searching by ("Model routing",
+"Agent memory", "Tenant isolation"), while forcing a further pass to reach a
+handful of top-level headings fused unrelated work. Use `--depth` for a corpus
+that wants more.
 
 #### Recurring meetings
 
@@ -348,7 +398,7 @@ codeeagle -p my-project status
 | Dependency | External dependency |
 | Document | Documentation file, office document (DOCX, PPTX, XLSX, ODT, ODS, ODP, PDF), or other non-code file |
 | Directory | Directory in the file hierarchy |
-| Topic | Extracted topic from document content (via LLM) |
+| Topic | A subject, either as a meeting named it or as an induced concept grouping several (`topic_level`, `topic_depth`) |
 | Person | Named person, identified by voice in meetings and/or by face in images |
 | AIGuideline | AI-related guideline files (CLAUDE.md, etc.) |
 | Year | Calendar year node (e.g., "2024") — part of date hierarchy |
@@ -388,6 +438,19 @@ codeeagle -p my-project status
 | FollowsUp | Action item implements a decision, or a recurring meeting follows its previous instance |
 | References | General cross-reference |
 | Embeds | Struct embeds another type |
+
+### Meeting storage scope
+
+The graph partitions keys by git branch, so indexing a feature branch does not
+disturb main's view of the code. Meetings are exempt: a meeting happened, and it
+belongs to no branch. They are written under a fixed scope and included as a
+fallback on the read path, so they are visible whichever branch is checked out —
+otherwise switching branches would hide the entire history and the next sync
+would re-index everything.
+
+A corpus indexed by an older version moves across with
+`codeeagle meetings migrate --from <branch>`. The scope appears only in the key
+and never in the stored value, so it is a key rename rather than a re-index.
 
 ### Storage
 

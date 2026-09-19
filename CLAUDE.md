@@ -124,7 +124,9 @@ codeeagle meetings watch [--interval D] [--settle D]       # Index new recording
 codeeagle meetings list [--person P] [--since DATE]        # List meetings
 codeeagle meetings show <id>            # Participants, topics, decisions, follow-ups
 codeeagle meetings people               # People, speaking time, follow-up counts
-codeeagle meetings topics               # Topics across meetings
+codeeagle meetings topics [--themes]    # Topics, flat or as the induced hierarchy
+codeeagle meetings taxonomy [--rebuild] [--depth N]   # Group topics into concepts
+codeeagle meetings migrate --from <branch>            # Move an older corpus into scope
 codeeagle meetings actions [--person P] [--unassigned]     # Follow-ups
 codeeagle meetings identify             # Review unidentified speakers
 codeeagle meetings label <label> <name> --meeting <id>     # Assign by hand
@@ -195,6 +197,17 @@ Design constraints that came out of measuring the real corpus:
 - **Claims are checkable.** Every decision and follow-up carries a verbatim
   quote, and whether that quote is really in the transcript is recorded on the
   node. The CLI and agent tools flag the ones that fail.
+- **A flat topic vocabulary never converges.** Each meeting names its subject in
+  its own words, so labels almost never collide and `HasTopic` indexes nothing.
+  Merging the labels is the wrong fix: it fuses distinct discussions. Instead the
+  phrases stay as leaves under the concept they are facets of, and each meeting
+  is shown the current hierarchy so it can place its topics inside it. Structure
+  therefore forms while indexing, not only in a bulk rebuild.
+- **More hierarchy is not better hierarchy.** Two rounds of grouping produced
+  concepts worth searching by; a third, chasing a tidy top level, mis-filed them
+  while still reading plausibly. Depth is a choice, defaulting to two.
+- **Meetings are not branch-scoped.** They live outside the per-branch key scopes
+  and are added as a fallback read, so they survive branch switches.
 
 Enrichment runs as two passes: identity first, then content read with real
 names substituted in. The order matters — "Person 3 will update the schema" is
