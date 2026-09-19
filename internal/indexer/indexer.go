@@ -147,7 +147,14 @@ func (idx *Indexer) toRelativePath(absPath string) string {
 	for _, root := range idx.repoRoots {
 		rel, err := filepath.Rel(root, absPath)
 		if err == nil && !strings.HasPrefix(rel, "..") {
-			if idx.nonGitRoots[root] {
+			if idx.nonGitRoots[root] || len(idx.repoRoots) > 1 {
+				// A path is only an identity if it is unique, and a bare
+				// repository-relative one is not: two repositories both
+				// holding cmd/main.go produce the same path, so the same node
+				// ID, so one silently overwrites the other. Naming the
+				// repository keeps them apart. A lone repository keeps the
+				// bare path, since there is nothing for it to collide with
+				// and changing it would invalidate every ID already indexed.
 				return filepath.Join(filepath.Base(root), rel)
 			}
 			return rel

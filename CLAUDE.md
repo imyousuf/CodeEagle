@@ -234,6 +234,18 @@ Design constraints that came out of measuring the real corpus:
   supersedes rather than adding to it: the attendance linker takes the first
   neighbour it finds, so two identifications mean one of them is silently
   ignored and both people are recorded as having attended.
+- **A path is only an identity if it is unique.** Node IDs hash the path a file
+  was recorded under, and a bare repository-relative path is not unique: two
+  repositories both holding `cmd/main.go` produced one ID for two unrelated
+  functions, so whichever was indexed second silently overwrote the first. A
+  configuration with more than one repository therefore records the
+  repository's name too, as non-git roots always have. A lone repository keeps
+  the bare path — nothing can collide with it, and changing it would invalidate
+  every ID already indexed. Adding a second repository to an existing
+  configuration does change them, so that first sync should be a `--full` one.
+  Federation across separate databases needs more than this: repo-scoped types
+  must be keyed on (source, id), while Person, Topic and the date hierarchy are
+  global by design and key on id alone.
 - **Refuse an ambiguous name.** Surnames only decide when both sides have one, so
   a bare first name matches every colleague who shares it. Resolution reports
   the ambiguity instead of choosing, and the speaker stays unidentified.
