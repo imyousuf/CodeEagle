@@ -664,23 +664,13 @@ func (w *Writer) linkTopicParent(ctx context.Context, topics *TopicRegistry, chi
 		return 0, nil
 	}
 
-	if parentNode.Properties == nil {
-		parentNode.Properties = make(map[string]string)
-	}
-	if parentNode.Properties[PropTopicLevel] != LevelTheme {
-		parentNode.Properties[PropTopicLevel] = LevelTheme
-		parentNode.Properties[PropTopicDepth] = "1"
-		if err := w.store.UpdateNode(ctx, parentNode); err != nil {
+	if snapshot, changed := topics.PromoteToTheme(parentNode); changed {
+		if err := w.store.UpdateNode(ctx, snapshot); err != nil {
 			return 0, fmt.Errorf("mark concept %q: %w", name, err)
 		}
 	}
-	if child.Properties == nil {
-		child.Properties = make(map[string]string)
-	}
-	if child.Properties[PropTopicLevel] == "" {
-		child.Properties[PropTopicLevel] = LevelSubject
-		child.Properties[PropTopicDepth] = "0"
-		if err := w.store.UpdateNode(ctx, child); err != nil {
+	if snapshot, changed := topics.DefaultToSubject(child); changed {
+		if err := w.store.UpdateNode(ctx, snapshot); err != nil {
 			return 0, fmt.Errorf("mark subject %q: %w", child.Name, err)
 		}
 	}

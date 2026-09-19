@@ -108,6 +108,54 @@ func (r *TopicRegistry) Vocabulary(limit int) []string {
 	return out
 }
 
+// PromoteToTheme records that a topic is a concept others sit under, and
+// returns a copy to persist if that changed anything.
+//
+// The nodes the registry holds are read concurrently: the enrichment workers
+// call Vocabulary while building their prompts, and the single writer
+// goroutine marks levels as it places each meeting's topics. Mutating a node's
+// property map outside the registry's lock is a data race on that map, which
+// Go traps and turns into an unrecoverable process abort rather than an error
+// the sync could survive. The caller is handed a snapshot to write so that
+// serializing it does not read the live map either.
+func (r *TopicRegistry) PromoteToTheme(node *graph.Node) (*graph.Node, bool) {
+	return r.markLevel(node, LevelTheme, "1", func(current string) bool {
+		return current != LevelTheme
+	})
+}
+
+// DefaultToSubject records that a topic is a leaf, unless it already has a
+// place in the hierarchy.
+func (r *TopicRegistry) DefaultToSubject(node *graph.Node) (*graph.Node, bool) {
+	return r.markLevel(node, LevelSubject, "0", func(current string) bool {
+		return current == ""
+	})
+}
+
+func (r *TopicRegistry) markLevel(node *graph.Node, level, depth string, when func(string) bool) (*graph.Node, bool) {
+	if node == nil {
+		return nil, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if node.Properties == nil {
+		node.Properties = make(map[string]string)
+	}
+	if !when(node.Properties[PropTopicLevel]) {
+		return nil, false
+	}
+	node.Properties[PropTopicLevel] = level
+	node.Properties[PropTopicDepth] = depth
+
+	snapshot := *node
+	snapshot.Properties = make(map[string]string, len(node.Properties))
+	for k, v := range node.Properties {
+		snapshot.Properties[k] = v
+	}
+	return &snapshot, true
+}
+
 // propTopicUses counts how many meetings have used a topic, so the vocabulary
 // offered back to the model leads with the labels that have proven reusable.
 const propTopicUses = "uses"
