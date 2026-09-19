@@ -195,6 +195,18 @@ func (w *Writer) writeSpeakers(ctx context.Context, res *Result, meeting *graph.
 	var st Stats
 	s := res.Session
 
+	// Diarization regularly splits one person across several labels — a change
+	// of microphone, a gap, a moment of crosstalk. Attendance is therefore
+	// accumulated per person and written once at the end: emitting an edge per
+	// label would have each overwrite the last, leaving a person credited with
+	// only the final fragment of what they said.
+	type attendance struct {
+		person  *graph.Node
+		seconds float64
+		labels  []string
+	}
+	attended := make(map[string]*attendance)
+
 	for _, stat := range s.SubstantiveSpeakers() {
 		speaker := &graph.Node{
 			ID:            graph.NewNodeID(string(graph.NodeSpeaker), s.Path, stat.Label),
@@ -254,13 +266,25 @@ func (w *Writer) writeSpeakers(ctx context.Context, res *Result, meeting *graph.
 		}); err != nil {
 			return st, err
 		}
-		if err := w.addEdge(ctx, graph.EdgeAttended, person.ID, meeting.ID, map[string]string{
-			graph.PropSpeakingSeconds: strconv.FormatFloat(stat.SpeakingSeconds, 'f', 1, 64),
-			graph.PropSpeakerLabel:    stat.Label,
+		st.Edges++
+
+		a, ok := attended[person.ID]
+		if !ok {
+			a = &attendance{person: person}
+			attended[person.ID] = a
+		}
+		a.seconds += stat.SpeakingSeconds
+		a.labels = append(a.labels, stat.Label)
+	}
+
+	for _, a := range attended {
+		if err := w.addEdge(ctx, graph.EdgeAttended, a.person.ID, meeting.ID, map[string]string{
+			graph.PropSpeakingSeconds: strconv.FormatFloat(a.seconds, 'f', 1, 64),
+			graph.PropSpeakerLabel:    strings.Join(a.labels, ", "),
 		}); err != nil {
 			return st, err
 		}
-		st.Edges += 2
+		st.Edges++
 	}
 	return st, nil
 }

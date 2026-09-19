@@ -3,6 +3,8 @@ package transcript
 import (
 	"context"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
@@ -286,5 +288,59 @@ func TestPersonRegistryRejectsNonNames(t *testing.T) {
 		if _, err := reg.Resolve(ctx, bad); err == nil {
 			t.Errorf("Resolve(%q) succeeded; want an error", bad)
 		}
+	}
+}
+
+func TestWriterAccumulatesSplitSpeakers(t *testing.T) {
+	ctx := context.Background()
+	store := testStore(t)
+	people, _ := LoadPersonRegistry(ctx, store)
+	w := NewWriter(store, people, WriterOptions{MinConfidence: 0.7})
+
+	// Diarization split one person across two labels, as it routinely does.
+	res := sampleResult("/tmp/sessions/split/session.json")
+	res.Session.Segments = append(res.Session.Segments, Segment{
+		ID: "seg-extra", Speaker: "Person 9", Source: SourceMonitor,
+		Text:      "And one more thing before we wrap up the meeting today.",
+		StartTime: 90, EndTime: 150,
+	})
+	res.Identities = append(res.Identities, SpeakerIdentity{
+		Label: "Person 9", Name: "Mona", Confidence: 0.9, Method: MethodLLM,
+	})
+
+	if _, err := w.Write(ctx, res); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	mona, err := people.Resolve(ctx, "Mona")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	edges, err := store.GetEdges(ctx, mona.ID, graph.EdgeAttended)
+	if err != nil {
+		t.Fatalf("get edges: %v", err)
+	}
+
+	var attended []*graph.Edge
+	for _, e := range edges {
+		if e.SourceID == mona.ID {
+			attended = append(attended, e)
+		}
+	}
+	if len(attended) != 1 {
+		t.Fatalf("got %d attendance edges, want 1 per meeting", len(attended))
+	}
+
+	// Both fragments must be credited, not just the last one written.
+	secs, err := strconv.ParseFloat(attended[0].Properties[graph.PropSpeakingSeconds], 64)
+	if err != nil {
+		t.Fatalf("parse seconds: %v", err)
+	}
+	if secs < 85 {
+		t.Errorf("speaking seconds = %v, want both fragments (30 + 60) counted", secs)
+	}
+	if labels := attended[0].Properties[graph.PropSpeakerLabel]; !strings.Contains(labels, "Person 1") ||
+		!strings.Contains(labels, "Person 9") {
+		t.Errorf("labels = %q, want both contributing labels", labels)
 	}
 }
