@@ -27,6 +27,12 @@ It supports monorepos, multi-repo setups, and multi-language codebases (Go, Pyth
 
 ## Installation
 
+> **New to this, or setting it up for someone who is?** [docs/installation.md](docs/installation.md)
+> walks through it step by step — no Go toolchain assumed — and covers the
+> configuration file, storing API keys in your system keyring, Google
+> application default credentials, and the failures that actually happen.
+
+
 ### Pre-built Binaries (Recommended)
 
 Download the latest release for your platform from [GitHub Releases](https://github.com/imyousuf/CodeEagle/releases):
