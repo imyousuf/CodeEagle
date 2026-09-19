@@ -178,8 +178,12 @@ func printRunReport(out io.Writer, r *transcript.RunReport) {
 	fmt.Fprintf(out, "  decisions     %d\n", r.Stats.Decisions)
 	fmt.Fprintf(out, "  action items  %d\n", r.Stats.ActionItems)
 	fmt.Fprintf(out, "  edges         %d\n", r.Stats.Edges)
-	if r.Skipped > 0 || r.Empty > 0 {
-		fmt.Fprintf(out, "  skipped       %d unchanged, %d with no speech\n", r.Skipped, r.Empty)
+	if r.Skipped > 0 || r.Empty > 0 || r.NotTranscripts > 0 {
+		fmt.Fprintf(out, "  skipped       %d unchanged, %d with no speech", r.Skipped, r.Empty)
+		if r.NotTranscripts > 0 {
+			fmt.Fprintf(out, ", %d not transcripts", r.NotTranscripts)
+		}
+		fmt.Fprintln(out)
 	}
 	fmt.Fprintf(out, "\n── Cost ──\n")
 	fmt.Fprintf(out, "  %d requests, %d in / %d out tokens, %s\n",

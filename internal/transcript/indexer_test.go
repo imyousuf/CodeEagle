@@ -214,8 +214,15 @@ func TestNeedsIndexingRejectsNonTranscript(t *testing.T) {
 	}
 
 	ix, _ := newTestIndexer(t, root)
-	if _, _, err := ix.needsIndexing(context.Background(), path); err == nil {
-		t.Error("expected an error for a file that is not a transcript")
+	// Pointing a scan at a folder of mixed downloads is a normal thing to do,
+	// so a file that turns out to be something else is skipped rather than
+	// reported as a failure.
+	needed, reason, err := ix.needsIndexing(context.Background(), path)
+	if err != nil {
+		t.Fatalf("a non-transcript should be skipped, not fail: %v", err)
+	}
+	if needed || reason != skipNotTranscript {
+		t.Errorf("needed=%v reason=%v, want false/skipNotTranscript", needed, reason)
 	}
 }
 

@@ -54,6 +54,12 @@ func TestCleanName(t *testing.T) {
 		// Genuine two-part names survive.
 		{"Imran Yousuf", "Imran Yousuf"},
 		{"Wait", ""},
+		// Directories list people surname-first; the same colleague must not
+		// become two people because two sources disagree on the order.
+		{"Bonaiuto, Jenna", "Jenna Bonaiuto"},
+		{"Schaefer, Benjamin", "Benjamin Schaefer"},
+		// A list of people is not one name.
+		{"Kevin, Mona, Ben", ""},
 	}
 	for _, tt := range tests {
 		if got := CleanName(tt.in); got != tt.want {
@@ -73,6 +79,11 @@ func TestSameName(t *testing.T) {
 		{"Mike", "Michael"},
 		{"Ben", "Benjamin"},
 		{"Bill", "Will"},
+		// A surname agreeing settles it, even when the given name is familiar.
+		{"Ben Schaefer", "Benjamin Schaefer"},
+		// One side carrying no surname still matches on the given name, which
+		// is all a diarized transcript ever offers.
+		{"Imran", "Imran Yousuf"},
 	}
 	for _, p := range same {
 		if !SameName(p[0], p[1]) {
@@ -90,6 +101,11 @@ func TestSameName(t *testing.T) {
 		{"Alex", "Alice"},
 		{"Carlos", "Charles"},
 		{"", "Kevin"},
+		// Two colleagues who merely share a given name are two people. Merging
+		// them would attribute one person's words to the other.
+		{"Chris Banner", "Christopher Stookey"},
+		{"Michael Johnstone", "Michiel Dorjee"},
+		{"Kevin Li", "Kevin Smith"},
 	}
 	for _, p := range different {
 		if SameName(p[0], p[1]) {

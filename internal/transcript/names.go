@@ -131,7 +131,13 @@ var honorificSuffixes = map[string]bool{
 // Fight", "Yamara Amra" — so a trailing token that is ordinary vocabulary is
 // dropped rather than allowed to make a two-word name.
 func CleanName(s string) string {
-	parts := strings.Fields(strings.TrimSpace(s))
+	s = uninvertName(strings.TrimSpace(s))
+	// A comma surviving un-inverting means several people were listed, which
+	// is not one person's name.
+	if strings.Contains(s, ",") {
+		return ""
+	}
+	parts := strings.Fields(s)
 	// Drop leading titles.
 	for len(parts) > 0 {
 		head := strings.ToLower(strings.Trim(parts[0], ".,"))
@@ -163,6 +169,31 @@ func CleanName(s string) string {
 	return cleaned
 }
 
+// uninvertName turns "Bonaiuto, Jenna" into "Jenna Bonaiuto".
+//
+// Directories list people surname-first, and a meeting platform writes whatever
+// the directory gave it. Left alone, the same colleague appears as "Jenna
+// Bonaiuto" from one source and "Bonaiuto, Jenna" from another, and the two
+// never resolve to one person.
+func uninvertName(s string) string {
+	// Exactly one comma, with something on each side, is the inverted form.
+	// More than one is a list of people, which is not a name at all.
+	first := strings.Index(s, ",")
+	if first < 0 || strings.Count(s, ",") != 1 {
+		return s
+	}
+	surname := strings.TrimSpace(s[:first])
+	given := strings.TrimSpace(s[first+1:])
+	if surname == "" || given == "" {
+		return s
+	}
+	// Both sides must be short enough to be name parts rather than a clause.
+	if len(strings.Fields(surname)) > 2 || len(strings.Fields(given)) > 2 {
+		return s
+	}
+	return given + " " + surname
+}
+
 // NormalizeName reduces a name to a comparison key: lowercase, no punctuation,
 // single-spaced.
 func NormalizeName(s string) string {
@@ -190,6 +221,16 @@ func FirstName(s string) string {
 		return n[:i]
 	}
 	return n
+}
+
+// Surname returns the last token of a normalized name, or "" when the name has
+// only one part.
+func Surname(s string) string {
+	n := NormalizeName(s)
+	if i := strings.LastIndexByte(n, ' '); i > 0 {
+		return n[i+1:]
+	}
+	return ""
 }
 
 // nicknames maps familiar forms to the formal name they abbreviate. Entries are
@@ -304,6 +345,17 @@ func SameName(a, b string) bool {
 	}
 	if na == nb {
 		return true
+	}
+
+	// When both names carry a surname, the surname decides. Comparing given
+	// names alone was right while transcripts offered nothing else, but a
+	// conferencing platform writes full names, and "Chris Banner" and
+	// "Christopher Stookey" are two colleagues rather than one spelled two
+	// ways. Merging them would attribute one person's words to the other,
+	// which is the failure this whole area is built to avoid.
+	sa, sb := Surname(na), Surname(nb)
+	if sa != "" && sb != "" && sa != sb {
+		return false
 	}
 
 	fa, fb := FirstName(na), FirstName(nb)

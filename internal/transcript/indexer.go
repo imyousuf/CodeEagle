@@ -68,8 +68,12 @@ type RunReport struct {
 	// Pending counts recordings still being written.
 	Pending int
 	// Empty counts recordings that captured no speech.
-	Empty    int
-	Duration time.Duration
+	Empty int
+	// NotTranscripts counts files that were looked at and turned out to be
+	// something else. Pointing a scan at a folder of mixed downloads is a
+	// normal thing to do, so these are counted rather than reported.
+	NotTranscripts int
+	Duration       time.Duration
 }
 
 const defaultConcurrency = 4
@@ -348,13 +352,15 @@ func (ix *Indexer) Run(ctx context.Context) (*RunReport, error) {
 			report.Skipped++
 		case skipPending:
 			report.Pending++
+		case skipNotTranscript:
+			report.NotTranscripts++
 		}
 		if needed {
 			todo = append(todo, p)
 		}
 	}
-	ix.opts.Log("%d to enrich, %d already indexed, %d empty%s", len(todo), report.Skipped, report.Empty,
-		pendingSuffix(report.Pending))
+	ix.opts.Log("%d to enrich, %d already indexed, %d empty%s%s", len(todo), report.Skipped, report.Empty,
+		pendingSuffix(report.Pending), notTranscriptSuffix(report.NotTranscripts))
 	if len(todo) == 0 {
 		report.Duration = time.Since(start)
 		return report, nil
@@ -457,6 +463,8 @@ const (
 	skipEmpty
 	// skipPending means the recorder may still be writing the transcript.
 	skipPending
+	// skipNotTranscript means the file is something else entirely.
+	skipNotTranscript
 )
 
 // needsIndexing reports whether a recording still has to be processed.
@@ -474,6 +482,12 @@ func (ix *Indexer) needsIndexing(ctx context.Context, path string) (bool, skipRe
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, skipNone, fmt.Errorf("read %s: %w", path, err)
+	}
+	// A directory of downloads holds all sorts of JSON and Word files. Being
+	// something other than a transcript is not an error — only a file that
+	// claims to be one and then cannot be read is.
+	if FormatFor(path, data) == nil {
+		return false, skipNotTranscript, nil
 	}
 	s, err := ParseAny(path, data)
 	if err != nil {
@@ -527,6 +541,14 @@ func (ix *Indexer) markIndexed(ctx context.Context, res *Result) error {
 func contentHash(data []byte) string {
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// notTranscriptSuffix mentions files that turned out to be something else.
+func notTranscriptSuffix(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(", %d not transcripts", n)
 }
 
 // pendingSuffix mentions recordings held back for the next sweep, and says

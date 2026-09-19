@@ -170,9 +170,13 @@ func cleanTeamsTitle(line string) string {
 	if i := strings.Index(line, "-Meeting Recording"); i > 0 {
 		line = line[:i]
 	}
-	line = regexp.MustCompile(`-\d{8}_\d{6}UTC$`).ReplaceAllString(line, "")
+	// The stamp is sometimes written with a UTC suffix and sometimes without.
+	line = teamsTitleStamp.ReplaceAllString(line, "")
 	return strings.TrimSpace(strings.Trim(line, "-"))
 }
+
+// teamsTitleStamp matches the timestamp Teams appends to a recording's name.
+var teamsTitleStamp = regexp.MustCompile(`-\d{8}_\d{6}(UTC)?$`)
 
 // teamsStampFromTitle reads the UTC stamp Teams embeds in the title.
 func teamsStampFromTitle(line string) (time.Time, bool) {
