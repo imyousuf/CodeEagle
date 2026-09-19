@@ -42,6 +42,11 @@ type IndexOptions struct {
 	// more than one place — a recorder's own folder, a downloads folder, a
 	// shared drive — and a single path would silently miss the rest.
 	SessionsDirs []string
+	// ExtraPaths are individual transcripts to index in addition, named rather
+	// than discovered. Document indexing marks the transcripts it comes
+	// across, and they arrive here, so a transcript committed beside the code
+	// it concerns becomes a meeting without anyone configuring its directory.
+	ExtraPaths []string
 	// Concurrency is how many recordings are analysed at once.
 	Concurrency int
 	// Force re-enriches recordings that are already indexed and unchanged.
@@ -184,6 +189,51 @@ func discoverOne(dir string, seen map[string]bool) ([]export, error) {
 		return nil, fmt.Errorf("read sessions directory %s: %w", dir, err)
 	}
 	return found, nil
+}
+
+// searchedDescription names where the recordings came from, for the log.
+//
+// With no directory configured they came from the document index alone, and
+// naming an empty list of directories would read as though nothing was
+// searched.
+func (ix *Indexer) searchedDescription() string {
+	dirs := strings.Join(ix.opts.SessionsDirs, ", ")
+	switch {
+	case dirs == "" && len(ix.opts.ExtraPaths) > 0:
+		return "indexed documents"
+	case dirs == "":
+		return "no configured directory"
+	case len(ix.opts.ExtraPaths) > 0:
+		return dirs + " and indexed documents"
+	default:
+		return dirs
+	}
+}
+
+// appendUnseenPaths adds named transcripts that discovery did not already
+// find, so a file both configured and marked is still indexed once.
+func appendUnseenPaths(found []string, extra []string) []string {
+	if len(extra) == 0 {
+		return found
+	}
+	seen := make(map[string]bool, len(found))
+	key := func(p string) string {
+		if abs, err := filepath.Abs(p); err == nil {
+			return abs
+		}
+		return p
+	}
+	for _, p := range found {
+		seen[key(p)] = true
+	}
+	for _, p := range extra {
+		if p == "" || seen[key(p)] {
+			continue
+		}
+		seen[key(p)] = true
+		found = append(found, p)
+	}
+	return found
 }
 
 // export is one transcript file and when its meeting began.
@@ -364,10 +414,11 @@ func (ix *Indexer) Run(ctx context.Context) (*RunReport, error) {
 	if err != nil {
 		return nil, err
 	}
+	paths = appendUnseenPaths(paths, ix.opts.ExtraPaths)
 	if ix.opts.Limit > 0 && len(paths) > ix.opts.Limit {
 		paths = paths[:ix.opts.Limit]
 	}
-	ix.opts.Log("Found %d recordings in %s", len(paths), strings.Join(ix.opts.SessionsDirs, ", "))
+	ix.opts.Log("Found %d recordings in %s", len(paths), ix.searchedDescription())
 
 	// Decide what actually needs work before spending anything on it.
 	var todo []string

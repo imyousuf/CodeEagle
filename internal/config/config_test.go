@@ -439,15 +439,13 @@ func searchString(s, substr string) bool {
 
 func TestTranscriptDirs(t *testing.T) {
 	cfg := &Config{
-		Repositories: []RepositoryConfig{{Path: "/repo/one"}, {Path: "/repo/two"}},
 		Transcripts: TranscriptsConfig{
-			SessionsDir: "/recordings",
-			// The singular and plural keys are merged, so either spelling works
-			// and a duplicate between them costs nothing.
-			SessionsDirs: []string{"/downloads", "/recordings", "  "},
+			SessionsDir: []string{"/recordings", "/downloads", "/recordings", "  "},
 		},
 	}
 
+	// Blanks and duplicates are dropped; order is kept so the first configured
+	// directory is searched first.
 	got := cfg.TranscriptDirs()
 	want := []string{"/recordings", "/downloads"}
 	if len(got) != len(want) {
@@ -457,14 +455,6 @@ func TestTranscriptDirs(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("TranscriptDirs()[%d] = %q, want %q", i, got[i], want[i])
 		}
-	}
-
-	// Repositories are searched only when asked for: a transcript committed
-	// beside the code it concerns is then indexed as a meeting.
-	cfg.Transcripts.ScanRepositories = true
-	got = cfg.TranscriptDirs()
-	if len(got) != 4 || got[2] != "/repo/one" || got[3] != "/repo/two" {
-		t.Errorf("with ScanRepositories = %v, want the repositories appended", got)
 	}
 }
 

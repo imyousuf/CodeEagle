@@ -129,6 +129,15 @@ const (
 	PropIsOwner = "is_owner"
 	// PropQuote is a representative verbatim quote.
 	PropQuote = "quote"
+	// PropIsTranscript marks a document that is also a meeting transcript.
+	//
+	// Such a file is both things at once: prose worth searching as a document,
+	// and a record of who said what worth extracting as a meeting. It is
+	// indexed as both, and this is what lets meeting indexing find the ones
+	// that turned up during ordinary document indexing.
+	PropIsTranscript = "is_transcript"
+	// PropTranscriptFormat names the transcript layout recognized.
+	PropTranscriptFormat = "transcript_format"
 )
 
 // EdgeType represents a relationship between two nodes.

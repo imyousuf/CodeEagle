@@ -180,27 +180,33 @@ a folder of per-session directories both work, nested to any depth. Files that
 turn out to be something else are counted and skipped, not reported as
 failures.
 
-Recordings accumulate in more than one place, so several directories can be
-searched:
+Recordings accumulate in more than one place, so `sessions_dir` takes either a
+single path or a list of them:
 
 ```yaml
 transcripts:
-  sessions_dir: ~/.local/share/tomoe/sessions   # one, as before
-  sessions_dirs:                                # or several; both are merged
+  sessions_dir: ~/.local/share/tomoe/sessions   # one place
+```
+
+```yaml
+transcripts:
+  sessions_dir:                                 # or several
+    - ~/.local/share/tomoe/sessions
     - ~/Downloads
     - /mnt/share/recordings
-  scan_repositories: true    # also look inside the indexed repositories
 ```
 
 `--dir` does the same on the command line and repeats:
 `codeeagle meetings sync --dir ~/Downloads --dir ~/recordings`. A file reachable
 through two of them is indexed once.
 
-With transcript indexing configured, `codeeagle sync` leaves transcripts to this
-pipeline rather than indexing them as documents — otherwise a Teams transcript
-committed in a repository is stored as prose, with the speakers, decisions and
-follow-ups inside it never extracted, and the same meeting ends up represented
-twice.
+A transcript committed beside the code it concerns needs no directory setting at
+all. `codeeagle sync` indexes it as a document like any other file and marks it
+as a transcript; `codeeagle meetings sync` reads those marks and indexes it as a
+meeting too. The file ends up in both indexes, which is what it is: prose worth
+searching, and a record of who said what. Nothing is configured for this, and a
+file that is both marked and inside a configured directory is still indexed
+once.
 
 Where a transcript names its speakers, identification has nothing to work out
 and the model call is skipped entirely — it would cost money to produce a worse
@@ -373,7 +379,7 @@ docs:
 ```yaml
 transcripts:
   enabled: true
-  sessions_dir: ~/.local/share/tomoe/sessions   # one directory per recording
+  sessions_dir: ~/.local/share/tomoe/sessions   # a path, or a list of them
   owner: "Your Name"              # microphone audio is always this person
   owner_aliases: ["Yourname"]     # spellings the transcriber produces
 

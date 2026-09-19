@@ -399,8 +399,19 @@ func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*mee
 	for i, d := range dirs {
 		dirs[i] = expandPath(d)
 	}
-	if len(dirs) == 0 {
-		return nil, fmt.Errorf("no transcripts directory configured; set transcripts.sessions_dir or pass --dir")
+	// Collected before the meeting store is opened, because both live in one
+	// database and only one writer may hold it at a time.
+	marked, err := transcriptDocuments(cmd.Context(), cfg)
+	if err != nil && verbose {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not read indexed documents: %v\n", err)
+	}
+
+	// Configuring a directory is not required: a transcript that turned up
+	// during document indexing is already known, and is indexed from there.
+	if len(dirs) == 0 && len(marked) == 0 {
+		return nil, fmt.Errorf(
+			"nothing to index: set transcripts.sessions_dir, pass --dir, " +
+				"or run `codeeagle sync` so transcripts among your documents are found")
 	}
 
 	client, err := newTranscriptClient(tc)
@@ -458,6 +469,7 @@ func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*mee
 	out := cmd.OutOrStdout()
 	indexer := transcript.NewIndexer(store, analyzer, writer, transcript.IndexOptions{
 		SessionsDirs: dirs,
+		ExtraPaths:   marked,
 		Concurrency:  tc.Concurrency,
 		Force:        ov.force,
 		Limit:        ov.limit,
@@ -1407,6 +1419,79 @@ func withGraph(cmd *cobra.Command, fn func(ctx context.Context, store graph.Stor
 	}
 	defer store.Close()
 	return fn(cmd.Context(), store)
+}
+
+// transcriptDocuments returns the files that document indexing recognized as
+// transcripts.
+//
+// A transcript committed beside the code it concerns is indexed as a document
+// like any other file, and marked. Reading those marks here is what makes it
+// additionally a meeting, without its directory having to be configured — the
+// file ends up in both indexes, which is what it is: prose worth searching,
+// and a record of who said what.
+func transcriptDocuments(ctx context.Context, cfg *config.Config) ([]string, error) {
+	store, _, err := openReadOnlyBranchStore(cfg)
+	if err != nil {
+		// No code graph yet is an ordinary state, not a problem.
+		return nil, nil
+	}
+	defer store.Close()
+
+	var out []string
+	seen := make(map[string]bool)
+	for _, nodeType := range []graph.NodeType{graph.NodeDocument, graph.NodeFile} {
+		nodes, err := store.QueryNodes(ctx, graph.NodeFilter{
+			Type:       nodeType,
+			Properties: map[string]string{graph.PropIsTranscript: "true"},
+		})
+		if err != nil {
+			return out, err
+		}
+		for _, n := range nodes {
+			path := resolveIndexedPath(cfg, n.FilePath)
+			if path == "" || seen[path] {
+				continue
+			}
+			seen[path] = true
+			out = append(out, path)
+		}
+	}
+	return out, nil
+}
+
+// resolveIndexedPath turns the relative path stored on an indexed node back
+// into a file on disk, returning "" when it cannot be found.
+func resolveIndexedPath(cfg *config.Config, rel string) string {
+	if rel == "" {
+		return ""
+	}
+	if filepath.IsAbs(rel) {
+		if _, err := os.Stat(rel); err == nil {
+			return rel
+		}
+		return ""
+	}
+	for _, repo := range cfg.Repositories {
+		root := expandPath(repo.Path)
+		candidate := filepath.Join(root, rel)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		// Non-git roots are stored with their basename prefixed, so the
+		// repository's own directory name appears twice when joined.
+		if trimmed := strings.TrimPrefix(rel, filepath.Base(root)+string(filepath.Separator)); trimmed != rel {
+			if candidate := filepath.Join(root, trimmed); fileExists(candidate) {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+// fileExists reports whether a path names a readable file.
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 // openMeetingStore opens the meeting graph for writing.

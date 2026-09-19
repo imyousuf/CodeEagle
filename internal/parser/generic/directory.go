@@ -24,8 +24,17 @@ func EnsureDirectoryHierarchy(filePath string, seen map[string]bool) ([]*graph.N
 	var dirs []string
 	current := dir
 	for current != "." && current != "" {
+		parent := filepath.Dir(current)
+		if parent == current {
+			// filepath.Dir is a fixpoint at the filesystem root: Dir("/") is
+			// "/", never "." or "". Walking past it would loop forever, which
+			// an absolute path reaches whenever a file lies outside every
+			// configured repository root. The root itself is not a directory
+			// worth recording.
+			break
+		}
 		dirs = append(dirs, current)
-		current = filepath.Dir(current)
+		current = parent
 	}
 
 	// Process from outermost to innermost (reverse order).

@@ -314,9 +314,7 @@ agents:
 
 transcripts:
   enabled: true
-  sessions_dir: ~/.local/share/tomoe/sessions
-  sessions_dirs: [~/Downloads]  # merged with sessions_dir; searched recursively
-  scan_repositories: false      # also search the indexed repositories
+  sessions_dir: ~/.local/share/tomoe/sessions   # or a list, for several places
   owner: "Your Name"          # microphone audio is always this person
   owner_aliases: ["Yourname"] # spellings the transcriber produces
   provider: baseten           # baseten | ollama | anthropic | vertex-ai

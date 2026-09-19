@@ -91,16 +91,18 @@ type FacesConfig struct {
 type TranscriptsConfig struct {
 	// Enabled turns on meeting transcript indexing.
 	Enabled bool `mapstructure:"enabled" yaml:"enabled,omitempty"`
-	// SessionsDir is a directory to search for transcripts.
-	SessionsDir string `mapstructure:"sessions_dir" yaml:"sessions_dir,omitempty"`
-	// SessionsDirs lists further directories to search. Recordings accumulate
-	// in more than one place — a recorder's folder, a downloads folder, a
-	// shared drive — and both keys are merged so either spelling works.
-	SessionsDirs []string `mapstructure:"sessions_dirs" yaml:"sessions_dirs,omitempty"`
-	// ScanRepositories also searches the configured repositories, so a
-	// transcript committed alongside the code it concerns is indexed as a
-	// meeting rather than as a document.
-	ScanRepositories bool `mapstructure:"scan_repositories" yaml:"scan_repositories,omitempty"`
+	// SessionsDir lists the directories to search for transcripts.
+	//
+	// Recordings accumulate in more than one place — a recorder's folder, a
+	// downloads folder, a shared drive — so this takes either a single path or
+	// a list, under the one key:
+	//
+	//	sessions_dir: ~/.local/share/tomoe/sessions
+	//	sessions_dir: [~/.local/share/tomoe/sessions, ~/Downloads]
+	//
+	// Transcripts that turn up during ordinary document indexing are found
+	// without being listed here at all.
+	SessionsDir []string `mapstructure:"sessions_dir" yaml:"sessions_dir,omitempty"`
 	// Owner is the person whose microphone made these recordings. Microphone
 	// audio is always this person, which anchors identity resolution.
 	Owner string `mapstructure:"owner" yaml:"owner,omitempty"`
@@ -565,23 +567,13 @@ func loadEnvFile(path string) {
 func (c *Config) TranscriptDirs() []string {
 	var out []string
 	seen := make(map[string]bool)
-	add := func(dir string) {
+	for _, dir := range c.Transcripts.SessionsDir {
 		dir = strings.TrimSpace(dir)
 		if dir == "" || seen[dir] {
-			return
+			continue
 		}
 		seen[dir] = true
 		out = append(out, dir)
-	}
-
-	add(c.Transcripts.SessionsDir)
-	for _, d := range c.Transcripts.SessionsDirs {
-		add(d)
-	}
-	if c.Transcripts.ScanRepositories {
-		for _, r := range c.Repositories {
-			add(r.Path)
-		}
 	}
 	return out
 }

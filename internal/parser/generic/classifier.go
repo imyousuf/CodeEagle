@@ -88,6 +88,10 @@ var textExtensions = map[string]bool{
 	".ipynb": true, ".rmd": true,
 	// Diff / patch
 	".diff": true, ".patch": true,
+	// Captions / transcripts. A recorder's export is ordinary text worth
+	// searching, and indexing it is also what lets meeting indexing find a
+	// transcript that was committed beside the code it concerns.
+	".vtt": true, ".srt": true,
 }
 
 // Classify determines how to process a file based on its extension.

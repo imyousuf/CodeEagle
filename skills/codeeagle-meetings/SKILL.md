@@ -68,5 +68,6 @@ record is, and prefer quoting the meeting over paraphrasing an attribution.
 ## Prerequisites
 
 - CodeEagle installed and on PATH
-- `transcripts.sessions_dir` configured, and `codeeagle meetings sync` run at
-  least once
+- `codeeagle meetings sync` run at least once. Transcripts are found in the
+  directories named by `transcripts.sessions_dir`, and among the documents
+  `codeeagle sync` already indexed, so neither setting is strictly required

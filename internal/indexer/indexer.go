@@ -31,16 +31,15 @@ type IndexerConfig struct {
 	AutoSummarize  bool                             // enable post-index LLM summarization
 	PostIndexHook  func(ctx context.Context) error  // optional hook called after initial full index (e.g., linker)
 	ShowProgress   bool                             // show progress bars during sync/index (independent of Verbose)
-	// SkipTranscripts leaves meeting transcripts to `codeeagle meetings sync`.
+	// MarkTranscripts records, on a document that turns out to be a meeting
+	// transcript, that it is one.
 	//
-	// A Teams transcript is a Word document and a Zoom one is a caption file,
-	// so without this a transcript sitting in a repository is indexed as a
-	// generic document: its text is summarized, but the speakers, decisions
-	// and follow-ups inside it are never extracted, and the same meeting ends
-	// up represented twice if it is also indexed properly. Enabled when
-	// transcript indexing is configured, so nothing changes for projects that
-	// do not use it.
-	SkipTranscripts bool
+	// The file stays in the documents index — it is prose worth searching —
+	// and the mark is what lets `codeeagle meetings sync` find it and
+	// additionally extract the speakers, decisions and follow-ups inside it.
+	// A transcript is therefore both a Document and a Meeting rather than
+	// either one.
+	MarkTranscripts bool
 }
 
 // IndexStats holds statistics about the indexing state.
@@ -65,7 +64,7 @@ type Indexer struct {
 	log             func(format string, args ...any)
 	llmClient       llm.Client
 	autoSummarize   bool
-	skipTranscripts bool
+	markTranscripts bool
 	postIndexHook   func(ctx context.Context) error
 
 	mu           sync.Mutex
@@ -110,7 +109,7 @@ func NewIndexer(cfg IndexerConfig) *Indexer {
 		log:             logFn,
 		llmClient:       cfg.LLMClient,
 		autoSummarize:   cfg.AutoSummarize,
-		skipTranscripts: cfg.SkipTranscripts,
+		markTranscripts: cfg.MarkTranscripts,
 		postIndexHook:   cfg.PostIndexHook,
 		changedFiles:    make(map[string]struct{}),
 	}
@@ -200,18 +199,6 @@ func (idx *Indexer) IndexFileWithTimestamp(ctx context.Context, filePath string,
 // This avoids redundant file reads and hash computations when the caller
 // has already read the file (e.g., during sync with duplicate detection).
 func (idx *Indexer) IndexFileWithContent(ctx context.Context, filePath string, content []byte, contentHash string, updatedAt time.Time) error {
-	// A transcript that happens to live in a repository belongs to the meeting
-	// pipeline, which extracts who spoke, what was decided and what was agreed.
-	// Indexing it here as a document would capture the words and lose all of
-	// that, and would represent the same meeting twice.
-	if idx.skipTranscripts && transcript.MayBeTranscript(filePath) &&
-		transcript.FormatFor(filePath, content) != nil {
-		if idx.verbose {
-			idx.log("Skipping %s: a meeting transcript, indexed by `codeeagle meetings sync`", idx.toRelativePath(filePath))
-		}
-		return nil
-	}
-
 	p, ok := idx.registry.ParserForFile(filePath)
 	if !ok {
 		return nil // no parser for this file
@@ -239,12 +226,26 @@ func (idx *Indexer) IndexFileWithContent(ctx context.Context, filePath string, c
 	classifier := parser.NewClassifier()
 	result = classifier.Classify(result)
 
+	// A document that is also a meeting transcript is marked as one. It stays
+	// in the documents index, and the mark is what lets meeting indexing find
+	// it and additionally extract who spoke and what was agreed.
+	transcriptFormat := ""
+	if idx.markTranscripts && transcript.MayBeTranscript(filePath) {
+		if f := transcript.FormatFor(filePath, content); f != nil {
+			transcriptFormat = f.Name()
+		}
+	}
+
 	// Inject content_hash and mime_type into file-type nodes that lack them.
 	mimeType := detectMIMEType(relPath)
 	for _, node := range result.Nodes {
 		if isFileTypeNode(node.Type) && node.Type != graph.NodeDirectory {
 			if node.Properties == nil {
 				node.Properties = make(map[string]string)
+			}
+			if transcriptFormat != "" {
+				node.Properties[graph.PropIsTranscript] = "true"
+				node.Properties[graph.PropTranscriptFormat] = transcriptFormat
 			}
 			if node.Properties[graph.PropContentHash] == "" {
 				node.Properties[graph.PropContentHash] = contentHash

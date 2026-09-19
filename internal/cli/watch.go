@@ -196,10 +196,10 @@ func newWatchCmd() *cobra.Command {
 
 			// Create indexer.
 			idx := indexer.NewIndexer(indexer.IndexerConfig{
-				// A transcript in a repository belongs to the meeting pipeline, which
-				// extracts speakers, decisions and follow-ups from it; indexing it here
-				// as a document would keep the words and lose all of that.
-				SkipTranscripts: cfg.Transcripts.Enabled,
+				// A document that is also a transcript is marked as one, so meeting
+				// indexing can find it later and additionally extract who spoke
+				// and what was agreed. It stays in the documents index either way.
+				MarkTranscripts: cfg.Transcripts.Enabled,
 				GraphStore:      store,
 				ParserRegistry:  registry,
 				WatcherConfig:   wcfg,
