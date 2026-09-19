@@ -106,6 +106,10 @@ const (
 	PropEndTime = "end_time"
 	// PropMeetingID is the source session ID of the owning meeting.
 	PropMeetingID = "meeting_id"
+	// PropIncomplete marks a meeting whose projection into the graph did not
+	// finish, so a reader can tell a meeting with no decisions from one whose
+	// decisions were never written.
+	PropIncomplete = "incomplete"
 	// PropPlatform is the meeting platform ("Zoom", "Unknown", ...).
 	PropPlatform = "platform"
 	// PropDuration is the meeting duration in seconds.

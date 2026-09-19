@@ -617,11 +617,18 @@ func newMeetingsListCmd() *cobra.Command {
 					} else if names, err := attendeeNames(ctx, store, m.ID); err == nil {
 						who = strconv.Itoa(len(names))
 					}
+					title := truncateText(m.Name, 70)
+					if m.Properties[graph.PropIncomplete] == "true" {
+						// Written partway and abandoned. Saying so beats
+						// letting it pass for a meeting where nothing was
+						// decided.
+						title += "  [incomplete]"
+					}
 					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
 						m.UpdatedAt.Format("2006-01-02 15:04"),
 						formatSeconds(m.Properties[graph.PropDuration]),
 						truncateText(who, 40),
-						truncateText(m.Name, 70))
+						title)
 				}
 				return tw.Flush()
 			})

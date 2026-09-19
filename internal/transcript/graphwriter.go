@@ -124,6 +124,13 @@ func (w *Writer) Write(ctx context.Context, res *Result) (Stats, error) {
 		}
 	}
 
+	// Written incomplete, then cleared at the end. Projection is several
+	// writes with no transaction around them, so a failure partway leaves a
+	// meeting that has speakers but no decisions — indistinguishable, to a
+	// reader, from a meeting where nothing was decided. It self-heals on the
+	// next successful sync, but a recording that fails every time would sit
+	// there looking whole. This project records whether a quote checks out
+	// rather than assuming it does; the same applies here.
 	meeting, err := w.writeMeeting(ctx, res)
 	if err != nil {
 		return st, err
@@ -149,7 +156,26 @@ func (w *Writer) Write(ctx context.Context, res *Result) (Stats, error) {
 			return st, fmt.Errorf("link meeting to date: %w", err)
 		}
 	}
+
+	if err := w.markComplete(ctx, meeting); err != nil {
+		return st, err
+	}
 	return st, nil
+}
+
+// markComplete clears the incomplete marker once everything is written.
+func (w *Writer) markComplete(ctx context.Context, meeting *graph.Node) error {
+	if meeting.Properties == nil {
+		return nil
+	}
+	if _, marked := meeting.Properties[graph.PropIncomplete]; !marked {
+		return nil
+	}
+	delete(meeting.Properties, graph.PropIncomplete)
+	if err := w.store.AddNode(ctx, meeting); err != nil {
+		return fmt.Errorf("clear the incomplete marker: %w", err)
+	}
+	return nil
 }
 
 // writeMeeting creates the node representing the recording itself.
@@ -168,6 +194,9 @@ func (w *Writer) writeMeeting(ctx context.Context, res *Result) (*graph.Node, er
 	props := map[string]string{
 		graph.PropMeetingID: s.ID,
 		graph.PropDuration:  strconv.FormatFloat(s.DurationSeconds(), 'f', 0, 64),
+		// Cleared once the rest of the projection succeeds. A meeting still
+		// carrying this was written partway and then abandoned.
+		graph.PropIncomplete: "true",
 	}
 	if s.Platform != "" {
 		props[graph.PropPlatform] = s.Platform
