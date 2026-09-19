@@ -58,7 +58,8 @@ Build and maintain a rich knowledge graph that captures:
 - `ASSIGNED_TO` — action item -> person
 - `RAISED_BY` — decision/action item -> person
 - `MENTIONS` — meeting/topic segment -> code entity or person
-- `FOLLOWS_UP` — action item -> decision, meeting -> earlier meeting
+- `FOLLOWS_UP` — action item -> decision; recurring meeting -> its previous instance
+  (inferred from the participant set, which recurs more reliably than a title)
 
 **Code Quality Metrics** (attached to graph nodes)
 - Cyclomatic complexity per function

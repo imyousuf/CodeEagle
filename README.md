@@ -189,6 +189,16 @@ another are kept apart.
 People discovered in earlier meetings are fed back as known names for later
 ones, so recordings are processed in the order the meetings happened.
 
+#### Recurring meetings
+
+Standing meetings are threaded together, so `meetings show` points at the
+previous and next instance and an agent can follow a thread backwards. The
+thread is inferred from who was in the room rather than from titles: a model's
+titles vary between instances of one standing meeting, while the set of people
+recurs reliably. A series needs at least two shared participants, and a gap of
+more than two months breaks the chain rather than inventing continuity across
+it.
+
 #### Verifying what was extracted
 
 Every decision and follow-up carries a verbatim quote, and whether that quote
@@ -375,7 +385,7 @@ codeeagle -p my-project status
 | AssignedTo | Action item is owned by a person |
 | RaisedBy | Decision or action item was raised by a person |
 | Mentions | Meeting or topic segment refers to a code entity or person |
-| FollowsUp | Action item implements a decision, or a meeting follows an earlier one |
+| FollowsUp | Action item implements a decision, or a recurring meeting follows its previous instance |
 | References | General cross-reference |
 | Embeds | Struct embeds another type |
 
