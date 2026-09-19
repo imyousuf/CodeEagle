@@ -251,6 +251,9 @@ func printRunReport(out io.Writer, r *transcript.RunReport) {
 	fmt.Fprintf(out, "  meetings      %d\n", r.Stats.Meetings)
 	fmt.Fprintf(out, "  participants  %d (%d identified, %d unresolved)\n",
 		r.Stats.Speakers, r.Stats.Identified, r.Stats.Unidentified)
+	if r.Stats.Background > 0 {
+		fmt.Fprintf(out, "  background    %d voices that were not people\n", r.Stats.Background)
+	}
 	fmt.Fprintf(out, "  new people    %d\n", r.Stats.People)
 	fmt.Fprintf(out, "  topics        %d across %d segments\n", r.Stats.Topics, r.Stats.Segments)
 	fmt.Fprintf(out, "  decisions     %d\n", r.Stats.Decisions)
@@ -495,6 +498,10 @@ func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*mee
 		Roster:        tc.Roster,
 		ExcludeNames:  tc.ExcludeNames,
 		MinConfidence: tc.MinConfidence,
+		// Screening for voices that are not people needs the decision model,
+		// so it is silently inert without one.
+		BackgroundFilter:        tc.BackgroundFilter,
+		BackgroundMinConfidence: tc.BackgroundMinConfidence,
 		// People found earlier in the run become known names for the
 		// meetings analysed after them, and topics likewise become the
 		// vocabulary later meetings are asked to reuse.

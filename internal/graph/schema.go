@@ -106,6 +106,9 @@ const (
 	PropEndTime = "end_time"
 	// PropMeetingID is the source session ID of the owning meeting.
 	PropMeetingID = "meeting_id"
+	// PropRole distinguishes a speaker that is not a person — background
+	// audio the recorder filed as a voice.
+	PropRole = "role"
 	// PropIncomplete marks a meeting whose projection into the graph did not
 	// finish, so a reader can tell a meeting with no decisions from one whose
 	// decisions were never written.

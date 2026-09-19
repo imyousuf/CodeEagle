@@ -77,6 +77,12 @@ type Options struct {
 	MinConfidence float64
 	// MaxTranscriptChars bounds how much transcript is sent in one request.
 	MaxTranscriptChars int
+	// BackgroundMinConfidence is the bar for treating a voice as something
+	// other than a person. Zero uses DefaultBackgroundConfidence.
+	BackgroundMinConfidence float64
+	// BackgroundFilter screens out voices that are not people — a television,
+	// a demonstrated video — when a judge is configured. On by default.
+	BackgroundFilter *bool
 }
 
 const (
@@ -166,6 +172,13 @@ func (a *Analyzer) Identify(ctx context.Context, s *Session, usage *Usage) ([]Sp
 		return a.identitiesFromTranscript(speakers), nil
 	}
 
+	// Screened first, so a television is never offered a colleague's name and
+	// its turns never feed the hint extractor.
+	background, err := a.screenBackgroundIfEnabled(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+
 	hints := ExtractHints(s)
 	evidence := Evidence(s, hints)
 
@@ -173,6 +186,15 @@ func (a *Analyzer) Identify(ctx context.Context, s *Session, usage *Usage) ([]Sp
 	var unresolved []SpeakerEvidence
 
 	for _, ev := range evidence {
+		if mark, ok := background[ev.Stat.Label]; ok {
+			identities = append(identities, SpeakerIdentity{
+				Label:      mark.Label,
+				Confidence: mark.Confidence,
+				Evidence:   mark.Evidence,
+				Method:     MethodBackground,
+			})
+			continue
+		}
 		// The microphone owner is known structurally: mic audio is by
 		// definition whoever made the recording. Never spend a model call, or
 		// risk a model disagreement, on a fact the format guarantees.
@@ -322,6 +344,15 @@ func bestSupported(idx []int, identities []SpeakerIdentity) (best int, tied bool
 		}
 	}
 	return best, tied
+}
+
+// screenBackgroundIfEnabled screens for voices that are not people, unless
+// the caller turned it off.
+func (a *Analyzer) screenBackgroundIfEnabled(ctx context.Context, s *Session) (map[string]BackgroundMark, error) {
+	if a.opts.BackgroundFilter != nil && !*a.opts.BackgroundFilter {
+		return nil, nil
+	}
+	return a.screenBackground(ctx, s)
 }
 
 // isOwnerName reports whether a name refers to the recording's host.

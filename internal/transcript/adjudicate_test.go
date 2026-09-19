@@ -175,7 +175,12 @@ func TestAdjudicateSkipsTheCallWhenNobodyIsNamed(t *testing.T) {
 		[3]string{"Person 1", SourceMonitor, "Yes, agreed, that all seems reasonable enough."},
 	)
 
-	a := NewAnalyzer(nil, Options{Owner: "Imran Yousuf", MinConfidence: 0.7}).WithJudge(judge)
+	// Background screening consults the judge too, and this test is about
+	// adjudication, so it is turned off to measure one thing.
+	off := false
+	a := NewAnalyzer(nil, Options{
+		Owner: "Imran Yousuf", MinConfidence: 0.7, BackgroundFilter: &off,
+	}).WithJudge(judge)
 	if _, err := a.Identify(context.Background(), s, &Usage{}); err != nil {
 		t.Fatalf("Identify: %v", err)
 	}

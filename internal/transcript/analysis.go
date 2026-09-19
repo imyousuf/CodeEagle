@@ -35,6 +35,9 @@ const (
 	MethodEvidence = "evidence"
 	// MethodLLM means a language model adjudicated the evidence.
 	MethodLLM = "llm"
+	// MethodBackground means the voice was judged not to be a person at all
+	// — a television, a demonstrated video, a stream left running.
+	MethodBackground = "background_media"
 	// MethodJudge means a decision model adjudicated the evidence. Recorded
 	// separately from MethodLLM because the confidence means something
 	// different: it is calibrated against outcomes rather than self-reported.

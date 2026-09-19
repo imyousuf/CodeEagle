@@ -249,6 +249,18 @@ Design constraints that came out of measuring the real corpus:
   Federation across separate databases needs more than this: repo-scoped types
   must be keyed on (source, id), while Person, Topic and the date hierarchy are
   global by design and key on id alone.
+- **Loudness is not participation.** The substantive-speaker filter asks how
+  much a voice spoke, never what it said, which correctly rejects diarization
+  debris but admits a television: broadcast audio is loud, continuous and
+  grammatical, so it clears the bar more easily than a quiet colleague does.
+  With a decision model configured, such voices are screened out before
+  identification — vetoed first by whether anything in the transcript answered
+  them, since a television is never addressed and never replies. They keep
+  their Speaker node so the recording is described honestly and a human can
+  overrule the judgment, but they are never named, never linked and never
+  counted as attendees. Eleven such labels in 1,572 across the reference
+  corpus. A television in the *host's* room is invisible to this: the
+  microphone is one undiarized label.
 - **Refuse an ambiguous name.** Surnames only decide when both sides have one, so
   a bare first name matches every colleague who shares it. Resolution reports
   the ambiguity instead of choosing, and the speaker stays unidentified.

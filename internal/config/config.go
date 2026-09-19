@@ -161,6 +161,14 @@ type TranscriptsConfig struct {
 	// rather than a rolling alias, because a confidence threshold tuned
 	// against one set of weights does not transfer silently to another.
 	JevModel string `mapstructure:"jev_model" yaml:"jev_model,omitempty"`
+	// BackgroundFilter screens out voices that are not people — a television,
+	// a video being demonstrated, a stream left running nearby. Requires a
+	// decision model; on by default when one is configured.
+	BackgroundFilter *bool `mapstructure:"background_filter" yaml:"background_filter,omitempty"`
+	// BackgroundMinConfidence is the bar for treating a voice as background
+	// audio rather than a person. Zero uses the package default of 0.85, set
+	// from reading every flag the model produced over the whole corpus.
+	BackgroundMinConfidence float64 `mapstructure:"background_min_confidence" yaml:"background_min_confidence,omitempty"`
 	// MinConfidence is the score at or above which a speaker is automatically
 	// identified. Below it, the speaker is left for manual review.
 	MinConfidence float64 `mapstructure:"min_confidence" yaml:"min_confidence,omitempty"`

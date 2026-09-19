@@ -48,11 +48,13 @@ type Stats struct {
 	People       int
 	Identified   int
 	Unidentified int
-	Topics       int
-	Segments     int
-	Decisions    int
-	ActionItems  int
-	Edges        int
+	// Background counts speakers judged not to be people at all.
+	Background  int
+	Topics      int
+	Segments    int
+	Decisions   int
+	ActionItems int
+	Edges       int
 }
 
 // Add accumulates another session's stats.
@@ -62,6 +64,7 @@ func (s *Stats) Add(o Stats) {
 	s.People += o.People
 	s.Identified += o.Identified
 	s.Unidentified += o.Unidentified
+	s.Background += o.Background
 	s.Topics += o.Topics
 	s.Segments += o.Segments
 	s.Decisions += o.Decisions
@@ -291,6 +294,23 @@ func (w *Writer) writeSpeakers(ctx context.Context, res *Result, meeting *graph.
 		st.Edges++
 
 		identity, ok := res.IdentityFor(stat.Label)
+		if ok && identity.Method == MethodBackground {
+			// Not a person: a television, a demonstrated video. The node stays,
+			// so the recording is described honestly and a human can overrule
+			// the judgment, but it is never given a name, never linked to
+			// anybody, and never counted as an attendee.
+			speaker.Properties[graph.PropRole] = MethodBackground
+			speaker.Properties[graph.PropConfidence] =
+				strconv.FormatFloat(identity.Confidence, 'f', 2, 64)
+			if identity.Evidence != "" {
+				speaker.Properties[graph.PropEvidence] = truncate(identity.Evidence, 300)
+			}
+			if err := w.store.AddNode(ctx, speaker); err != nil {
+				return st, fmt.Errorf("mark background speaker: %w", err)
+			}
+			st.Background++
+			continue
+		}
 		if !ok || identity.Name == "" || identity.Confidence < w.opts.MinConfidence {
 			st.Unidentified++
 			continue
