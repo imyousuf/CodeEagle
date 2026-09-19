@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
@@ -279,5 +280,136 @@ func addEdge(t *testing.T, store graph.Store, typ graph.EdgeType, from, to strin
 	}
 	if err := store.AddEdge(context.Background(), e); err != nil {
 		t.Fatalf("add edge %s: %v", typ, err)
+	}
+}
+
+// addMeetingWith creates a meeting attended by the given people.
+func addMeetingWith(t *testing.T, store graph.Store, name string, when time.Time, people ...*graph.Node) *graph.Node {
+	t.Helper()
+	m := &graph.Node{
+		ID:            graph.NewNodeID(string(graph.NodeMeeting), "/s/"+name, name),
+		Type:          graph.NodeMeeting,
+		Name:          name,
+		QualifiedName: name,
+		UpdatedAt:     when,
+	}
+	if err := store.AddNode(context.Background(), m); err != nil {
+		t.Fatalf("add meeting: %v", err)
+	}
+	for _, p := range people {
+		addEdge(t, store, graph.EdgeAttended, p.ID, m.ID)
+	}
+	return m
+}
+
+func followsUpTarget(t *testing.T, store graph.Store, from string) string {
+	t.Helper()
+	nodes, err := store.GetNeighbors(context.Background(), from, graph.EdgeFollowsUp, graph.Outgoing)
+	if err != nil {
+		t.Fatalf("get follows-up: %v", err)
+	}
+	if len(nodes) == 0 {
+		return ""
+	}
+	return nodes[0].Name
+}
+
+func TestLinkMeetingSeriesThreadsRecurringMeetings(t *testing.T) {
+	ctx := context.Background()
+	store := meetingTestStore(t)
+
+	imran := addNode(t, store, graph.NodePerson, "Imran", nil)
+	jeremiah := addNode(t, store, graph.NodePerson, "Jeremiah", nil)
+
+	base := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	// The same one-to-one three weeks running. Titles differ between
+	// instances, as a model's titles do; the people are what recurs.
+	addMeetingWith(t, store, "1:1 retrieval status", base, imran, jeremiah)
+	second := addMeetingWith(t, store, "1:1 Q2 planning", base.AddDate(0, 0, 7), imran, jeremiah)
+	third := addMeetingWith(t, store, "1:1 hiring and RAG", base.AddDate(0, 0, 14), imran, jeremiah)
+
+	l := NewLinker(store, nil, nil, false)
+	n, err := l.linkMeetingSeries(ctx)
+	if err != nil {
+		t.Fatalf("link series: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("linked %d, want 2 (each instance to its predecessor)", n)
+	}
+
+	// Each instance points back to the one before it, so a thread can be walked.
+	if got := followsUpTarget(t, store, third.ID); got != "1:1 Q2 planning" {
+		t.Errorf("third follows %q, want the second instance", got)
+	}
+	if got := followsUpTarget(t, store, second.ID); got != "1:1 retrieval status" {
+		t.Errorf("second follows %q, want the first instance", got)
+	}
+}
+
+func TestLinkMeetingSeriesIgnoresDifferentGroups(t *testing.T) {
+	ctx := context.Background()
+	store := meetingTestStore(t)
+
+	imran := addNode(t, store, graph.NodePerson, "Imran", nil)
+	jeremiah := addNode(t, store, graph.NodePerson, "Jeremiah", nil)
+	mona := addNode(t, store, graph.NodePerson, "Mona", nil)
+
+	base := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	addMeetingWith(t, store, "1:1 with Jeremiah", base, imran, jeremiah)
+	other := addMeetingWith(t, store, "1:1 with Mona", base.AddDate(0, 0, 1), imran, mona)
+
+	l := NewLinker(store, nil, nil, false)
+	if _, err := l.linkMeetingSeries(ctx); err != nil {
+		t.Fatalf("link series: %v", err)
+	}
+	// Different people means a different standing meeting.
+	if got := followsUpTarget(t, store, other.ID); got != "" {
+		t.Errorf("unrelated meetings were threaded together: %q", got)
+	}
+}
+
+func TestLinkMeetingSeriesRequiresTwoParticipants(t *testing.T) {
+	ctx := context.Background()
+	store := meetingTestStore(t)
+
+	imran := addNode(t, store, graph.NodePerson, "Imran", nil)
+	base := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+
+	// Solo recordings share exactly one participant. Threading on that would
+	// chain together every recording their owner ever made.
+	addMeetingWith(t, store, "note to self 1", base, imran)
+	second := addMeetingWith(t, store, "note to self 2", base.AddDate(0, 0, 1), imran)
+
+	l := NewLinker(store, nil, nil, false)
+	n, err := l.linkMeetingSeries(ctx)
+	if err != nil {
+		t.Fatalf("link series: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("linked %d, want 0 for single-participant recordings", n)
+	}
+	if got := followsUpTarget(t, store, second.ID); got != "" {
+		t.Errorf("solo recordings were threaded: %q", got)
+	}
+}
+
+func TestLinkMeetingSeriesBreaksOnLongGaps(t *testing.T) {
+	ctx := context.Background()
+	store := meetingTestStore(t)
+
+	imran := addNode(t, store, graph.NodePerson, "Imran", nil)
+	jeremiah := addNode(t, store, graph.NodePerson, "Jeremiah", nil)
+
+	base := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	addMeetingWith(t, store, "old 1:1", base, imran, jeremiah)
+	// Revived six months later: a different thread, not a continuation.
+	revived := addMeetingWith(t, store, "revived 1:1", base.AddDate(0, 6, 0), imran, jeremiah)
+
+	l := NewLinker(store, nil, nil, false)
+	if _, err := l.linkMeetingSeries(ctx); err != nil {
+		t.Fatalf("link series: %v", err)
+	}
+	if got := followsUpTarget(t, store, revived.ID); got != "" {
+		t.Errorf("series was threaded across a six-month gap: %q", got)
 	}
 }

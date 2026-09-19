@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
 )
@@ -280,6 +281,90 @@ func (l *Linker) linkMeetingAttendance(ctx context.Context) (int, error) {
 			if err := l.store.AddEdge(ctx, edge); err != nil {
 				if l.verbose {
 					l.log("  Warning: add attendance edge: %v", err)
+				}
+				continue
+			}
+			linked++
+		}
+	}
+	return linked, nil
+}
+
+// minSeriesParticipants is how many identified people two meetings must share
+// before they count as the same recurring meeting. Two is the floor that makes
+// a one-to-one a series; one would chain together every recording its owner
+// ever made.
+const minSeriesParticipants = 2
+
+// maxSeriesGap is the longest silence a series survives. A standing meeting
+// that has not happened for a quarter is not the same thread as one revived
+// later, and linking across that gap invents continuity that was not there.
+const maxSeriesGap = 60 * 24 * time.Hour
+
+// linkMeetingSeries connects each recurring meeting to the one before it.
+//
+// Standing meetings are where most decisions actually get made, and the useful
+// question about them is rarely about a single instance: it is "what did we
+// decide last time?" or "how long has this been dragging on?". Those need the
+// instances threaded together, which nothing else in the graph does — each
+// recording arrives independently, with a placeholder title, and nothing
+// marking it as the same meeting as last week's.
+//
+// The thread is inferred from who was in the room. Titles come from a model
+// and vary between instances of the same meeting, while the set of people
+// recurs reliably. Matching on the participant set is therefore both more
+// stable and cheaper than comparing titles, and needs no model at all.
+func (l *Linker) linkMeetingSeries(ctx context.Context) (int, error) {
+	meetings, err := l.store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeMeeting})
+	if err != nil {
+		return 0, err
+	}
+
+	type instance struct {
+		node *graph.Node
+		when time.Time
+	}
+	series := make(map[string][]instance)
+
+	for _, m := range meetings {
+		people, err := l.store.GetNeighbors(ctx, m.ID, graph.EdgeAttended, graph.Incoming)
+		if err != nil || len(people) < minSeriesParticipants {
+			continue
+		}
+		ids := make([]string, 0, len(people))
+		for _, p := range people {
+			ids = append(ids, p.ID)
+		}
+		sort.Strings(ids)
+		key := strings.Join(ids, "|")
+		series[key] = append(series[key], instance{node: m, when: m.UpdatedAt})
+	}
+
+	linked := 0
+	for _, instances := range series {
+		if len(instances) < 2 {
+			continue
+		}
+		sort.Slice(instances, func(i, j int) bool { return instances[i].when.Before(instances[j].when) })
+
+		for i := 1; i < len(instances); i++ {
+			prev, cur := instances[i-1], instances[i]
+			if cur.when.Sub(prev.when) > maxSeriesGap {
+				continue
+			}
+			edge := &graph.Edge{
+				ID:       graph.NewNodeID("edge", cur.node.ID, prev.node.ID+":"+string(graph.EdgeFollowsUp)),
+				Type:     graph.EdgeFollowsUp,
+				SourceID: cur.node.ID,
+				TargetID: prev.node.ID,
+				Properties: map[string]string{
+					"gap_days":    strconv.Itoa(int(cur.when.Sub(prev.when).Hours() / 24)),
+					"series_size": strconv.Itoa(len(instances)),
+				},
+			}
+			if err := l.store.AddEdge(ctx, edge); err != nil {
+				if l.verbose {
+					l.log("  Warning: add meeting series edge: %v", err)
 				}
 				continue
 			}

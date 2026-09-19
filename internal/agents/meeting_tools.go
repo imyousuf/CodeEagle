@@ -189,7 +189,7 @@ type queryMeetingDetailTool struct {
 func (t *queryMeetingDetailTool) Name() string { return "query_meeting_detail" }
 
 func (t *queryMeetingDetailTool) Description() string {
-	return "Get the full record of one meeting: participants with speaking time, topics with per-topic summaries and timestamps, decisions with their supporting quotes, and follow-ups with owners. Takes a Meeting ID from query_meetings."
+	return "Get the full record of one meeting: participants with speaking time, topics with per-topic summaries and timestamps, decisions with their supporting quotes, follow-ups with owners, and links to the previous and next meeting with the same people. Takes a Meeting ID from query_meetings."
 }
 
 func (t *queryMeetingDetailTool) Parameters() map[string]any {
@@ -317,6 +317,18 @@ func (t *queryMeetingDetailTool) Execute(ctx context.Context, args map[string]an
 
 	if mentions := m.Properties["mentions"]; mentions != "" {
 		fmt.Fprintf(&b, "Systems discussed: %s\n", mentions)
+	}
+
+	// A standing meeting is rarely interesting on its own. Pointing at the
+	// previous instance lets an agent follow a thread backwards instead of
+	// treating each recording as unrelated.
+	if prev, err := t.store.GetNeighbors(ctx, m.ID, graph.EdgeFollowsUp, graph.Outgoing); err == nil && len(prev) > 0 {
+		fmt.Fprintf(&b, "\nPrevious meeting with these people: %s on %s (ID: %s)\n",
+			prev[0].Name, prev[0].UpdatedAt.Format("2006-01-02"), prev[0].QualifiedName)
+	}
+	if next, err := t.store.GetNeighbors(ctx, m.ID, graph.EdgeFollowsUp, graph.Incoming); err == nil && len(next) > 0 {
+		fmt.Fprintf(&b, "Next meeting with these people: %s on %s (ID: %s)\n",
+			next[0].Name, next[0].UpdatedAt.Format("2006-01-02"), next[0].QualifiedName)
 	}
 	return b.String(), true
 }

@@ -202,7 +202,7 @@ func printRunReport(out io.Writer, r *transcript.RunReport) {
 // to link to.
 func linkMeetingsToCode(ctx context.Context, out io.Writer, store graph.Store) {
 	lnk := linker.NewLinker(store, nil, nil, false)
-	phases, _ := lnk.PhasesByName("meetings", "meeting_attendance")
+	phases, _ := lnk.PhasesByName("meetings", "meeting_attendance", "meeting_series")
 	if len(phases) == 0 {
 		return
 	}
@@ -539,12 +539,26 @@ func newMeetingsShowCmd() *cobra.Command {
 				if mentions := m.Properties["mentions"]; mentions != "" {
 					fmt.Fprintf(out, "Mentioned: %s\n", mentions)
 				}
+				showSeriesLinks(ctx, out, store, m)
 				return nil
 			})
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON")
 	return cmd
+}
+
+// showSeriesLinks points at the neighbouring instances of a standing meeting,
+// so a reader can follow the thread rather than treat each one as unrelated.
+func showSeriesLinks(ctx context.Context, out io.Writer, store graph.Store, m *graph.Node) {
+	if prev, err := store.GetNeighbors(ctx, m.ID, graph.EdgeFollowsUp, graph.Outgoing); err == nil && len(prev) > 0 {
+		fmt.Fprintf(out, "\nPrevious with these people: %s (%s)\n",
+			truncateText(prev[0].Name, 60), prev[0].QualifiedName)
+	}
+	if next, err := store.GetNeighbors(ctx, m.ID, graph.EdgeFollowsUp, graph.Incoming); err == nil && len(next) > 0 {
+		fmt.Fprintf(out, "Next with these people:     %s (%s)\n",
+			truncateText(next[0].Name, 60), next[0].QualifiedName)
+	}
 }
 
 func showParticipants(ctx context.Context, store graph.Store, out io.Writer, m *graph.Node) error {

@@ -1247,7 +1247,7 @@ func TestPhasesCount(t *testing.T) {
 	want := []string{
 		"services", "endpoints", "api_calls", "dependencies", "imports",
 		"implements", "tests", "calls", "documents", "meetings",
-		"meeting_attendance", "duplicates", "symlinks",
+		"meeting_attendance", "meeting_series", "duplicates", "symlinks",
 	}
 	allPhases := linker.Phases()
 	if len(allPhases) != len(want) {
