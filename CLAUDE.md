@@ -119,6 +119,7 @@ codeeagle faces suggest                # Auto-suggest face assignments
 codeeagle faces person [...]           # Person CRUD (add, list, edit, delete)
 
 codeeagle meetings sync [--dry-run] [--limit N] [--force]   # Index transcripts
+codeeagle meetings watch [--interval D] [--settle D]       # Index new recordings live
 codeeagle meetings list [--person P] [--since DATE]        # List meetings
 codeeagle meetings show <id>            # Participants, topics, decisions, follow-ups
 codeeagle meetings people               # People, speaking time, follow-up counts

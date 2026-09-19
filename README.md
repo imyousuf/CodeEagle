@@ -141,6 +141,7 @@ codeeagle meetings sync                    # Enrich transcripts and index them
 codeeagle meetings sync --dry-run          # Report scope and token cost, call no model
 codeeagle meetings sync --limit 20         # Process a subset
 codeeagle meetings sync --force            # Re-enrich already-indexed recordings
+codeeagle meetings watch                   # Index new recordings as they appear
 
 codeeagle meetings list                    # List indexed meetings
 codeeagle meetings list --person Kevin     # Meetings a person attended
@@ -156,7 +157,10 @@ codeeagle meetings label "Person 3" Kevin --meeting <id>   # Assign one by hand
 ```
 
 Recordings already indexed and unchanged are skipped on a content hash, so
-re-running after a few new meetings costs almost nothing.
+re-running after a few new meetings costs almost nothing. `meetings watch`
+sweeps on an interval for the same reason — an unchanged recording costs a file
+read and no model call — and leaves a transcript alone until it has been idle
+for a moment, so a meeting still being recorded is not indexed half-complete.
 
 #### How speakers are identified
 
