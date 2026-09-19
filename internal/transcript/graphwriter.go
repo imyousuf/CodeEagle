@@ -19,6 +19,7 @@ import (
 type Writer struct {
 	store    graph.Store
 	people   *PersonRegistry
+	topics   *TopicRegistry
 	opts     WriterOptions
 	ensureOn DateLinker
 }
@@ -75,6 +76,26 @@ func NewWriter(store graph.Store, people *PersonRegistry, opts WriterOptions) *W
 		opts.MinConfidence = defaultMinConfidence
 	}
 	return &Writer{store: store, people: people, opts: opts}
+}
+
+// WithTopics supplies a shared topic registry. A batch passes one so that the
+// vocabulary accumulated across meetings is available to all of them; left
+// unset, the writer loads its own on first use.
+func (w *Writer) WithTopics(tr *TopicRegistry) *Writer {
+	w.topics = tr
+	return w
+}
+
+// topicRegistry returns the registry, loading it on first use.
+func (w *Writer) topicRegistry(ctx context.Context) (*TopicRegistry, error) {
+	if w.topics == nil {
+		tr, err := LoadTopicRegistry(ctx, w.store)
+		if err != nil {
+			return nil, err
+		}
+		w.topics = tr
+	}
+	return w.topics, nil
 }
 
 // WithDateLinker attaches the temporal hierarchy to written meetings, so a
@@ -299,24 +320,24 @@ func (w *Writer) writeAnalysis(ctx context.Context, res *Result, meeting *graph.
 	// action items link to the same people who attended.
 	attendees := w.attendeeIndex(ctx, res)
 
+	topics, err := w.topicRegistry(ctx)
+	if err != nil {
+		return st, err
+	}
+
 	for _, topic := range a.Topics {
 		name := strings.TrimSpace(topic.Name)
 		if name == "" {
 			continue
 		}
 
-		// Topic nodes are global and keyed on name alone, matching how
-		// document topics are stored. Two meetings about authentication
-		// therefore hang off one topic, which is what makes the graph
-		// answerable across meetings.
-		topicNode := &graph.Node{
-			ID:            graph.NewNodeID(string(graph.NodeTopic), "", name),
-			Type:          graph.NodeTopic,
-			Name:          name,
-			QualifiedName: name,
-		}
-		if err := w.store.AddNode(ctx, topicNode); err != nil {
-			return st, fmt.Errorf("add topic %q: %w", name, err)
+		// The subject is resolved through the registry rather than minted per
+		// wording. Four meetings that each phrase "MCP authentication"
+		// differently must hang off one topic, or HasTopic indexes nothing.
+		topicNode, err := topics.Resolve(ctx, name)
+		if err != nil {
+			// An unusable label costs this topic, not the meeting.
+			continue
 		}
 		st.Topics++
 
@@ -325,8 +346,19 @@ func (w *Writer) writeAnalysis(ctx context.Context, res *Result, meeting *graph.
 		}
 		st.Edges++
 
+		// Place the subject under the concept the model named, so the
+		// hierarchy grows as meetings are indexed rather than only when it is
+		// rebuilt in bulk.
+		if edges, err := w.linkTopicParent(ctx, topics, topicNode, topic.Parent); err != nil {
+			return st, err
+		} else {
+			st.Edges += edges
+		}
+
 		// The segment holds what *this* meeting said about the topic, keeping
 		// the shared topic node free of meeting-specific text.
+		// The segment keeps the wording this meeting used, so collapsing the
+		// subject never loses how it was actually described here.
 		segment := &graph.Node{
 			ID:            graph.NewNodeID(string(graph.NodeTopicSegment), s.Path, s.ID+":"+name),
 			Type:          graph.NodeTopicSegment,
@@ -409,7 +441,7 @@ func (w *Writer) writeAnalysis(ctx context.Context, res *Result, meeting *graph.
 				st.Edges++
 			}
 		}
-		if id, ok := w.topicNodeID(a, d.Topic); ok {
+		if id, ok := w.topicNodeID(ctx, a, d.Topic); ok {
 			if err := w.addEdge(ctx, graph.EdgeHasTopic, node.ID, id, nil); err != nil {
 				return st, err
 			}
@@ -468,7 +500,7 @@ func (w *Writer) writeAnalysis(ctx context.Context, res *Result, meeting *graph.
 				st.Edges++
 			}
 		}
-		if id, ok := w.topicNodeID(a, ai.Topic); ok {
+		if id, ok := w.topicNodeID(ctx, a, ai.Topic); ok {
 			if err := w.addEdge(ctx, graph.EdgeHasTopic, node.ID, id, nil); err != nil {
 				return st, err
 			}
@@ -500,16 +532,27 @@ func (w *Writer) attendeeIndex(ctx context.Context, res *Result) map[string]stri
 }
 
 // topicNodeID resolves a topic name the model referenced to its node, but only
-// when that topic is one the analysis actually produced.
-func (w *Writer) topicNodeID(a *Analysis, name string) (string, bool) {
+// when that topic is one the analysis actually produced. Resolution goes
+// through the registry so the id matches the topic the segment was linked to,
+// rather than one derived from the raw wording.
+func (w *Writer) topicNodeID(ctx context.Context, a *Analysis, name string) (string, bool) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", false
 	}
+	topics, err := w.topicRegistry(ctx)
+	if err != nil {
+		return "", false
+	}
 	for _, t := range a.Topics {
-		if strings.EqualFold(strings.TrimSpace(t.Name), name) {
-			return graph.NewNodeID(string(graph.NodeTopic), "", strings.TrimSpace(t.Name)), true
+		if !strings.EqualFold(strings.TrimSpace(t.Name), name) {
+			continue
 		}
+		node, err := topics.Resolve(ctx, t.Name)
+		if err != nil {
+			return "", false
+		}
+		return node.ID, true
 	}
 	return "", false
 }
@@ -541,4 +584,60 @@ func SortedTopics(a *Analysis) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// linkTopicParent places a subject under the broader concept a meeting named.
+//
+// The parent is resolved through the same registry as subjects, so a concept
+// named slightly differently by two meetings does not fork into two branches.
+func (w *Writer) linkTopicParent(ctx context.Context, topics *TopicRegistry, child *graph.Node, parent string) (int, error) {
+	name := CleanTopic(parent)
+	if name == "" || SameTopic(name, child.Name) {
+		return 0, nil
+	}
+
+	// A subject already placed keeps its parent: re-parenting on every mention
+	// would have the last meeting to run decide the shape of the tree.
+	existing, err := w.store.GetNeighbors(ctx, child.ID, graph.EdgeContains, graph.Incoming)
+	if err == nil {
+		for _, p := range existing {
+			if p.Type == graph.NodeTopic {
+				return 0, nil
+			}
+		}
+	}
+
+	parentNode, err := topics.Resolve(ctx, name)
+	if err != nil {
+		return 0, nil
+	}
+	if parentNode.ID == child.ID {
+		return 0, nil
+	}
+
+	if parentNode.Properties == nil {
+		parentNode.Properties = make(map[string]string)
+	}
+	if parentNode.Properties[PropTopicLevel] != LevelTheme {
+		parentNode.Properties[PropTopicLevel] = LevelTheme
+		parentNode.Properties[PropTopicDepth] = "1"
+		if err := w.store.UpdateNode(ctx, parentNode); err != nil {
+			return 0, fmt.Errorf("mark concept %q: %w", name, err)
+		}
+	}
+	if child.Properties == nil {
+		child.Properties = make(map[string]string)
+	}
+	if child.Properties[PropTopicLevel] == "" {
+		child.Properties[PropTopicLevel] = LevelSubject
+		child.Properties[PropTopicDepth] = "0"
+		if err := w.store.UpdateNode(ctx, child); err != nil {
+			return 0, fmt.Errorf("mark subject %q: %w", child.Name, err)
+		}
+	}
+
+	if err := w.addEdge(ctx, graph.EdgeContains, parentNode.ID, child.ID, nil); err != nil {
+		return 0, err
+	}
+	return 1, nil
 }

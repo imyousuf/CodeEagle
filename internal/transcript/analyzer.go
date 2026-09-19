@@ -39,6 +39,14 @@ type Options struct {
 	// recognized in one meeting is a known name for the rest of the run. It
 	// may be nil, and is called once per meeting.
 	KnownPeople func() []string
+	// KnownTopics supplies the topic labels already in use, so meetings about
+	// the same subject settle on one label instead of each inventing its own.
+	// It may be nil, and is called once per meeting.
+	KnownTopics func() []string
+	// TopicTaxonomy renders the hierarchy topics are organized into, so a
+	// meeting can place a new subject under an existing concept rather than
+	// leaving it loose for a later rebuild to sort out. It may be nil.
+	TopicTaxonomy func() string
 	// MinConfidence is the bar for accepting an identification.
 	MinConfidence float64
 	// MaxTranscriptChars bounds how much transcript is sent in one request.
@@ -236,6 +244,22 @@ func (a *Analyzer) knownPeople() []string {
 	return out
 }
 
+// maxKnownTopics bounds the vocabulary offered back. Past a point the list
+// stops being a hint and becomes noise that crowds out the transcript.
+const maxKnownTopics = 80
+
+// knownTopics returns the labels already in use, most-used first.
+func (a *Analyzer) knownTopics() []string {
+	if a.opts.KnownTopics == nil {
+		return nil
+	}
+	topics := a.opts.KnownTopics()
+	if len(topics) > maxKnownTopics {
+		topics = topics[:maxKnownTopics]
+	}
+	return topics
+}
+
 // identityPrompt assembles the speaker table, the deterministic evidence, and
 // the transcript into one request.
 func (a *Analyzer) identityPrompt(s *Session, unresolved []SpeakerEvidence, hints []Hint) string {
@@ -341,6 +365,21 @@ Ground everything in the transcript:
   that subject specifically, not a restatement of the meeting as a whole.
   Someone looking up "authentication" should learn what this meeting concluded
   about authentication.
+- A topic's NAME is the subject, not a description of this meeting. Write the
+  shortest label another meeting about the same thing would also choose: two to
+  four words, a noun phrase, no colons or lists. "MCP authentication", not
+  "Clarifying Opal MCP/OAuth security answers and token revocation". Everything
+  specific to this meeting belongs in the topic's summary, which is what that
+  field is for.
+- Reuse a label from the known topics list whenever it fits, even if you would
+  have phrased it differently. Shared labels are what make it possible to ask
+  which meetings covered a subject; a new label for an existing subject makes
+  that subject invisible.
+- Give each topic a parent: the broader concept it is a facet of, taken from
+  the taxonomy shown to you. "OAuth token lifetimes" sits under "OAuth", which
+  sits under "Authentication". If nothing in the taxonomy fits, name the parent
+  you would add — one concept, two to four words. Leave it empty only when the
+  topic genuinely has no broader subject.
 - A decision is a choice the group actually settled on, not a suggestion
   someone floated. If it was left open, it is not a decision.
 - An action item is something a specific person committed to doing. Assign it
@@ -371,6 +410,18 @@ func (a *Analyzer) Analyze(ctx context.Context, res *Result, usage *Usage) (*Ana
 	}
 	if people := res.Participants(a.opts.MinConfidence); len(people) > 0 {
 		fmt.Fprintf(&b, "IDENTIFIED PARTICIPANTS: %s\n", strings.Join(people, ", "))
+	}
+	if topics := a.knownTopics(); len(topics) > 0 {
+		fmt.Fprintf(&b, "\nKNOWN TOPICS (reuse these labels where they fit):\n  %s\n",
+			strings.Join(topics, "\n  "))
+	}
+	if a.opts.TopicTaxonomy != nil {
+		if tree := strings.TrimSpace(a.opts.TopicTaxonomy()); tree != "" {
+			b.WriteString("\nTOPIC TAXONOMY (place each topic under one of these concepts):\n")
+			for _, line := range strings.Split(tree, "\n") {
+				fmt.Fprintf(&b, "  %s\n", line)
+			}
+		}
 	}
 	b.WriteString("\nTimestamps below are mm:ss (or h:mm:ss) from the start of the meeting.\n")
 	b.WriteString("Use them for topic start and end times, expressed in seconds.\n\n")
@@ -432,7 +483,14 @@ func analysisSchema() *llm.JSONSchema {
 			"topics": map[string]any{
 				"type": "array",
 				"items": object(map[string]any{
-					"name":    map[string]any{"type": "string"},
+					"name": map[string]any{
+						"type":        "string",
+						"description": "the subject, as a reusable two-to-four word noun phrase; reuse a known topic label where one fits",
+					},
+					"parent": map[string]any{
+						"type":        "string",
+						"description": "the broader concept this is a facet of, from the taxonomy shown, or a new one; empty if it has no broader subject",
+					},
 					"summary": map[string]any{"type": "string", "description": "what this meeting established about this topic specifically"},
 					"start_time": map[string]any{
 						"type":        "number",
@@ -441,7 +499,7 @@ func analysisSchema() *llm.JSONSchema {
 					"end_time":     map[string]any{"type": "number"},
 					"participants": strs("names of people who spoke on this topic"),
 					"keywords":     strs("short search terms for this topic"),
-				}, "name", "summary", "start_time", "end_time", "participants", "keywords"),
+				}, "name", "parent", "summary", "start_time", "end_time", "participants", "keywords"),
 			},
 			"decisions": map[string]any{
 				"type": "array",

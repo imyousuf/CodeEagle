@@ -42,6 +42,11 @@ const (
 // Topic is a subject the meeting covered, with the span of time spent on it.
 type Topic struct {
 	Name string `json:"name"`
+	// Parent is the broader concept this subject belongs under, named by the
+	// model from the taxonomy it was shown. Placing a topic as it is created
+	// is what lets the hierarchy grow with the corpus instead of having to be
+	// rebuilt from scratch each time.
+	Parent string `json:"parent"`
 	// Summary describes the meeting from this topic's point of view: what was
 	// said about this subject specifically, not the meeting as a whole.
 	Summary      string   `json:"summary"`

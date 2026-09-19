@@ -47,6 +47,7 @@ was said, by whom, and what it committed anyone to.`,
 		newMeetingsIdentifyCmd(),
 		newMeetingsLabelCmd(),
 		newMeetingsTopicsCmd(),
+		newMeetingsTaxonomyCmd(),
 		newMeetingsActionsCmd(),
 	)
 	return cmd
@@ -304,13 +305,23 @@ anything recorded while it was not running. Press Ctrl-C to stop.`,
 
 // --- shared pipeline ---
 
+// maxOfferedTopics bounds the vocabulary shown to the model per meeting.
+const maxOfferedTopics = 80
+
+// maxTaxonomyLines bounds the hierarchy shown alongside it. The tree is what
+// the model places new subjects into, so it earns more room than the flat
+// list, but not so much that it crowds out the transcript.
+const maxTaxonomyLines = 150
+
 // meetingPipeline bundles everything needed to index transcripts.
 type meetingPipeline struct {
-	client  llm.Client
-	store   *embedded.BranchStore
-	branch  string
-	indexer *transcript.Indexer
-	people  *transcript.PersonRegistry
+	client   llm.Client
+	store    *embedded.BranchStore
+	branch   string
+	indexer  *transcript.Indexer
+	analyzer *transcript.Analyzer
+	people   *transcript.PersonRegistry
+	topics   *transcript.TopicRegistry
 }
 
 func (p *meetingPipeline) close() {
@@ -376,6 +387,12 @@ func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*mee
 		_ = store.Close()
 		return nil, fmt.Errorf("load people: %w", err)
 	}
+	topics, err := transcript.LoadTopicRegistry(ctx, store)
+	if err != nil {
+		_ = client.Close()
+		_ = store.Close()
+		return nil, fmt.Errorf("load topics: %w", err)
+	}
 
 	analyzer := transcript.NewAnalyzer(client, transcript.Options{
 		Owner:         tc.Owner,
@@ -384,13 +401,25 @@ func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*mee
 		ExcludeNames:  tc.ExcludeNames,
 		MinConfidence: tc.MinConfidence,
 		// People found earlier in the run become known names for the
-		// meetings analysed after them.
+		// meetings analysed after them, and topics likewise become the
+		// vocabulary later meetings are asked to reuse.
 		KnownPeople: people.Names,
+		KnownTopics: func() []string { return topics.Vocabulary(maxOfferedTopics) },
+		// Showing the hierarchy, not just a list of labels, is what lets a
+		// meeting place a new subject under an existing concept instead of
+		// leaving it loose for a later rebuild to sort out.
+		TopicTaxonomy: func() string {
+			tree, err := transcript.RenderTaxonomy(ctx, store, maxTaxonomyLines)
+			if err != nil {
+				return ""
+			}
+			return tree
+		},
 	})
 	writer := transcript.NewWriter(store, people, transcript.WriterOptions{
 		MinConfidence: tc.MinConfidence,
 		Owner:         tc.Owner,
-	}).WithDateLinker(meetingDateLinker)
+	}).WithDateLinker(meetingDateLinker).WithTopics(topics)
 
 	out := cmd.OutOrStdout()
 	indexer := transcript.NewIndexer(store, analyzer, writer, transcript.IndexOptions{
@@ -404,11 +433,13 @@ func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*mee
 	})
 
 	return &meetingPipeline{
-		client:  client,
-		store:   store,
-		branch:  branch,
-		indexer: indexer,
-		people:  people,
+		client:   client,
+		store:    store,
+		branch:   branch,
+		indexer:  indexer,
+		analyzer: analyzer,
+		people:   people,
+		topics:   topics,
 	}, nil
 }
 
@@ -958,13 +989,19 @@ func meetingSuffix(id string) string {
 // --- topics ---
 
 func newMeetingsTopicsCmd() *cobra.Command {
-	var limit int
+	var (
+		limit  int
+		themes bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "topics",
 		Short: "List topics discussed across meetings",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withGraph(cmd, func(ctx context.Context, store graph.Store) error {
+				if themes {
+					return showTaxonomy(ctx, cmd.OutOrStdout(), store)
+				}
 				topics, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeTopic})
 				if err != nil {
 					return err
@@ -1019,7 +1056,143 @@ func newMeetingsTopicsCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 40, "maximum topics to show (0 for all)")
+	cmd.Flags().BoolVar(&themes, "themes", false, "show the induced theme hierarchy instead of flat topics")
 	return cmd
+}
+
+// --- taxonomy ---
+
+func newMeetingsTaxonomyCmd() *cobra.Command {
+	var show bool
+
+	cmd := &cobra.Command{
+		Use:   "taxonomy",
+		Short: "Group meeting topics into broader themes",
+		Long: `Induce a hierarchy over the topics meetings produced.
+
+Meetings name their subject in whatever words suited that conversation, so the
+topics a corpus produces are specific and numerous — several different labels
+usually describe facets of one larger subject, and each appears in only a
+meeting or two.
+
+Merging them into one another would be the obvious fix and the wrong one: fuse
+two genuinely different discussions and both are misrepresented; leave them
+apart and neither is findable. A hierarchy avoids the choice. The specific
+phrases stay exactly as they are, and each is placed under a broader theme that
+several of them share, so "which meetings covered authentication?" is answered
+by walking one level up.
+
+Themes are induced from the topics this corpus actually produced, not from a
+fixed ontology. Re-run as the corpus grows.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+			if show {
+				return withGraph(cmd, func(ctx context.Context, store graph.Store) error {
+					return showTaxonomy(ctx, out, store)
+				})
+			}
+
+			pipeline, err := buildMeetingPipeline(cmd, meetingPipelineOverrides{})
+			if err != nil {
+				return err
+			}
+			defer pipeline.close()
+
+			ctx := cmd.Context()
+			roots, err := transcript.TopicRoots(ctx, pipeline.store)
+			if err != nil {
+				return err
+			}
+			if len(roots) == 0 {
+				fmt.Fprintln(out, "No topics indexed yet. Run: codeeagle meetings sync")
+				return nil
+			}
+
+			fmt.Fprintf(out, "Organizing %d topics using %s\n\n", len(roots), pipeline.client.Model())
+			st, err := pipeline.analyzer.BuildTaxonomy(ctx, pipeline.store, func(format string, args ...any) {
+				fmt.Fprintf(out, format+"\n", args...)
+			})
+			if err != nil {
+				return fmt.Errorf("build taxonomy: %w", err)
+			}
+
+			fmt.Fprintf(out, "\n%d concepts across %d level(s); %d topics at the top.\n",
+				st.Themes, st.Levels, st.Roots)
+			fmt.Fprintf(out, "%d requests, %d in / %d out tokens.\n",
+				st.Usage.Requests, st.Usage.InputTokens, st.Usage.OutputTokens)
+
+			return showTaxonomy(ctx, out, pipeline.store)
+		},
+	}
+
+	cmd.Flags().BoolVar(&show, "show", false, "print the existing taxonomy without rebuilding it")
+	return cmd
+}
+
+// showTaxonomy prints the hierarchy as an indented tree.
+func showTaxonomy(ctx context.Context, out io.Writer, store graph.Store) error {
+	roots, err := transcript.TopicRoots(ctx, store)
+	if err != nil {
+		return err
+	}
+	if len(roots) == 0 {
+		fmt.Fprintln(out, "No topics indexed yet. Run: codeeagle meetings sync")
+		return nil
+	}
+
+	grouped := false
+	for _, r := range roots {
+		if transcript.TopicDepth(r.Node) > 0 {
+			grouped = true
+			break
+		}
+	}
+	if !grouped {
+		fmt.Fprintln(out, "No taxonomy yet. Run: codeeagle meetings taxonomy")
+		return nil
+	}
+
+	fmt.Fprintln(out)
+	for _, r := range roots {
+		if err := printTopicTree(ctx, out, store, r.Node, 0); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintln(out)
+	return nil
+}
+
+// maxTopicTreeDepth guards against a cycle, which a malformed grouping could
+// otherwise turn into an unbounded walk.
+const maxTopicTreeDepth = 6
+
+func printTopicTree(ctx context.Context, out io.Writer, store graph.Store, n *graph.Node, indent int) error {
+	if indent > maxTopicTreeDepth {
+		return nil
+	}
+	pad := strings.Repeat("  ", indent)
+
+	// Counts come from the graph, so a parent is never smaller than its children.
+	meetings := transcript.TopicMeetingCount(ctx, store, n)
+	if transcript.TopicDepth(n) > 0 {
+		fmt.Fprintf(out, "%s%s (%d)\n", pad, n.Name, meetings)
+		if d := n.Properties[graph.PropSummary]; d != "" && indent == 0 {
+			fmt.Fprintf(out, "%s  %s\n", pad, wrapText(d, 72-len(pad), pad+"  "))
+		}
+	} else {
+		fmt.Fprintf(out, "%s· %-*s %d\n", pad, 64-len(pad), truncateText(n.Name, 64-len(pad)), meetings)
+	}
+
+	children, err := transcript.TopicChildren(ctx, store, n.ID)
+	if err != nil {
+		return err
+	}
+	for _, c := range children {
+		if err := printTopicTree(ctx, out, store, c, indent+1); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // --- actions ---
