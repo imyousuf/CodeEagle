@@ -230,6 +230,10 @@ Design constraints that came out of measuring the real corpus:
   to share a first name.
 - **A file that is not a transcript is not a failure.** Scanning a folder of
   mixed downloads is normal; unrecognized files are counted and skipped.
+- **A transcript is never indexed as a document.** When transcripts are enabled,
+  `codeeagle sync` skips them so the meeting pipeline can extract speakers,
+  decisions and follow-ups; indexing both would represent one meeting twice and
+  keep only the prose from one of them.
 
 Enrichment runs as two passes: identity first, then content read with real
 names substituted in. The order matters — "Person 3 will update the schema" is
@@ -311,6 +315,8 @@ agents:
 transcripts:
   enabled: true
   sessions_dir: ~/.local/share/tomoe/sessions
+  sessions_dirs: [~/Downloads]  # merged with sessions_dir; searched recursively
+  scan_repositories: false      # also search the indexed repositories
   owner: "Your Name"          # microphone audio is always this person
   owner_aliases: ["Yourname"] # spellings the transcriber produces
   provider: baseten           # baseten | ollama | anthropic | vertex-ai

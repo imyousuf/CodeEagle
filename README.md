@@ -175,9 +175,32 @@ for a moment, so a meeting still being recorded is not indexed half-complete.
 | `.srt` | Zoom and most recorders | named, when the tool writes them |
 | `.docx` | Teams "Meeting Recording" transcript export | named |
 
-Discovery walks the configured directory, so a folder of loose downloads and a
-folder of per-session directories both work. Files that turn out to be
-something else are counted and skipped, not reported as failures.
+Discovery walks every configured directory, so a folder of loose downloads and
+a folder of per-session directories both work, nested to any depth. Files that
+turn out to be something else are counted and skipped, not reported as
+failures.
+
+Recordings accumulate in more than one place, so several directories can be
+searched:
+
+```yaml
+transcripts:
+  sessions_dir: ~/.local/share/tomoe/sessions   # one, as before
+  sessions_dirs:                                # or several; both are merged
+    - ~/Downloads
+    - /mnt/share/recordings
+  scan_repositories: true    # also look inside the indexed repositories
+```
+
+`--dir` does the same on the command line and repeats:
+`codeeagle meetings sync --dir ~/Downloads --dir ~/recordings`. A file reachable
+through two of them is indexed once.
+
+With transcript indexing configured, `codeeagle sync` leaves transcripts to this
+pipeline rather than indexing them as documents — otherwise a Teams transcript
+committed in a repository is stored as prose, with the speakers, decisions and
+follow-ups inside it never extracted, and the same meeting ends up represented
+twice.
 
 Where a transcript names its speakers, identification has nothing to work out
 and the model call is skipped entirely — it would cost money to produce a worse
