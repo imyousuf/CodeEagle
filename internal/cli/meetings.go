@@ -312,18 +312,10 @@ func meetingDateLinker(ctx context.Context, store graph.Store, t interface{ Unix
 
 // newTranscriptClient builds the LLM client used for enrichment.
 func newTranscriptClient(tc config.TranscriptsConfig) (llm.Client, error) {
-	apiKey, err := config.ResolveSecret(config.SecretSource{
-		Literal: tc.APIKey,
-		EnvVar:  tc.APIKeyEnv,
-		Command: tc.APIKeyCommand,
-	})
+	provider := tc.TranscriptProvider()
+	apiKey, err := config.ResolveSecret(tc.ProviderSecret())
 	if err != nil {
-		return nil, fmt.Errorf("resolve API key: %w", err)
-	}
-
-	provider := tc.Provider
-	if provider == "" {
-		provider = "baseten"
+		return nil, fmt.Errorf("resolve %s API key: %w", provider, err)
 	}
 	client, err := llm.NewClient(llm.Config{
 		Provider:        provider,

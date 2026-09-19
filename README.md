@@ -385,9 +385,12 @@ transcripts:
 
   provider: baseten               # baseten | ollama | anthropic | vertex-ai
   model: deepseek-ai/DeepSeek-V4.1-Flash
-  api_key_command: "keyring get baseten.co you@example.com"
-  # api_key_env: BASETEN_API_KEY  # or an environment variable
-  # api_key: ...                  # or a literal, though config files get committed
+  # Each credential is named for the service it belongs to, so several can
+  # sit here at once and changing `provider` above does not mean moving a key.
+  baseten_api_key: $(keyring get baseten.co you@example.com)
+  # anthropic_api_key: ${ANTHROPIC_API_KEY}
+  # openai_api_key: ${OPENAI_API_KEY}
+  # Vertex AI takes no key: run `gcloud auth application-default login`.
 
   reasoning_effort: low           # see the note below
   max_tokens: 65536
@@ -441,6 +444,12 @@ jev_api_key: $(keyring get typesafe.ai you@example.com)  # a command's output
 So a wrapper can put the key in the environment, or the config can go to the
 system keyring itself. `$$` is a literal dollar, so a value that merely
 contains one is left alone.
+
+Credentials are named for the service they belong to — `baseten_api_key`,
+`anthropic_api_key`, `openai_api_key`, `jev_api_key` — so several can sit in
+one file and changing `provider` is a one-line edit rather than moving a key
+between settings. The older `api_key`, `api_key_env` and `api_key_command`
+still work for whichever provider is configured.
 
 A failing command is an error rather than an empty value — an empty credential
 surfaces much later as a confusing authentication failure. Neither the value

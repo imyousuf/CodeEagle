@@ -116,8 +116,9 @@ type TranscriptsConfig struct {
 	Model string `mapstructure:"model" yaml:"model,omitempty"`
 	// BaseURL overrides the provider endpoint.
 	BaseURL string `mapstructure:"base_url" yaml:"base_url,omitempty"`
-	// APIKey is a literal credential. Prefer APIKeyEnv or APIKeyCommand:
-	// config files get committed.
+	// APIKey is the credential for whichever provider is configured, used
+	// when no provider-named key matches it. Kept so configs written before
+	// the provider-named settings existed keep working.
 	APIKey string `mapstructure:"api_key" yaml:"api_key,omitempty"`
 	// APIKeyEnv names an environment variable holding the credential.
 	APIKeyEnv string `mapstructure:"api_key_env" yaml:"api_key_env,omitempty"`
@@ -125,6 +126,19 @@ type TranscriptsConfig struct {
 	// can live in the system keyring instead of on disk. For example:
 	// "keyring get baseten.co me@example.com".
 	APIKeyCommand string `mapstructure:"api_key_command" yaml:"api_key_command,omitempty"`
+	// BasetenAPIKey, AnthropicAPIKey and OpenAIAPIKey are credentials named
+	// after the service they belong to, so several can sit in one config and
+	// changing `provider` does not mean moving a key to a differently-named
+	// setting.
+	//
+	// The one matching `provider` is used. APIKey below is consulted only
+	// when the matching one is absent, which is what keeps older configs
+	// working. Vertex AI is not here because it authenticates with Google
+	// application default credentials rather than a key — see `gcloud auth
+	// application-default login` — and Ollama needs none at all.
+	BasetenAPIKey   string `mapstructure:"baseten_api_key" yaml:"baseten_api_key,omitempty"`
+	AnthropicAPIKey string `mapstructure:"anthropic_api_key" yaml:"anthropic_api_key,omitempty"`
+	OpenAIAPIKey    string `mapstructure:"openai_api_key" yaml:"openai_api_key,omitempty"`
 	// JevAPIKey enables adjudicating speaker identity with the TypeSafe Jev
 	// decision model instead of the language model.
 	//
@@ -586,8 +600,39 @@ func loadEnvFile(path string) {
 	}
 }
 
-// TranscriptDirs returns every directory to search for transcripts, with the
-// single and plural config keys merged and duplicates removed.
+// TranscriptProvider returns the configured provider, or the default.
+func (c *TranscriptsConfig) TranscriptProvider() string {
+	if p := strings.TrimSpace(c.Provider); p != "" {
+		return p
+	}
+	return "baseten"
+}
+
+// ProviderSecret returns where to find the credential for the configured
+// provider.
+//
+// A key named after its service is preferred, so switching provider is a
+// one-line change rather than a rewrite of whichever setting happened to hold
+// the old key, and several services can sit configured at once. The unnamed
+// `api_key` is the fallback, for configs written before that was possible.
+func (c *TranscriptsConfig) ProviderSecret() SecretSource {
+	named := map[string]string{
+		"baseten":   c.BasetenAPIKey,
+		"anthropic": c.AnthropicAPIKey,
+		"openai":    c.OpenAIAPIKey,
+	}
+	if key := strings.TrimSpace(named[c.TranscriptProvider()]); key != "" {
+		return SecretSource{Literal: key}
+	}
+	return SecretSource{
+		Literal: c.APIKey,
+		EnvVar:  c.APIKeyEnv,
+		Command: c.APIKeyCommand,
+	}
+}
+
+// TranscriptDirs returns every directory to search for transcripts, with
+// blanks and duplicates removed.
 func (c *Config) TranscriptDirs() []string {
 	var out []string
 	seen := make(map[string]bool)

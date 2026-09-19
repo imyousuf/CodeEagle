@@ -350,7 +350,7 @@ transcripts:
   owner_aliases: ["Yourname"] # spellings the transcriber produces
   provider: baseten           # baseten | ollama | anthropic | vertex-ai
   model: deepseek-ai/DeepSeek-V4.1-Flash
-  api_key_command: "keyring get baseten.co you@example.com"
+  baseten_api_key: $(keyring get baseten.co you@example.com)
   reasoning_effort: low       # low cuts cost without hurting identification
   max_tokens: 65536           # must be generous: reasoning is spent first
   min_confidence: 0.70
