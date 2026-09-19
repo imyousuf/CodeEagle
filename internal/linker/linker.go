@@ -53,6 +53,7 @@ func (l *Linker) Phases() []Phase {
 		{Name: "calls", Fn: l.linkCalls},
 		{Name: "documents", Fn: l.linkDocuments},
 		{Name: "meetings", Fn: l.linkMeetingMentions},
+		{Name: "meeting_attendance", Fn: l.linkMeetingAttendance},
 		{Name: "duplicates", Fn: l.linkDuplicates},
 		{Name: "symlinks", Fn: l.linkSymlinks},
 	}

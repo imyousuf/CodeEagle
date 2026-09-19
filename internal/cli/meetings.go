@@ -202,7 +202,7 @@ func printRunReport(out io.Writer, r *transcript.RunReport) {
 // to link to.
 func linkMeetingsToCode(ctx context.Context, out io.Writer, store graph.Store) {
 	lnk := linker.NewLinker(store, nil, nil, false)
-	phases, _ := lnk.PhasesByName("meetings")
+	phases, _ := lnk.PhasesByName("meetings", "meeting_attendance")
 	if len(phases) == 0 {
 		return
 	}

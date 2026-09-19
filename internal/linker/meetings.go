@@ -2,6 +2,8 @@ package linker
 
 import (
 	"context"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
@@ -210,4 +212,79 @@ func splitMentions(raw string) []string {
 		}
 	}
 	return out
+}
+
+// linkMeetingAttendance recomputes who attended each meeting, and for how long,
+// from the speakers already in the graph.
+//
+// Attendance is derived data: it follows from which speaker labels resolved to
+// which person. Deriving it in one pass rather than incrementally is what keeps
+// it correct when a person arrives through several labels — diarization splits
+// one voice routinely, and a hand assignment via `meetings label` adds another
+// label later. Writing an edge per label instead would have each overwrite the
+// last, crediting the person with only the final fragment of what they said.
+//
+// This needs no model and is safe to re-run.
+func (l *Linker) linkMeetingAttendance(ctx context.Context) (int, error) {
+	meetings, err := l.store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeMeeting})
+	if err != nil {
+		return 0, err
+	}
+
+	linked := 0
+	for _, m := range meetings {
+		children, err := l.store.GetNeighbors(ctx, m.ID, graph.EdgeContains, graph.Outgoing)
+		if err != nil {
+			continue
+		}
+
+		// Sum each person's speaking time across every label they were heard on.
+		type attendance struct {
+			seconds float64
+			labels  []string
+		}
+		byPerson := make(map[string]*attendance)
+
+		for _, c := range children {
+			if c.Type != graph.NodeSpeaker {
+				continue
+			}
+			people, err := l.store.GetNeighbors(ctx, c.ID, graph.EdgeIdentifiedAs, graph.Outgoing)
+			if err != nil || len(people) == 0 {
+				continue
+			}
+			secs, _ := strconv.ParseFloat(c.Properties[graph.PropSpeakingSeconds], 64)
+
+			person := people[0]
+			a, ok := byPerson[person.ID]
+			if !ok {
+				a = &attendance{}
+				byPerson[person.ID] = a
+			}
+			a.seconds += secs
+			a.labels = append(a.labels, c.Name)
+		}
+
+		for personID, a := range byPerson {
+			sort.Strings(a.labels)
+			edge := &graph.Edge{
+				ID:       graph.NewNodeID("edge", personID, m.ID+":"+string(graph.EdgeAttended)),
+				Type:     graph.EdgeAttended,
+				SourceID: personID,
+				TargetID: m.ID,
+				Properties: map[string]string{
+					graph.PropSpeakingSeconds: strconv.FormatFloat(a.seconds, 'f', 1, 64),
+					graph.PropSpeakerLabel:    strings.Join(a.labels, ", "),
+				},
+			}
+			if err := l.store.AddEdge(ctx, edge); err != nil {
+				if l.verbose {
+					l.log("  Warning: add attendance edge: %v", err)
+				}
+				continue
+			}
+			linked++
+		}
+	}
+	return linked, nil
 }

@@ -180,3 +180,104 @@ func TestNormalizeMention(t *testing.T) {
 		}
 	}
 }
+
+func TestLinkMeetingAttendanceSumsSplitLabels(t *testing.T) {
+	ctx := context.Background()
+	store := meetingTestStore(t)
+
+	meeting := addNode(t, store, graph.NodeMeeting, "Planning", nil)
+	person := addNode(t, store, graph.NodePerson, "Mona", nil)
+
+	// One person, heard on two labels — which is what diarization produces
+	// when a voice is split, and what a later hand assignment adds.
+	for _, sp := range []struct {
+		label string
+		secs  string
+	}{{"Person 1", "600.0"}, {"Person 7", "240.0"}} {
+		n := &graph.Node{
+			ID:            graph.NewNodeID(string(graph.NodeSpeaker), "/s/session.json", sp.label),
+			Type:          graph.NodeSpeaker,
+			Name:          sp.label,
+			QualifiedName: "sess:" + sp.label,
+			FilePath:      "/s/session.json",
+			Properties:    map[string]string{graph.PropSpeakingSeconds: sp.secs},
+		}
+		if err := store.AddNode(ctx, n); err != nil {
+			t.Fatalf("add speaker: %v", err)
+		}
+		addEdge(t, store, graph.EdgeContains, meeting.ID, n.ID)
+		addEdge(t, store, graph.EdgeIdentifiedAs, n.ID, person.ID)
+	}
+
+	l := NewLinker(store, nil, nil, false)
+	n, err := l.linkMeetingAttendance(ctx)
+	if err != nil {
+		t.Fatalf("link attendance: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("wrote %d attendance edges, want 1", n)
+	}
+
+	edges, err := store.GetEdges(ctx, person.ID, graph.EdgeAttended)
+	if err != nil {
+		t.Fatalf("get edges: %v", err)
+	}
+	var found *graph.Edge
+	for _, e := range edges {
+		if e.SourceID == person.ID && e.TargetID == meeting.ID {
+			found = e
+		}
+	}
+	if found == nil {
+		t.Fatal("no attendance edge written")
+	}
+	// Both labels must be credited, not just one.
+	if got := found.Properties[graph.PropSpeakingSeconds]; got != "840.0" {
+		t.Errorf("speaking seconds = %q, want 840.0 (600 + 240)", got)
+	}
+	if got := found.Properties[graph.PropSpeakerLabel]; got != "Person 1, Person 7" {
+		t.Errorf("labels = %q, want both", got)
+	}
+}
+
+func TestLinkMeetingAttendanceIgnoresUnidentifiedSpeakers(t *testing.T) {
+	ctx := context.Background()
+	store := meetingTestStore(t)
+
+	meeting := addNode(t, store, graph.NodeMeeting, "Standup", nil)
+	anon := &graph.Node{
+		ID:         graph.NewNodeID(string(graph.NodeSpeaker), "/s/session.json", "Person 4"),
+		Type:       graph.NodeSpeaker,
+		Name:       "Person 4",
+		FilePath:   "/s/session.json",
+		Properties: map[string]string{graph.PropSpeakingSeconds: "300.0"},
+	}
+	if err := store.AddNode(ctx, anon); err != nil {
+		t.Fatalf("add speaker: %v", err)
+	}
+	addEdge(t, store, graph.EdgeContains, meeting.ID, anon.ID)
+
+	l := NewLinker(store, nil, nil, false)
+	n, err := l.linkMeetingAttendance(ctx)
+	if err != nil {
+		t.Fatalf("link attendance: %v", err)
+	}
+	// An unidentified speaker attended, but there is no person to credit.
+	if n != 0 {
+		t.Errorf("wrote %d attendance edges, want 0", n)
+	}
+}
+
+// addEdge links two nodes for test setup.
+func addEdge(t *testing.T, store graph.Store, typ graph.EdgeType, from, to string) {
+	t.Helper()
+	e := &graph.Edge{
+		ID:       graph.NewNodeID("edge", from, to+":"+string(typ)),
+		Type:     typ,
+		SourceID: from,
+		TargetID: to,
+	}
+	if err := store.AddEdge(context.Background(), e); err != nil {
+		t.Fatalf("add edge %s: %v", typ, err)
+	}
+}
