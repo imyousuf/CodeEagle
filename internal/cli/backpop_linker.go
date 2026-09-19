@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -12,6 +13,7 @@ import (
 
 func newBackpopCmd() *cobra.Command {
 	var allPhases bool
+	var phaseNames []string
 
 	cmd := &cobra.Command{
 		Use:   "backpop",
@@ -41,7 +43,19 @@ Use --all to run all linker phases.`,
 			lnk := linker.NewLinker(store, nil, logFn, verbose)
 
 			var phases []linker.Phase
-			if allPhases {
+			if len(phaseNames) > 0 {
+				selected, unknown := lnk.PhasesByName(phaseNames...)
+				if len(unknown) > 0 {
+					var available []string
+					for _, p := range lnk.Phases() {
+						available = append(available, p.Name)
+					}
+					return fmt.Errorf("unknown phase(s) %s; available: %s",
+						strings.Join(unknown, ", "), strings.Join(available, ", "))
+				}
+				phases = selected
+				fmt.Fprintf(out, "Running linker phases: %s...\n", strings.Join(phaseNames, ", "))
+			} else if allPhases {
 				phases = lnk.Phases()
 				fmt.Fprintln(out, "Running all linker phases...")
 			} else {
@@ -68,6 +82,8 @@ Use --all to run all linker phases.`,
 	}
 
 	cmd.Flags().BoolVar(&allPhases, "all", false, "run all linker phases (not just new ones)")
+	cmd.Flags().StringSliceVar(&phaseNames, "phase", nil,
+		"run only the named phases (repeatable), e.g. --phase meetings")
 
 	return cmd
 }

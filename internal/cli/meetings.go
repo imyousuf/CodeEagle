@@ -18,6 +18,7 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/indexer"
+	"github.com/imyousuf/CodeEagle/internal/linker"
 	_ "github.com/imyousuf/CodeEagle/internal/llm" // register LLM providers
 	"github.com/imyousuf/CodeEagle/internal/transcript"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
@@ -148,6 +149,13 @@ meetings costs nothing for the ones already done.`,
 				return err
 			}
 			printRunReport(out, report)
+
+			// Connect what the meetings discussed to the indexed codebase.
+			// This needs the whole graph in view, so it runs once at the end
+			// rather than per meeting.
+			if report.Stats.Meetings > 0 {
+				linkMeetingsToCode(ctx, out, store)
+			}
 			return nil
 		},
 	}
@@ -226,6 +234,27 @@ func printRunReport(out io.Writer, r *transcript.RunReport) {
 			}
 			fmt.Fprintf(out, "  %s: %v\n", filepath.Base(filepath.Dir(f.Path)), f.Err)
 		}
+	}
+}
+
+// linkMeetingsToCode resolves mentioned systems to indexed code entities.
+//
+// A failure here is reported but not fatal: the meetings themselves are
+// already written, and a project with no code indexed yet simply has nothing
+// to link to.
+func linkMeetingsToCode(ctx context.Context, out io.Writer, store graph.Store) {
+	lnk := linker.NewLinker(store, nil, nil, false)
+	phases, _ := lnk.PhasesByName("meetings")
+	if len(phases) == 0 {
+		return
+	}
+	results, err := lnk.RunPhases(ctx, phases)
+	if err != nil {
+		fmt.Fprintf(out, "\nWarning: could not link meetings to code: %v\n", err)
+		return
+	}
+	if n := results["meetings"]; n > 0 {
+		fmt.Fprintf(out, "\nLinked %d meeting-to-code references.\n", n)
 	}
 }
 

@@ -6,6 +6,7 @@ package linker
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
@@ -66,6 +67,26 @@ func (l *Linker) NewPhases() []Phase {
 		{Name: "duplicates", Fn: l.linkDuplicates},
 		{Name: "symlinks", Fn: l.linkSymlinks},
 	}
+}
+
+// PhasesByName returns the named phases in the order Phases() defines them,
+// along with any names that matched nothing.
+func (l *Linker) PhasesByName(names ...string) (phases []Phase, unknown []string) {
+	wanted := make(map[string]bool, len(names))
+	for _, n := range names {
+		wanted[n] = true
+	}
+	for _, p := range l.Phases() {
+		if wanted[p.Name] {
+			phases = append(phases, p)
+			delete(wanted, p.Name)
+		}
+	}
+	for n := range wanted {
+		unknown = append(unknown, n)
+	}
+	sort.Strings(unknown)
+	return phases, unknown
 }
 
 // RunPhases executes the given phases in order and returns per-phase counts.

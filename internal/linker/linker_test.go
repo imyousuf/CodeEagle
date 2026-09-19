@@ -1682,3 +1682,30 @@ func containsSubstr(s, sub string) bool {
 	}
 	return false
 }
+
+func TestPhasesByName(t *testing.T) {
+	store := newTestStore(t)
+	linker := NewLinker(store, nil, nil, false)
+
+	phases, unknown := linker.PhasesByName("meetings", "documents")
+	if len(unknown) != 0 {
+		t.Errorf("unknown = %v, want none", unknown)
+	}
+	if len(phases) != 2 {
+		t.Fatalf("got %d phases, want 2", len(phases))
+	}
+	// Selection preserves the canonical order rather than the argument order.
+	if phases[0].Name != "documents" || phases[1].Name != "meetings" {
+		t.Errorf("phases = %s, %s; want documents, meetings", phases[0].Name, phases[1].Name)
+	}
+
+	// An unknown name is reported so the caller can list what is available.
+	phases, unknown = linker.PhasesByName("meetings", "nonsense")
+	if len(phases) != 1 || len(unknown) != 1 || unknown[0] != "nonsense" {
+		t.Errorf("phases=%d unknown=%v", len(phases), unknown)
+	}
+
+	if phases, unknown := linker.PhasesByName(); len(phases) != 0 || len(unknown) != 0 {
+		t.Errorf("empty selection returned phases=%d unknown=%v", len(phases), unknown)
+	}
+}
