@@ -51,13 +51,22 @@ const (
 )
 
 const (
-	// maxTaxonomyDepth bounds how tall the tree gets. Three levels — subject,
-	// concept, area — is as much structure as a corpus of meetings supports;
-	// beyond that the top becomes abstractions nobody searches by.
-	maxTaxonomyDepth = 3
-	// minTopLevel is the number of roots below which grouping stops. A handful
-	// of top-level areas is already browsable, and grouping them further only
-	// produces headings like "Engineering" that carry no information.
+	// maxTaxonomyDepth is the ceiling on how tall the tree may be built.
+	maxTaxonomyDepth = 4
+	// DefaultTaxonomyDepth is how many rounds of grouping are applied unless
+	// the caller asks for more.
+	//
+	// Two is the default because a third round measurably made things worse on
+	// a real corpus. Grouping 3,637 topics produced 50 concepts and then 35 —
+	// "Model routing", "Agent memory", "Tenant isolation", the terms people
+	// actually search by. Forcing a further pass over those 35 to reach a
+	// handful of top-level areas fused unrelated work: identity management
+	// landed under product development while deployment infrastructure landed
+	// under security. A model asked to squeeze a good taxonomy into too few
+	// headings will do it, and the result reads plausibly and misleads.
+	DefaultTaxonomyDepth = 2
+	// minTopLevel is the number of roots below which grouping stops early,
+	// because a list this short is already browsable.
 	minTopLevel = 8
 	// minThemeMembers is the smallest group worth creating. A group of one is
 	// a rename, not a grouping.
@@ -513,9 +522,15 @@ func topicWeight(n *graph.Node) int {
 
 // BuildTaxonomy groups topics, then groups the groups, until the top is small
 // enough to browse or no further grouping is possible.
-func (a *Analyzer) BuildTaxonomy(ctx context.Context, store graph.Store, log func(string, ...any)) (TaxonomyStats, error) {
+func (a *Analyzer) BuildTaxonomy(ctx context.Context, store graph.Store, maxDepth int, log func(string, ...any)) (TaxonomyStats, error) {
 	if log == nil {
 		log = func(string, ...any) {}
+	}
+	if maxDepth <= 0 {
+		maxDepth = DefaultTaxonomyDepth
+	}
+	if maxDepth > maxTaxonomyDepth {
+		maxDepth = maxTaxonomyDepth
 	}
 	st := TaxonomyStats{ThemesByDepth: map[int]int{}}
 
@@ -525,7 +540,7 @@ func (a *Analyzer) BuildTaxonomy(ctx context.Context, store graph.Store, log fun
 	}
 	st.Subjects = len(subjects)
 
-	for depth := 1; depth <= maxTaxonomyDepth; depth++ {
+	for depth := 1; depth <= maxDepth; depth++ {
 		roots, err := TopicRoots(ctx, store)
 		if err != nil {
 			return st, err

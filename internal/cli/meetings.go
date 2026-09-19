@@ -1125,6 +1125,7 @@ func newMeetingsTaxonomyCmd() *cobra.Command {
 	var (
 		show    bool
 		rebuild bool
+		depth   int
 	)
 
 	cmd := &cobra.Command{
@@ -1182,7 +1183,7 @@ fixed ontology. Re-run as the corpus grows.`,
 			}
 
 			fmt.Fprintf(out, "Organizing %d topics using %s\n\n", len(roots), pipeline.client.Model())
-			st, err := pipeline.analyzer.BuildTaxonomy(ctx, pipeline.store, func(format string, args ...any) {
+			st, err := pipeline.analyzer.BuildTaxonomy(ctx, pipeline.store, depth, func(format string, args ...any) {
 				fmt.Fprintf(out, format+"\n", args...)
 			})
 			if err != nil {
@@ -1201,6 +1202,8 @@ fixed ontology. Re-run as the corpus grows.`,
 	cmd.Flags().BoolVar(&show, "show", false, "print the existing taxonomy without rebuilding it")
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false,
 		"discard the existing concepts and group from scratch, rather than extending")
+	cmd.Flags().IntVar(&depth, "depth", transcript.DefaultTaxonomyDepth,
+		"rounds of grouping to apply; a further round over already-good concepts tends to fuse unrelated work")
 	return cmd
 }
 
@@ -1251,8 +1254,9 @@ func printTopicTree(ctx context.Context, out io.Writer, store graph.Store, n *gr
 	meetings := transcript.TopicMeetingCount(ctx, store, n)
 	if transcript.TopicDepth(n) > 0 {
 		fmt.Fprintf(out, "%s%s (%d)\n", pad, n.Name, meetings)
+		// Prefixed so a description is never mistaken for a child node.
 		if d := n.Properties[graph.PropSummary]; d != "" && indent == 0 {
-			fmt.Fprintf(out, "%s  %s\n", pad, wrapText(d, 72-len(pad), pad+"  "))
+			fmt.Fprintf(out, "%s  — %s\n", pad, wrapText(d, 70-len(pad), pad+"    "))
 		}
 	} else {
 		fmt.Fprintf(out, "%s· %-*s %d\n", pad, 64-len(pad), truncateText(n.Name, 64-len(pad)), meetings)
