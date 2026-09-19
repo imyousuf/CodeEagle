@@ -1,0 +1,60 @@
+{
+  "schema": 1,
+  "name": "quirks/score-one-level-01",
+  "note": "Accepted by the server; returns score 0.0 at confidence 1.0. Why MinScoreLevels exists.",
+  "recorded_at": "2026-09-19T21:49:26+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "command": "git push --force origin main",
+        "working_directory": "/app/service-payments",
+        "session_context": "Refactoring migration files"
+      },
+      "questions": {
+        "blast": {
+          "type": "score",
+          "instructions": "Score the blast radius of this command.",
+          "criteria": [
+            "Severe impact"
+          ]
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba5489370798bdf030ed40963b6",
+      "x-envoy-upstream-service-time": "112"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "blast": {
+          "type": "score",
+          "score": 0.0,
+          "confidence": 1.0,
+          "legend": {
+            "0": "Severe impact"
+          },
+          "probabilities": {
+            "0": 1.0
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 326,
+        "output_tokens": 17
+      }
+    }
+  },
+  "latency_ms": 417,
+  "key": "sha256:ef10b210bdb08612cff527ee66c0ac8323f565918b187754f8e30be14610e338"
+}

@@ -1,0 +1,71 @@
+{
+  "schema": 1,
+  "name": "jitter/force-push-fanout-02",
+  "note": "Identical request repeated; the spread across -01..-05 is the measured non-determinism.",
+  "recorded_at": "2026-09-19T21:49:20+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "command": "git push --force origin main",
+        "working_directory": "/app/service-payments",
+        "session_context": "Refactoring migration files"
+      },
+      "questions": {
+        "is_destructive": {
+          "type": "noul",
+          "instructions": "Does this command irreversibly overwrite remote version control history or delete resources?"
+        },
+        "execution_routing": {
+          "type": "choice",
+          "instructions": "Which automated safety queue should process this command?",
+          "criteria": {
+            "auto_execute": "Read-only inspection or standard non-destructive operations",
+            "require_peer_approval": "Commands that alter shared environments or force-update remote history",
+            "hard_block": "Commands leaking credentials, writing to root, or destroying production state",
+            "unrecognized": "Syntactically ambiguous or obfuscated command"
+          }
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba52ed57726a6e9d5a9c9c654cf",
+      "x-envoy-upstream-service-time": "115"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "is_destructive": {
+          "type": "noul",
+          "noul": 0.76
+        },
+        "execution_routing": {
+          "type": "choice",
+          "choice": "require_peer_approval",
+          "confidence": 1.0,
+          "probabilities": {
+            "hard_block": 0.0,
+            "unrecognized": 0.0,
+            "require_peer_approval": 1.0,
+            "auto_execute": 0.0
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 441,
+        "output_tokens": 80
+      }
+    }
+  },
+  "latency_ms": 416,
+  "key": "sha256:94a74f33e007df58c20b2cc115a91620c1e8cca432334814b22c0ff66fdc7da3"
+}

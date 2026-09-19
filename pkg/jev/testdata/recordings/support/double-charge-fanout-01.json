@@ -1,0 +1,109 @@
+{
+  "schema": 1,
+  "name": "support/double-charge-fanout-01",
+  "note": "Billing noul near 0.95; the enterprise-plan noul is unanswerable from the state and should sit near 0.5.",
+  "recorded_at": "2026-09-19T21:49:25+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "subject": "Charged twice for September",
+        "message": "Hi, I just checked my card statement and there are two charges from you on 3 September, both for $49. I only have one subscription. Can you refund the second one? Order number is in my account. Thanks, Marta",
+        "channel": "email",
+        "customer_since": "2024-11"
+      },
+      "questions": {
+        "billing": {
+          "type": "noul",
+          "instructions": "Is this message about billing?"
+        },
+        "tone": {
+          "type": "choice",
+          "instructions": "What is the tone of this message?",
+          "criteria": {
+            "angry": "An upset or hostile message",
+            "calm": "A neutral or polite message",
+            "confused": "The customer does not understand what happened",
+            "urgent": "The customer needs a fast answer",
+            "other": "None of the above"
+          }
+        },
+        "urgency": {
+          "type": "score",
+          "instructions": "How urgent is this message?",
+          "criteria": [
+            "Can wait",
+            "Needs attention this week",
+            "Needs attention today",
+            "Needs attention now"
+          ]
+        },
+        "enterprise_plan": {
+          "type": "noul",
+          "instructions": "Is the customer on an enterprise plan?"
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba5459f7f8b8a4dd93a354e98f0",
+      "x-envoy-upstream-service-time": "56"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "billing": {
+          "type": "noul",
+          "noul": 0.99
+        },
+        "tone": {
+          "type": "choice",
+          "choice": "calm",
+          "confidence": 0.98,
+          "probabilities": {
+            "angry": 0.0,
+            "calm": 0.99,
+            "confused": 0.01,
+            "urgent": 0.0,
+            "other": 0.0
+          }
+        },
+        "urgency": {
+          "type": "score",
+          "score": 1.21,
+          "confidence": 0.75,
+          "legend": {
+            "0": "Can wait",
+            "1": "Needs attention this week",
+            "2": "Needs attention today",
+            "3": "Needs attention now"
+          },
+          "probabilities": {
+            "0": 0.02,
+            "1": 0.75,
+            "2": 0.23,
+            "3": 0.0
+          }
+        },
+        "enterprise_plan": {
+          "type": "noul",
+          "noul": 0.07
+        }
+      },
+      "usage": {
+        "input_tokens": 538,
+        "output_tokens": 104
+      }
+    }
+  },
+  "latency_ms": 353,
+  "key": "sha256:3d9f33ad3eec4d3292c70160e91a6fc06340d5fa00761f4b7dea5f47391fb2d7"
+}

@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "name": "errors/400-string-empty-question-name-01",
+  "note": "detail is a bare string.",
+  "recorded_at": "2026-09-19T21:49:30+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": null,
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "command": "git push --force origin main",
+        "working_directory": "/app/service-payments",
+        "session_context": "Refactoring migration files"
+      },
+      "questions": {
+        "": {
+          "type": "noul",
+          "instructions": "Is it destructive?"
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba556377787b82b0db02c5bf819",
+      "x-envoy-upstream-service-time": "7"
+    },
+    "body": {
+      "detail": "Question key cannot be empty."
+    }
+  },
+  "latency_ms": 285,
+  "key": "sha256:9b24ec9fea815d43f14da8f933082c880cde35909d9f47876fe5f713d842679e"
+}

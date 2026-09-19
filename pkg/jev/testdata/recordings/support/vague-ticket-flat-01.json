@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "name": "support/vague-ticket-flat-01",
+  "note": "Near-flat small choice, or a decisive 'unknown'.",
+  "recorded_at": "2026-09-19T21:49:26+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "subject": "not working",
+        "message": "the app doesnt work anymore since yesterday. please fix",
+        "channel": "chat"
+      },
+      "questions": {
+        "category": {
+          "type": "choice",
+          "instructions": "Which team should handle this ticket?",
+          "criteria": {
+            "billing": "Charges, invoices, refunds",
+            "login": "Passwords, sign-in, sessions",
+            "bug": "Something in the product is broken",
+            "performance": "Slowness or timeouts",
+            "feature_request": "Asking for something new",
+            "unknown": "Cannot tell from the message"
+          }
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba547027b4aa8b64d30481fcedd",
+      "x-envoy-upstream-service-time": "96"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "category": {
+          "type": "choice",
+          "choice": "bug",
+          "confidence": 0.99,
+          "probabilities": {
+            "bug": 0.99,
+            "unknown": 0.01,
+            "login": 0.0,
+            "feature_request": 0.0,
+            "billing": 0.0,
+            "performance": 0.0
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 417,
+        "output_tokens": 60
+      }
+    }
+  },
+  "latency_ms": 405,
+  "key": "sha256:9cdafa6cd632714a1ef300072bf12048de4f08b0369db3d74282113c2e6767d8"
+}

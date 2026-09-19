@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "name": "speaker-identity/meeting-ended-on-time-uncertain-01",
+  "note": "The transcript does not say; a calibrated answer sits near 0.5.",
+  "recorded_at": "2026-09-19T21:49:23+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "meeting": "Gateway sync",
+        "date": "2026-09-15 10:00",
+        "host": "The speaker labelled \"You\" is Nadia Rahman, who made the recording. No other speaker is Nadia Rahman.",
+        "known_colleagues": "Kevin Mitchell, Priya Nair, Omar Haddad, Tom Becker, Saki Ito, Lena Fischer, Marcus Ellis, Diego Alvarez, Hana Kobayashi, Rupak Sen, Ana Costa, Wei Zhang",
+        "names_mentioned": "Kevin, Priya, Tom, Omar",
+        "transcript": "You (00:00): Okay, I think we're recording. Let's get started, it's the gateway sync.\nPerson 1 (00:06): Hi all, Kevin here. I'm on the train so if I drop, that's why.\nYou (00:11): No problem. So the plan for today: status on the gateway migration, then the schema change for the sessions table, then whatever's left.\nPerson 1 (00:22): On the gateway, the routing layer is done. All the read endpoints go through it now. Writes are still on the old path because of the idempotency key thing we discussed last week.\nYou (00:36): Right. Is that blocked on us or on the platform team?\nPerson 1 (00:40): On us. I need to decide whether the key lives in the header or in the body, and I wanted a second opinion before I commit to it.\nYou (00:48): Priya, you did the same thing on the billing service. Can you take the schema migration and also look at Kevin's idempotency question?\nPerson 2 (00:57): Yeah, I can do both. For billing we put it in the header, Idempotency-Key, and the body was untouched. It worked fine with the retries.\nPerson 1 (01:08): That's what I was leaning toward. Okay, header it is.\nPerson 3 (01:11): Mm-hmm.\nYou (01:13): Good. Priya, when can the sessions migration land? We have the release on Thursday.\nPerson 2 (01:19): The migration itself is small, it's adding the expires_at column and a backfill. I'd say Wednesday, but the backfill needs to run in batches or it'll lock the table.\nPerson 4 (01:31): We had exactly that problem on the events table last quarter. Ten thousand rows per batch was fine, a hundred thousand was not.\nYou (01:40): Thanks, Tom. Let's use ten thousand then, Priya.\nPerson 2 (01:43): Will do.\nPerson 3 (01:44): Yeah.\nYou (01:46): Omar, what do you think about the timeline? You're the one who has to ship it.\nPerson 4 (01:52): Thursday is tight but doable if the migration is in by Wednesday morning. If it slips to the afternoon I'd rather push the release a day.\nYou (02:01): Fair. Let's say Wednesday morning is the hard cutoff.\nPerson 1 (02:05): One more thing on the gateway. The health check is returning 200 even when the upstream is down, because it only checks that the process is up. I'll fix it, but it's the kind of thing that'll bite us during the release if we forget.\nYou (02:18): Put it in the release checklist. Anything else?\nPerson 2 (02:21): Nope.\nPerson 3 (02:22): Mm-hmm, no.\nYou (02:24): Okay, thanks everyone. Kevin, enjoy the train.\nPerson 1 (02:27): Ha, thanks. Bye all.\n",
+        "candidate_evidence": {
+          "Person 1": "Kevin (strength 3.0) — this speaker introduced themselves by this name: \"Hi all, Kevin here.\"",
+          "Person 2": "Priya (strength 2.0) — addressed by this name, and answered in the turn that follows: \"Priya, you did the same thing on the billing service. Can you take the schema migration\"",
+          "Person 4": "Tom (strength 1.5) — thanked by this name, having just finished speaking: \"Thanks, Tom.\"; Omar (strength 2.0) — addressed by this name, and answered in the turn that follows: \"Omar, what do you think about the timeline?\""
+        },
+        "candidate_evidence_note": "Produced by a pattern matcher reading direct address, self-introduction, thanks and hand-offs, and resolved against the order the turns actually occurred in. Where a quote and the direction given for it fit that order, this is reliable. It misses people who are never addressed by name, and it errs in four ways worth rejecting: a product, model or company name read as a person; a voice from a recording playing in the room; a name said in negation or doubt; and a common word the transcriber capitalised. Judge the candidate on whether it names a participant in this meeting."
+      },
+      "questions": {
+        "on_time": {
+          "type": "noul",
+          "instructions": "Did the meeting end at its scheduled time?"
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba53b9f781d99cd6f48204043dd",
+      "x-envoy-upstream-service-time": "105"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "on_time": {
+          "type": "noul",
+          "noul": 0.35
+        }
+      },
+      "usage": {
+        "input_tokens": 1438,
+        "output_tokens": 21
+      }
+    }
+  },
+  "latency_ms": 395,
+  "key": "sha256:089904617f217686513a198a733011edfebeef9b673c6282e58619c9c5f8ab79"
+}

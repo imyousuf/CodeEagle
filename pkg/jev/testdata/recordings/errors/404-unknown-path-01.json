@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "name": "errors/404-unknown-path-01",
+  "note": "Routing miss; detail is a bare string.",
+  "recorded_at": "2026-09-19T21:49:32+00:00",
+  "api_version": "0.2.0",
+  "model_requested": null,
+  "model_answered": null,
+  "request": {
+    "method": "GET",
+    "path": "/v1/nope"
+  },
+  "response": {
+    "status": 404,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba55f977a25a180ace81aa99f74",
+      "x-envoy-upstream-service-time": "2"
+    },
+    "body": {
+      "detail": "Not Found"
+    }
+  },
+  "latency_ms": 306,
+  "key": "sha256:bdd3c32f016787e8cc0d941943dbf2b6f82a202eb0a05e1aefa8a310826d564a"
+}

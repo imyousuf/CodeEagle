@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "name": "errors/400-string-too-many-levels-01",
+  "note": "detail is a bare string; the upper rubric bound IS enforced server-side.",
+  "recorded_at": "2026-09-19T21:49:30+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": null,
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "command": "git push --force origin main",
+        "working_directory": "/app/service-payments",
+        "session_context": "Refactoring migration files"
+      },
+      "questions": {
+        "blast": {
+          "type": "score",
+          "instructions": "Blast radius?",
+          "criteria": [
+            "level 0",
+            "level 1",
+            "level 2",
+            "level 3",
+            "level 4",
+            "level 5",
+            "level 6",
+            "level 7",
+            "level 8",
+            "level 9",
+            "level 10"
+          ]
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba557687214bb7ce9d606d95023",
+      "x-envoy-upstream-service-time": "3"
+    },
+    "body": {
+      "detail": "Too many score levels. Must have at most 10 levels."
+    }
+  },
+  "latency_ms": 311,
+  "key": "sha256:b370106b881113d46ef5b04eee3891237571ce1e76e29db17d7da50bd3c658ff"
+}

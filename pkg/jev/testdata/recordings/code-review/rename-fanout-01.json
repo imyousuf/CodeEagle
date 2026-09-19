@@ -1,0 +1,120 @@
+{
+  "schema": 1,
+  "name": "code-review/rename-fanout-01",
+  "note": "Benign rename: noul near 0.05, score at the bottom of the rubric.",
+  "recorded_at": "2026-09-19T21:49:24+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "file_path": "internal/api/users.go",
+        "diff": "diff --git a/internal/api/users.go b/internal/api/users.go\nindex 3f1c2aa..1a2b3c4 100644\n--- a/internal/api/users.go\n+++ b/internal/api/users.go\n@@ -12,9 +12,9 @@ import (\n\n // handleGetUser returns one user by ID.\n func (s *Server) handleGetUser(w http.ResponseWriter, r *http.Request) {\n-\tusr, err := s.store.User(r.Context(), r.PathValue(\"id\"))\n+\tuser, err := s.store.User(r.Context(), r.PathValue(\"id\"))\n \tif err != nil {\n \t\thttp.Error(w, \"not found\", http.StatusNotFound)\n \t\treturn\n \t}\n-\twriteJSON(w, http.StatusOK, usr)\n+\twriteJSON(w, http.StatusOK, user)\n }\n",
+        "author": "d.alvarez",
+        "lines_modified": 4
+      },
+      "questions": {
+        "introduces_vulnerability": {
+          "type": "noul",
+          "instructions": "Does this diff introduce an injection, insecure deserialization, or unhandled-input vulnerability?"
+        },
+        "subsystem": {
+          "type": "choice",
+          "instructions": "Which subsystem does this diff primarily modify?",
+          "criteria": {
+            "database": "Schema migrations, SQL queries, ORM models, transaction handling",
+            "authentication": "Sessions, tokens, password handling, access control",
+            "api_handlers": "HTTP routing, request parsing, response encoding",
+            "frontend": "UI components, styling, client-side rendering",
+            "business_logic": "Domain rules, calculations, workflow orchestration",
+            "infrastructure": "Deployment, containers, CI pipelines, infrastructure as code",
+            "observability": "Logging, metrics, tracing, alerting",
+            "messaging": "Queues, event publishing, webhooks",
+            "storage": "Object storage, file handling, caching layers",
+            "testing": "Test code, fixtures, mocks",
+            "documentation": "READMEs, comments, API docs",
+            "build_tooling": "Makefiles, build scripts, dependency manifests",
+            "unclassified": "Does not fit any category above"
+          }
+        },
+        "review_complexity": {
+          "type": "score",
+          "instructions": "Rate the review effort this change needs.",
+          "criteria": [
+            "Trivial: a rename or comment change with no behavioural effect",
+            "Small: a local logic change covered by existing tests",
+            "Moderate: new behaviour that needs new tests and one reviewer familiar with the area",
+            "Large: touches a shared boundary such as a database or public API and needs cross-team review",
+            "Critical: changes security-sensitive or data-integrity code and needs a security review before merge"
+          ]
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba540ac7cbeb0610a15ee0588dc",
+      "x-envoy-upstream-service-time": "132"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "introduces_vulnerability": {
+          "type": "noul",
+          "noul": 0.03
+        },
+        "subsystem": {
+          "type": "choice",
+          "choice": "api_handlers",
+          "confidence": 0.98,
+          "probabilities": {
+            "observability": 0.0,
+            "authentication": 0.0,
+            "unclassified": 0.01,
+            "api_handlers": 0.99,
+            "documentation": 0.0,
+            "testing": 0.0,
+            "database": 0.0,
+            "messaging": 0.0,
+            "storage": 0.0,
+            "infrastructure": 0.0,
+            "business_logic": 0.0,
+            "frontend": 0.0,
+            "build_tooling": 0.0
+          }
+        },
+        "review_complexity": {
+          "type": "score",
+          "score": 0.0,
+          "confidence": 1.0,
+          "legend": {
+            "0": "Trivial: a rename or comment change with no behavioural effect",
+            "1": "Small: a local logic change covered by existing tests",
+            "2": "Moderate: new behaviour that needs new tests and one reviewer familiar with the area",
+            "3": "Large: touches a shared boundary such as a database or public API and needs cross-team review",
+            "4": "Critical: changes security-sensitive or data-integrity code and needs a security review before merge"
+          },
+          "probabilities": {
+            "0": 1.0,
+            "1": 0.0,
+            "2": 0.0,
+            "3": 0.0,
+            "4": 0.0
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 931,
+        "output_tokens": 164
+      }
+    }
+  },
+  "latency_ms": 433,
+  "key": "sha256:d39173bf329053eb54e6cee6f86ce580f71cef032d44f7201a5b9a08ae6acf78"
+}

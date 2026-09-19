@@ -1,0 +1,201 @@
+{
+  "schema": 1,
+  "name": "speaker-identity/four-speakers-no-evidence-01",
+  "note": "Same transcript without the deterministic candidate evidence.",
+  "recorded_at": "2026-09-19T21:49:22+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "meeting": "Gateway sync",
+        "date": "2026-09-15 10:00",
+        "host": "The speaker labelled \"You\" is Nadia Rahman, who made the recording. No other speaker is Nadia Rahman.",
+        "known_colleagues": "Kevin Mitchell, Priya Nair, Omar Haddad, Tom Becker, Saki Ito, Lena Fischer, Marcus Ellis, Diego Alvarez, Hana Kobayashi, Rupak Sen, Ana Costa, Wei Zhang",
+        "names_mentioned": "Kevin, Priya, Tom, Omar",
+        "transcript": "You (00:00): Okay, I think we're recording. Let's get started, it's the gateway sync.\nPerson 1 (00:06): Hi all, Kevin here. I'm on the train so if I drop, that's why.\nYou (00:11): No problem. So the plan for today: status on the gateway migration, then the schema change for the sessions table, then whatever's left.\nPerson 1 (00:22): On the gateway, the routing layer is done. All the read endpoints go through it now. Writes are still on the old path because of the idempotency key thing we discussed last week.\nYou (00:36): Right. Is that blocked on us or on the platform team?\nPerson 1 (00:40): On us. I need to decide whether the key lives in the header or in the body, and I wanted a second opinion before I commit to it.\nYou (00:48): Priya, you did the same thing on the billing service. Can you take the schema migration and also look at Kevin's idempotency question?\nPerson 2 (00:57): Yeah, I can do both. For billing we put it in the header, Idempotency-Key, and the body was untouched. It worked fine with the retries.\nPerson 1 (01:08): That's what I was leaning toward. Okay, header it is.\nPerson 3 (01:11): Mm-hmm.\nYou (01:13): Good. Priya, when can the sessions migration land? We have the release on Thursday.\nPerson 2 (01:19): The migration itself is small, it's adding the expires_at column and a backfill. I'd say Wednesday, but the backfill needs to run in batches or it'll lock the table.\nPerson 4 (01:31): We had exactly that problem on the events table last quarter. Ten thousand rows per batch was fine, a hundred thousand was not.\nYou (01:40): Thanks, Tom. Let's use ten thousand then, Priya.\nPerson 2 (01:43): Will do.\nPerson 3 (01:44): Yeah.\nYou (01:46): Omar, what do you think about the timeline? You're the one who has to ship it.\nPerson 4 (01:52): Thursday is tight but doable if the migration is in by Wednesday morning. If it slips to the afternoon I'd rather push the release a day.\nYou (02:01): Fair. Let's say Wednesday morning is the hard cutoff.\nPerson 1 (02:05): One more thing on the gateway. The health check is returning 200 even when the upstream is down, because it only checks that the process is up. I'll fix it, but it's the kind of thing that'll bite us during the release if we forget.\nYou (02:18): Put it in the release checklist. Anything else?\nPerson 2 (02:21): Nope.\nPerson 3 (02:22): Mm-hmm, no.\nYou (02:24): Okay, thanks everyone. Kevin, enjoy the train.\nPerson 1 (02:27): Ha, thanks. Bye all.\n"
+      },
+      "questions": {
+        "speaker_0": {
+          "type": "choice",
+          "instructions": "Which person is the speaker labelled \"Person 1\"? Answer \"unresolved\" unless the transcript itself establishes who they are.",
+          "criteria": {
+            "Kevin Mitchell": "The transcript establishes that Person 1 is Kevin Mitchell",
+            "Priya Nair": "The transcript establishes that Person 1 is Priya Nair",
+            "Omar Haddad": "The transcript establishes that Person 1 is Omar Haddad",
+            "Tom Becker": "The transcript establishes that Person 1 is Tom Becker",
+            "Saki Ito": "The transcript establishes that Person 1 is Saki Ito",
+            "Lena Fischer": "The transcript establishes that Person 1 is Lena Fischer",
+            "Marcus Ellis": "The transcript establishes that Person 1 is Marcus Ellis",
+            "Diego Alvarez": "The transcript establishes that Person 1 is Diego Alvarez",
+            "Hana Kobayashi": "The transcript establishes that Person 1 is Hana Kobayashi",
+            "Rupak Sen": "The transcript establishes that Person 1 is Rupak Sen",
+            "Ana Costa": "The transcript establishes that Person 1 is Ana Costa",
+            "Wei Zhang": "The transcript establishes that Person 1 is Wei Zhang",
+            "unresolved": "The transcript does not establish who Person 1 is"
+          }
+        },
+        "speaker_1": {
+          "type": "choice",
+          "instructions": "Which person is the speaker labelled \"Person 2\"? Answer \"unresolved\" unless the transcript itself establishes who they are.",
+          "criteria": {
+            "Kevin Mitchell": "The transcript establishes that Person 2 is Kevin Mitchell",
+            "Priya Nair": "The transcript establishes that Person 2 is Priya Nair",
+            "Omar Haddad": "The transcript establishes that Person 2 is Omar Haddad",
+            "Tom Becker": "The transcript establishes that Person 2 is Tom Becker",
+            "Saki Ito": "The transcript establishes that Person 2 is Saki Ito",
+            "Lena Fischer": "The transcript establishes that Person 2 is Lena Fischer",
+            "Marcus Ellis": "The transcript establishes that Person 2 is Marcus Ellis",
+            "Diego Alvarez": "The transcript establishes that Person 2 is Diego Alvarez",
+            "Hana Kobayashi": "The transcript establishes that Person 2 is Hana Kobayashi",
+            "Rupak Sen": "The transcript establishes that Person 2 is Rupak Sen",
+            "Ana Costa": "The transcript establishes that Person 2 is Ana Costa",
+            "Wei Zhang": "The transcript establishes that Person 2 is Wei Zhang",
+            "unresolved": "The transcript does not establish who Person 2 is"
+          }
+        },
+        "speaker_2": {
+          "type": "choice",
+          "instructions": "Which person is the speaker labelled \"Person 3\"? Answer \"unresolved\" unless the transcript itself establishes who they are.",
+          "criteria": {
+            "Kevin Mitchell": "The transcript establishes that Person 3 is Kevin Mitchell",
+            "Priya Nair": "The transcript establishes that Person 3 is Priya Nair",
+            "Omar Haddad": "The transcript establishes that Person 3 is Omar Haddad",
+            "Tom Becker": "The transcript establishes that Person 3 is Tom Becker",
+            "Saki Ito": "The transcript establishes that Person 3 is Saki Ito",
+            "Lena Fischer": "The transcript establishes that Person 3 is Lena Fischer",
+            "Marcus Ellis": "The transcript establishes that Person 3 is Marcus Ellis",
+            "Diego Alvarez": "The transcript establishes that Person 3 is Diego Alvarez",
+            "Hana Kobayashi": "The transcript establishes that Person 3 is Hana Kobayashi",
+            "Rupak Sen": "The transcript establishes that Person 3 is Rupak Sen",
+            "Ana Costa": "The transcript establishes that Person 3 is Ana Costa",
+            "Wei Zhang": "The transcript establishes that Person 3 is Wei Zhang",
+            "unresolved": "The transcript does not establish who Person 3 is"
+          }
+        },
+        "speaker_3": {
+          "type": "choice",
+          "instructions": "Which person is the speaker labelled \"Person 4\"? Answer \"unresolved\" unless the transcript itself establishes who they are.",
+          "criteria": {
+            "Kevin Mitchell": "The transcript establishes that Person 4 is Kevin Mitchell",
+            "Priya Nair": "The transcript establishes that Person 4 is Priya Nair",
+            "Omar Haddad": "The transcript establishes that Person 4 is Omar Haddad",
+            "Tom Becker": "The transcript establishes that Person 4 is Tom Becker",
+            "Saki Ito": "The transcript establishes that Person 4 is Saki Ito",
+            "Lena Fischer": "The transcript establishes that Person 4 is Lena Fischer",
+            "Marcus Ellis": "The transcript establishes that Person 4 is Marcus Ellis",
+            "Diego Alvarez": "The transcript establishes that Person 4 is Diego Alvarez",
+            "Hana Kobayashi": "The transcript establishes that Person 4 is Hana Kobayashi",
+            "Rupak Sen": "The transcript establishes that Person 4 is Rupak Sen",
+            "Ana Costa": "The transcript establishes that Person 4 is Ana Costa",
+            "Wei Zhang": "The transcript establishes that Person 4 is Wei Zhang",
+            "unresolved": "The transcript does not establish who Person 4 is"
+          }
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba53853762ea697dbbec5592c62",
+      "x-envoy-upstream-service-time": "159"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "speaker_0": {
+          "type": "choice",
+          "choice": "Kevin Mitchell",
+          "confidence": 0.99,
+          "probabilities": {
+            "Tom Becker": 0.0,
+            "Saki Ito": 0.0,
+            "Priya Nair": 0.0,
+            "unresolved": 0.01,
+            "Hana Kobayashi": 0.0,
+            "Marcus Ellis": 0.0,
+            "Diego Alvarez": 0.0,
+            "Wei Zhang": 0.0,
+            "Kevin Mitchell": 0.99,
+            "Lena Fischer": 0.0,
+            "Ana Costa": 0.0,
+            "Omar Haddad": 0.0,
+            "Rupak Sen": 0.0
+          }
+        },
+        "speaker_1": {
+          "type": "choice",
+          "choice": "Priya Nair",
+          "confidence": 0.99,
+          "probabilities": {
+            "Saki Ito": 0.0,
+            "Tom Becker": 0.0,
+            "Priya Nair": 0.99,
+            "unresolved": 0.01,
+            "Omar Haddad": 0.0,
+            "Lena Fischer": 0.0,
+            "Marcus Ellis": 0.0,
+            "Wei Zhang": 0.0,
+            "Kevin Mitchell": 0.0,
+            "Hana Kobayashi": 0.0,
+            "Ana Costa": 0.0,
+            "Diego Alvarez": 0.0,
+            "Rupak Sen": 0.0
+          }
+        },
+        "speaker_2": {
+          "type": "choice",
+          "choice": "unresolved",
+          "confidence": 0.99,
+          "probabilities": {
+            "Tom Becker": 0.0,
+            "Saki Ito": 0.0,
+            "Priya Nair": 0.0,
+            "unresolved": 1.0,
+            "Hana Kobayashi": 0.0,
+            "Omar Haddad": 0.0,
+            "Lena Fischer": 0.0,
+            "Wei Zhang": 0.0,
+            "Kevin Mitchell": 0.0,
+            "Marcus Ellis": 0.0,
+            "Ana Costa": 0.0,
+            "Diego Alvarez": 0.0,
+            "Rupak Sen": 0.0
+          }
+        },
+        "speaker_3": {
+          "type": "choice",
+          "choice": "Omar Haddad",
+          "confidence": 0.77,
+          "probabilities": {
+            "Saki Ito": 0.0,
+            "Tom Becker": 0.1,
+            "Priya Nair": 0.0,
+            "unresolved": 0.11,
+            "Lena Fischer": 0.0,
+            "Hana Kobayashi": 0.0,
+            "Marcus Ellis": 0.0,
+            "Wei Zhang": 0.0,
+            "Kevin Mitchell": 0.0,
+            "Diego Alvarez": 0.0,
+            "Ana Costa": 0.0,
+            "Omar Haddad": 0.79,
+            "Rupak Sen": 0.0
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 2529,
+        "output_tokens": 549
+      }
+    }
+  },
+  "latency_ms": 462,
+  "key": "sha256:6a76cf6d1071cbc062e2f2e2d489326c066fb0e0cfaad2a8ce1cbd8635f73c42"
+}

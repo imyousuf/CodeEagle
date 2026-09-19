@@ -1,0 +1,78 @@
+{
+  "schema": 1,
+  "name": "build-triage/ambiguous-log-language-flat-01",
+  "note": "A log that only says `make test` failed; expected near-flat over 12 options.",
+  "recorded_at": "2026-09-19T21:51:03+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "log_excerpt": "[12:04:18] Running step: test\n[12:04:19] > make test\n[12:07:52] Error: Process completed with exit code 1.\n",
+        "environment": "ci"
+      },
+      "questions": {
+        "language": {
+          "type": "choice",
+          "instructions": "Which language is the project written in?",
+          "criteria": {
+            "Go": "The project is written mainly in Go",
+            "Python": "The project is written mainly in Python",
+            "TypeScript": "The project is written mainly in TypeScript",
+            "JavaScript": "The project is written mainly in JavaScript",
+            "Java": "The project is written mainly in Java",
+            "Rust": "The project is written mainly in Rust",
+            "C#": "The project is written mainly in C#",
+            "Ruby": "The project is written mainly in Ruby",
+            "Kotlin": "The project is written mainly in Kotlin",
+            "Swift": "The project is written mainly in Swift",
+            "PHP": "The project is written mainly in PHP",
+            "Scala": "The project is written mainly in Scala"
+          }
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba6c0ff70f58fc2893f0c687e84",
+      "x-envoy-upstream-service-time": "85"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "language": {
+          "type": "choice",
+          "choice": "JavaScript",
+          "confidence": 0.38,
+          "probabilities": {
+            "Go": 0.21,
+            "Java": 0.04,
+            "TypeScript": 0.02,
+            "JavaScript": 0.42,
+            "Rust": 0.21,
+            "Kotlin": 0.0,
+            "Swift": 0.01,
+            "C#": 0.0,
+            "Ruby": 0.04,
+            "Python": 0.03,
+            "Scala": 0.01,
+            "PHP": 0.01
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 582,
+        "output_tokens": 115
+      }
+    }
+  },
+  "latency_ms": 387,
+  "key": "sha256:184e81fe59821cdb25e2cddcaacb5c922f3b13428254572e7a895ae603388d22"
+}

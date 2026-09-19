@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "name": "errors/models-401-invalid-key-01",
+  "note": "Models() error path.",
+  "recorded_at": "2026-09-19T21:51:04+00:00",
+  "api_version": "0.2.0",
+  "model_requested": null,
+  "model_answered": null,
+  "request": {
+    "method": "GET",
+    "path": "/v1/models"
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba6c6927f1e8ed152cc17a78cc2",
+      "x-envoy-upstream-service-time": "13"
+    },
+    "body": {
+      "detail": {
+        "error_type": "authentication_error",
+        "message": "Cannot authenticate with the server. Please check your API key and try again."
+      }
+    }
+  },
+  "latency_ms": 305,
+  "key": "sha256:31859108c0d9d31c57940415975dd0e647887ce489ff7a1deb44eee760d3216f"
+}

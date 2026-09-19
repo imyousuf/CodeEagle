@@ -1,0 +1,132 @@
+{
+  "schema": 1,
+  "name": "code-review/sql-injection-fanout-01",
+  "note": "Four-question fan-out; 13-option choice; 5-level rubric; last noul is genuinely uncertain.",
+  "recorded_at": "2026-09-19T21:49:23+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "file_path": "internal/api/users.go",
+        "diff": "diff --git a/internal/api/users.go b/internal/api/users.go\nindex 3f1c2aa..9b7d0e4 100644\n--- a/internal/api/users.go\n+++ b/internal/api/users.go\n@@ -41,6 +41,27 @@ func (s *Server) handleGetUser(w http.ResponseWriter, r *http.Request) {\n \twriteJSON(w, http.StatusOK, user)\n }\n\n+// handleSearchUsers returns users whose name matches the q parameter.\n+func (s *Server) handleSearchUsers(w http.ResponseWriter, r *http.Request) {\n+\tq := r.URL.Query().Get(\"q\")\n+\tquery := fmt.Sprintf(\"SELECT id, name, email FROM users WHERE name LIKE '%%%s%%'\", q)\n+\trows, err := s.db.QueryContext(r.Context(), query)\n+\tif err != nil {\n+\t\thttp.Error(w, err.Error(), http.StatusInternalServerError)\n+\t\treturn\n+\t}\n+\tdefer rows.Close()\n+\tvar out []User\n+\tfor rows.Next() {\n+\t\tvar u User\n+\t\tif err := rows.Scan(&u.ID, &u.Name, &u.Email); err != nil {\n+\t\t\thttp.Error(w, err.Error(), http.StatusInternalServerError)\n+\t\t\treturn\n+\t\t}\n+\t\tout = append(out, u)\n+\t}\n+\twriteJSON(w, http.StatusOK, out)\n+}\n+\n func (s *Server) routes() {\n \ts.mux.HandleFunc(\"GET /users/{id}\", s.handleGetUser)\n+\ts.mux.HandleFunc(\"GET /users/search\", s.handleSearchUsers)\n }\n",
+        "author": "d.alvarez",
+        "lines_modified": 24
+      },
+      "questions": {
+        "introduces_vulnerability": {
+          "type": "noul",
+          "instructions": "Does this diff introduce an injection, insecure deserialization, or unhandled-input vulnerability?",
+          "criteria": {
+            "true": "User-controlled input reaches a query, command, or deserializer without validation or parameterization",
+            "false": "Input is validated or parameterized, or the change does not touch input handling"
+          }
+        },
+        "subsystem": {
+          "type": "choice",
+          "instructions": "Which subsystem does this diff primarily modify?",
+          "criteria": {
+            "database": "Schema migrations, SQL queries, ORM models, transaction handling",
+            "authentication": "Sessions, tokens, password handling, access control",
+            "api_handlers": "HTTP routing, request parsing, response encoding",
+            "frontend": "UI components, styling, client-side rendering",
+            "business_logic": "Domain rules, calculations, workflow orchestration",
+            "infrastructure": "Deployment, containers, CI pipelines, infrastructure as code",
+            "observability": "Logging, metrics, tracing, alerting",
+            "messaging": "Queues, event publishing, webhooks",
+            "storage": "Object storage, file handling, caching layers",
+            "testing": "Test code, fixtures, mocks",
+            "documentation": "READMEs, comments, API docs",
+            "build_tooling": "Makefiles, build scripts, dependency manifests",
+            "unclassified": "Does not fit any category above"
+          }
+        },
+        "review_complexity": {
+          "type": "score",
+          "instructions": "Rate the review effort this change needs.",
+          "criteria": [
+            "Trivial: a rename or comment change with no behavioural effect",
+            "Small: a local logic change covered by existing tests",
+            "Moderate: new behaviour that needs new tests and one reviewer familiar with the area",
+            "Large: touches a shared boundary such as a database or public API and needs cross-team review",
+            "Critical: changes security-sensitive or data-integrity code and needs a security review before merge"
+          ]
+        },
+        "breaks_existing_clients": {
+          "type": "noul",
+          "instructions": "Will existing API clients break because of this change?"
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba53d3574779b6b0321b3fe975c",
+      "x-envoy-upstream-service-time": "156"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "introduces_vulnerability": {
+          "type": "noul",
+          "noul": 0.97
+        },
+        "subsystem": {
+          "type": "choice",
+          "choice": "api_handlers",
+          "confidence": 0.99,
+          "probabilities": {
+            "frontend": 0.0,
+            "testing": 0.0,
+            "business_logic": 0.0,
+            "build_tooling": 0.0,
+            "observability": 0.0,
+            "documentation": 0.0,
+            "messaging": 0.0,
+            "infrastructure": 0.0,
+            "storage": 0.0,
+            "unclassified": 0.0,
+            "database": 0.0,
+            "authentication": 0.0,
+            "api_handlers": 1.0
+          }
+        },
+        "review_complexity": {
+          "type": "score",
+          "score": 3.91,
+          "confidence": 0.92,
+          "legend": {
+            "0": "Trivial: a rename or comment change with no behavioural effect",
+            "1": "Small: a local logic change covered by existing tests",
+            "2": "Moderate: new behaviour that needs new tests and one reviewer familiar with the area",
+            "3": "Large: touches a shared boundary such as a database or public API and needs cross-team review",
+            "4": "Critical: changes security-sensitive or data-integrity code and needs a security review before merge"
+          },
+          "probabilities": {
+            "0": 0.0,
+            "1": 0.0,
+            "2": 0.03,
+            "3": 0.03,
+            "4": 0.94
+          }
+        },
+        "breaks_existing_clients": {
+          "type": "noul",
+          "noul": 0.07
+        }
+      },
+      "usage": {
+        "input_tokens": 1191,
+        "output_tokens": 184
+      }
+    }
+  },
+  "latency_ms": 457,
+  "key": "sha256:c97352b134bd4f7cc7ab7f40d5a1a23ffc1d54c91b5dd426aa17851245db71c0"
+}

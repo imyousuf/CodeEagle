@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "name": "errors/400-object-unknown-model-01",
+  "note": "detail is an object with a specific message.",
+  "recorded_at": "2026-09-19T21:49:29+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-9.99.9",
+  "model_answered": null,
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-9.99.9",
+      "state": {
+        "command": "git push --force origin main",
+        "working_directory": "/app/service-payments",
+        "session_context": "Refactoring migration files"
+      },
+      "questions": {
+        "destructive": {
+          "type": "noul",
+          "instructions": "Is it destructive?"
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba554fc768abc596c16cdcb1ba1",
+      "x-envoy-upstream-service-time": "28"
+    },
+    "body": {
+      "detail": {
+        "error_type": "api_usage_error",
+        "message": "Unknown model: jev-9.99.9"
+      }
+    }
+  },
+  "latency_ms": 340,
+  "key": "sha256:203945749c96f90ed84ff29ac4fe7213f4b0810f639a974d6bb4acfa836c649f"
+}

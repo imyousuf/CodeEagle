@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "name": "quirks/unicode-question-name-01",
+  "note": "Question names are free text.",
+  "recorded_at": "2026-09-19T21:49:29+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "command": "git push --force origin main",
+        "working_directory": "/app/service-payments",
+        "session_context": "Refactoring migration files"
+      },
+      "questions": {
+        "är det säkert?": {
+          "type": "noul",
+          "instructions": "Is this command safe to run unattended?"
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba551c97863ae87898e88ba73d3",
+      "x-envoy-upstream-service-time": "211"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "är det säkert?": {
+          "type": "noul",
+          "noul": 0.08
+        }
+      },
+      "usage": {
+        "input_tokens": 314,
+        "output_tokens": 26
+      }
+    }
+  },
+  "latency_ms": 511,
+  "key": "sha256:5731d7b8a646c1767babb8af366467794a3403ec8ee6844c0d0f3a81b94312f5"
+}

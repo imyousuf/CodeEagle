@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "name": "code-review/sql-injection-single-01",
+  "note": "One question over the same state, for the fan-out token comparison.",
+  "recorded_at": "2026-09-19T21:49:24+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "file_path": "internal/api/users.go",
+        "diff": "diff --git a/internal/api/users.go b/internal/api/users.go\nindex 3f1c2aa..9b7d0e4 100644\n--- a/internal/api/users.go\n+++ b/internal/api/users.go\n@@ -41,6 +41,27 @@ func (s *Server) handleGetUser(w http.ResponseWriter, r *http.Request) {\n \twriteJSON(w, http.StatusOK, user)\n }\n\n+// handleSearchUsers returns users whose name matches the q parameter.\n+func (s *Server) handleSearchUsers(w http.ResponseWriter, r *http.Request) {\n+\tq := r.URL.Query().Get(\"q\")\n+\tquery := fmt.Sprintf(\"SELECT id, name, email FROM users WHERE name LIKE '%%%s%%'\", q)\n+\trows, err := s.db.QueryContext(r.Context(), query)\n+\tif err != nil {\n+\t\thttp.Error(w, err.Error(), http.StatusInternalServerError)\n+\t\treturn\n+\t}\n+\tdefer rows.Close()\n+\tvar out []User\n+\tfor rows.Next() {\n+\t\tvar u User\n+\t\tif err := rows.Scan(&u.ID, &u.Name, &u.Email); err != nil {\n+\t\t\thttp.Error(w, err.Error(), http.StatusInternalServerError)\n+\t\t\treturn\n+\t\t}\n+\t\tout = append(out, u)\n+\t}\n+\twriteJSON(w, http.StatusOK, out)\n+}\n+\n func (s *Server) routes() {\n \ts.mux.HandleFunc(\"GET /users/{id}\", s.handleGetUser)\n+\ts.mux.HandleFunc(\"GET /users/search\", s.handleSearchUsers)\n }\n",
+        "author": "d.alvarez",
+        "lines_modified": 24
+      },
+      "questions": {
+        "introduces_vulnerability": {
+          "type": "noul",
+          "instructions": "Does this diff introduce an injection, insecure deserialization, or unhandled-input vulnerability?"
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba53f067b8fa57ceb02fad228e3",
+      "x-envoy-upstream-service-time": "112"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "introduces_vulnerability": {
+          "type": "noul",
+          "noul": 0.96
+        }
+      },
+      "usage": {
+        "input_tokens": 710,
+        "output_tokens": 27
+      }
+    }
+  },
+  "latency_ms": 417,
+  "key": "sha256:cb7d1c9e4ed324ab50eab2f6ddd6e86630490c30471203944329e8af91f700e8"
+}
