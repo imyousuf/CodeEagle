@@ -28,6 +28,10 @@ type Indexer struct {
 	writer   *Writer
 	store    graph.Store
 	opts     IndexOptions
+	// minAge is how long a transcript must sit unmodified before it is treated
+	// as finished. Set by Watch; zero in a one-shot run, where the caller has
+	// decided the corpus is static.
+	minAge time.Duration
 }
 
 // IndexOptions configures a batch run.
@@ -59,6 +63,8 @@ type RunReport struct {
 	Failures []Failure
 	// Skipped counts recordings already indexed and unchanged.
 	Skipped int
+	// Pending counts recordings still being written.
+	Pending int
 	// Empty counts recordings that captured no speech.
 	Empty    int
 	Duration time.Duration
@@ -179,12 +185,15 @@ func (ix *Indexer) Run(ctx context.Context) (*RunReport, error) {
 			report.Empty++
 		case skipUnchanged:
 			report.Skipped++
+		case skipPending:
+			report.Pending++
 		}
 		if needed {
 			todo = append(todo, p)
 		}
 	}
-	ix.opts.Log("%d to enrich, %d already indexed, %d empty", len(todo), report.Skipped, report.Empty)
+	ix.opts.Log("%d to enrich, %d already indexed, %d empty%s", len(todo), report.Skipped, report.Empty,
+		pendingSuffix(report.Pending))
 	if len(todo) == 0 {
 		report.Duration = time.Since(start)
 		return report, nil
@@ -285,6 +294,8 @@ const (
 	skipNone skipReason = iota
 	skipUnchanged
 	skipEmpty
+	// skipPending means the recorder may still be writing the transcript.
+	skipPending
 )
 
 // needsIndexing reports whether a recording still has to be processed.
@@ -293,6 +304,12 @@ const (
 // this: an unchanged recording is skipped without loading a model, which is
 // what makes re-running a 600-recording batch nearly free.
 func (ix *Indexer) needsIndexing(ctx context.Context, path string) (bool, skipReason, error) {
+	// A recording still being written would be enriched half-complete, and then
+	// again once it finishes. Leave it for the next sweep.
+	if info, err := os.Stat(path); err == nil && ix.tooRecent(info.ModTime()) {
+		return false, skipPending, nil
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false, skipNone, fmt.Errorf("read %s: %w", path, err)
@@ -352,6 +369,15 @@ func (ix *Indexer) markIndexed(ctx context.Context, res *Result) error {
 func contentHash(data []byte) string {
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// pendingSuffix mentions recordings held back for the next sweep, and says
+// nothing when there are none.
+func pendingSuffix(pending int) string {
+	if pending == 0 {
+		return ""
+	}
+	return fmt.Sprintf(", %d still being written", pending)
 }
 
 // EstimatedCost returns the dollar cost of a run at the given per-million

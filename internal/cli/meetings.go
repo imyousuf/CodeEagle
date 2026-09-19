@@ -17,6 +17,7 @@ import (
 
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/indexer"
 	"github.com/imyousuf/CodeEagle/internal/linker"
 	_ "github.com/imyousuf/CodeEagle/internal/llm" // register LLM providers
@@ -39,6 +40,7 @@ was said, by whom, and what it committed anyone to.`,
 	}
 	cmd.AddCommand(
 		newMeetingsSyncCmd(),
+		newMeetingsWatchCmd(),
 		newMeetingsListCmd(),
 		newMeetingsShowCmd(),
 		newMeetingsPeopleCmd(),
@@ -71,80 +73,36 @@ func newMeetingsSyncCmd() *cobra.Command {
 Recordings already indexed and unchanged are skipped, so re-running after new
 meetings costs nothing for the ones already done.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load()
-			if err != nil {
-				return fmt.Errorf("load config: %w", err)
-			}
-			tc := cfg.Transcripts
-			if dir != "" {
-				tc.SessionsDir = dir
-			}
-			if model != "" {
-				tc.Model = model
-			}
-			if provider != "" {
-				tc.Provider = provider
-			}
-			if concurrency > 0 {
-				tc.Concurrency = concurrency
-			}
-			if tc.SessionsDir == "" {
-				return fmt.Errorf("no transcripts directory configured; set transcripts.sessions_dir or pass --dir")
-			}
-			tc.SessionsDir = expandPath(tc.SessionsDir)
-
 			out := cmd.OutOrStdout()
 
 			if dryRun {
-				return meetingsDryRun(out, tc.SessionsDir, limit)
+				cfg, err := config.Load()
+				if err != nil {
+					return fmt.Errorf("load config: %w", err)
+				}
+				sessionsDir := cfg.Transcripts.SessionsDir
+				if dir != "" {
+					sessionsDir = dir
+				}
+				if sessionsDir == "" {
+					return fmt.Errorf("no transcripts directory configured; set transcripts.sessions_dir or pass --dir")
+				}
+				return meetingsDryRun(out, expandPath(sessionsDir), limit)
 			}
 
-			client, err := newTranscriptClient(tc)
+			pipeline, err := buildMeetingPipeline(cmd, meetingPipelineOverrides{
+				dir: dir, model: model, provider: provider,
+				concurrency: concurrency, force: force, limit: limit,
+			})
 			if err != nil {
 				return err
 			}
-			defer client.Close()
+			defer pipeline.close()
 
-			store, branch, err := openBranchStore(cfg)
-			if err != nil {
-				return fmt.Errorf("open graph store: %w", err)
-			}
-			defer store.Close()
-			fmt.Fprintf(out, "Graph branch: %s\n", branch)
-			fmt.Fprintf(out, "Provider: %s (%s)\n\n", client.Provider(), client.Model())
+			fmt.Fprintf(out, "Graph branch: %s\n", pipeline.branch)
+			fmt.Fprintf(out, "Provider: %s (%s)\n\n", pipeline.client.Provider(), pipeline.client.Model())
 
-			ctx := cmd.Context()
-			people, err := transcript.LoadPersonRegistry(ctx, store)
-			if err != nil {
-				return fmt.Errorf("load people: %w", err)
-			}
-
-			analyzer := transcript.NewAnalyzer(client, transcript.Options{
-				Owner:         tc.Owner,
-				OwnerAliases:  tc.OwnerAliases,
-				Roster:        tc.Roster,
-				ExcludeNames:  tc.ExcludeNames,
-				MinConfidence: tc.MinConfidence,
-				// People found earlier in the run become known names for the
-				// meetings analysed after them.
-				KnownPeople: people.Names,
-			})
-			writer := transcript.NewWriter(store, people, transcript.WriterOptions{
-				MinConfidence: tc.MinConfidence,
-				Owner:         tc.Owner,
-			}).WithDateLinker(meetingDateLinker)
-
-			ix := transcript.NewIndexer(store, analyzer, writer, transcript.IndexOptions{
-				SessionsDir: tc.SessionsDir,
-				Concurrency: tc.Concurrency,
-				Force:       force,
-				Limit:       limit,
-				Log: func(format string, args ...any) {
-					fmt.Fprintf(out, format+"\n", args...)
-				},
-			})
-
-			report, err := ix.Run(ctx)
+			report, err := pipeline.indexer.Run(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -154,7 +112,7 @@ meetings costs nothing for the ones already done.`,
 			// This needs the whole graph in view, so it runs once at the end
 			// rather than per meeting.
 			if report.Stats.Meetings > 0 {
-				linkMeetingsToCode(ctx, out, store)
+				linkMeetingsToCode(cmd.Context(), out, pipeline.store)
 			}
 			return nil
 		},
@@ -296,6 +254,162 @@ func newTranscriptClient(tc config.TranscriptsConfig) (llm.Client, error) {
 		return nil, fmt.Errorf("create %s client: %w", provider, err)
 	}
 	return client, nil
+}
+
+// --- watch ---
+
+func newMeetingsWatchCmd() *cobra.Command {
+	var (
+		dir      string
+		interval time.Duration
+		settle   time.Duration
+	)
+
+	cmd := &cobra.Command{
+		Use:   "watch",
+		Short: "Index new meeting recordings as they appear",
+		Long: `Watch the sessions directory and index new recordings continuously.
+
+The directory is swept on an interval rather than watched for filesystem
+events. A recording is written by the recorder over the course of a meeting, so
+an event arrives while the file is still incomplete; a sweep waits until a
+transcript has been idle for a moment and skips everything already indexed on
+its content hash, which costs a file read and no model call.
+
+The first sweep runs immediately, so starting the watcher catches up on
+anything recorded while it was not running. Press Ctrl-C to stop.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+			pipeline, err := buildMeetingPipeline(cmd, meetingPipelineOverrides{dir: dir})
+			if err != nil {
+				return err
+			}
+			defer pipeline.close()
+
+			fmt.Fprintf(out, "Provider: %s (%s)\n", pipeline.client.Provider(), pipeline.client.Model())
+
+			return pipeline.indexer.Watch(cmd.Context(), transcript.WatchOptions{
+				Interval: interval,
+				Settle:   settle,
+			})
+		},
+	}
+
+	cmd.Flags().StringVar(&dir, "dir", "", "directory of recorded sessions (overrides config)")
+	cmd.Flags().DurationVar(&interval, "interval", transcript.DefaultWatchInterval, "how often to sweep for new recordings")
+	cmd.Flags().DurationVar(&settle, "settle", transcript.DefaultSettleTime,
+		"how long a transcript must be idle before indexing, so a recording in progress is left alone")
+	return cmd
+}
+
+// --- shared pipeline ---
+
+// meetingPipeline bundles everything needed to index transcripts.
+type meetingPipeline struct {
+	client  llm.Client
+	store   *embedded.BranchStore
+	branch  string
+	indexer *transcript.Indexer
+	people  *transcript.PersonRegistry
+}
+
+func (p *meetingPipeline) close() {
+	if p.client != nil {
+		_ = p.client.Close()
+	}
+	if p.store != nil {
+		_ = p.store.Close()
+	}
+}
+
+// meetingPipelineOverrides carries the flags that can override config.
+type meetingPipelineOverrides struct {
+	dir         string
+	model       string
+	provider    string
+	concurrency int
+	force       bool
+	limit       int
+}
+
+// buildMeetingPipeline assembles the client, store, analyzer, writer, and
+// indexer that both sync and watch need.
+func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*meetingPipeline, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+
+	tc := cfg.Transcripts
+	if ov.dir != "" {
+		tc.SessionsDir = ov.dir
+	}
+	if ov.model != "" {
+		tc.Model = ov.model
+	}
+	if ov.provider != "" {
+		tc.Provider = ov.provider
+	}
+	if ov.concurrency > 0 {
+		tc.Concurrency = ov.concurrency
+	}
+	if tc.SessionsDir == "" {
+		return nil, fmt.Errorf("no transcripts directory configured; set transcripts.sessions_dir or pass --dir")
+	}
+	tc.SessionsDir = expandPath(tc.SessionsDir)
+
+	client, err := newTranscriptClient(tc)
+	if err != nil {
+		return nil, err
+	}
+
+	store, branch, err := openBranchStore(cfg)
+	if err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("open graph store: %w", err)
+	}
+
+	ctx := cmd.Context()
+	people, err := transcript.LoadPersonRegistry(ctx, store)
+	if err != nil {
+		_ = client.Close()
+		_ = store.Close()
+		return nil, fmt.Errorf("load people: %w", err)
+	}
+
+	analyzer := transcript.NewAnalyzer(client, transcript.Options{
+		Owner:         tc.Owner,
+		OwnerAliases:  tc.OwnerAliases,
+		Roster:        tc.Roster,
+		ExcludeNames:  tc.ExcludeNames,
+		MinConfidence: tc.MinConfidence,
+		// People found earlier in the run become known names for the
+		// meetings analysed after them.
+		KnownPeople: people.Names,
+	})
+	writer := transcript.NewWriter(store, people, transcript.WriterOptions{
+		MinConfidence: tc.MinConfidence,
+		Owner:         tc.Owner,
+	}).WithDateLinker(meetingDateLinker)
+
+	out := cmd.OutOrStdout()
+	indexer := transcript.NewIndexer(store, analyzer, writer, transcript.IndexOptions{
+		SessionsDir: tc.SessionsDir,
+		Concurrency: tc.Concurrency,
+		Force:       ov.force,
+		Limit:       ov.limit,
+		Log: func(format string, args ...any) {
+			fmt.Fprintf(out, format+"\n", args...)
+		},
+	})
+
+	return &meetingPipeline{
+		client:  client,
+		store:   store,
+		branch:  branch,
+		indexer: indexer,
+		people:  people,
+	}, nil
 }
 
 // --- list ---
