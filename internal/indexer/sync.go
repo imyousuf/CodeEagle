@@ -157,6 +157,16 @@ func syncGitRepo(ctx context.Context, idx *Indexer, repoPath string, state *Sync
 	return nil
 }
 
+// underAny reports whether a path lies beneath one of the given prefixes.
+func underAny(path string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // walkResult holds a file discovered during parallel directory walk.
 type walkResult struct {
 	absPath string
@@ -175,14 +185,18 @@ type syncWork struct {
 // listing (no stat per entry) and bounded goroutines for subdirectory traversal.
 // This is significantly faster than filepath.Walk on high-latency filesystems
 // (e.g., SSHFS) because stat() calls are parallelized across directories.
-func parallelWalkDir(ctx context.Context, root string, matcher *watcher.GitIgnoreMatcher, numWorkers int) ([]walkResult, error) {
+// It also reports the directories it could not read. A caller that treats
+// "not seen on disk" as "deleted from disk" must not apply that to a subtree
+// it was never able to look at.
+func parallelWalkDir(ctx context.Context, root string, matcher *watcher.GitIgnoreMatcher, numWorkers int) ([]walkResult, []string, error) {
 	var (
-		mu      sync.Mutex
-		results []walkResult
-		wg      sync.WaitGroup
-		sem     = make(chan struct{}, numWorkers)
-		walkErr error
-		errOnce sync.Once
+		mu         sync.Mutex
+		results    []walkResult
+		unreadable []string
+		wg         sync.WaitGroup
+		sem        = make(chan struct{}, numWorkers)
+		walkErr    error
+		errOnce    sync.Once
 	)
 
 	var walkDir func(dir string)
@@ -199,7 +213,13 @@ func parallelWalkDir(ctx context.Context, root string, matcher *watcher.GitIgnor
 
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			return // skip unreadable directories
+			// Remember it rather than passing over it silently: a mount that
+			// dropped or a directory owned by someone else is indistinguishable
+			// here from one whose files were all deleted.
+			mu.Lock()
+			unreadable = append(unreadable, dir)
+			mu.Unlock()
+			return
 		}
 
 		for _, entry := range entries {
@@ -247,7 +267,7 @@ func parallelWalkDir(ctx context.Context, root string, matcher *watcher.GitIgnor
 	}()
 	wg.Wait()
 
-	return results, walkErr
+	return results, unreadable, walkErr
 }
 
 // syncDirectory performs mtime-based sync for a non-git directory.
@@ -299,9 +319,14 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, full bool)
 		idx.log("Scanning %s with %d workers...", dirPath, numWorkers)
 	}
 
-	walkResults, err := parallelWalkDir(ctx, dirPath, idx.matcher, numWorkers)
+	walkResults, unreadableDirs, err := parallelWalkDir(ctx, dirPath, idx.matcher, numWorkers)
 	if err != nil {
 		return err
+	}
+	if len(unreadableDirs) > 0 {
+		idx.log("Warning: %d directories could not be read; their files are left "+
+			"in the graph rather than treated as deleted (first: %s)",
+			len(unreadableDirs), unreadableDirs[0])
 	}
 
 	if idx.verbose {
@@ -380,9 +405,21 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, full bool)
 	// Only basename-scoped paths are checked, preventing cross-directory deletion.
 	basename := filepath.Base(dirPath)
 	prefix := basename + "/"
+
+	// A subtree that could not be read contributed no files, so every node
+	// under it looks deleted. Leaving stale nodes behind is recoverable; a
+	// dropped mount erasing the graph for everything below it is not.
+	skipPrefixes := make([]string, 0, len(unreadableDirs))
+	for _, dir := range unreadableDirs {
+		skipPrefixes = append(skipPrefixes, idx.toRelativePath(dir)+"/")
+	}
+
 	deletedCount := 0
 	for dbPath := range indexedTimes {
 		if !strings.HasPrefix(dbPath, prefix) {
+			continue
+		}
+		if underAny(dbPath, skipPrefixes) {
 			continue
 		}
 		if _, stillExists := existing[dbPath]; !stillExists {
@@ -550,6 +587,9 @@ func CleanupStaleBranches(ctx context.Context, store *embedded.BranchStore, repo
 	}
 
 	for _, branch := range dbBranches {
+		if embedded.IsReservedScope(branch) {
+			continue // ours, not a branch; git will never list it
+		}
 		if _, ok := existing[branch]; !ok {
 			if logFn != nil {
 				logFn("Cleaning up stale branch data: %s", branch)

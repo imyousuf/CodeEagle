@@ -109,17 +109,67 @@ func runExpansion(command string) (string, error) {
 // Applied after loading rather than to the file's text, so a value is expanded
 // exactly once and wherever it came from — file, environment or flag.
 func expandConfig(cfg *Config) error {
-	return expandReflected(reflect.ValueOf(cfg), "config")
+	cfg.resolved = make(map[string]resolvedValue)
+	return walkStrings(reflect.ValueOf(cfg), "config", func(path, value string) (string, error) {
+		out, err := expandValue(value, path)
+		if err != nil {
+			return "", err
+		}
+		if out != value {
+			cfg.resolved[path] = resolvedValue{expression: value, resolved: out}
+		}
+		return out, nil
+	})
 }
 
-// expandReflected rewrites the strings reachable from a value in place.
-func expandReflected(v reflect.Value, path string) error {
+// resolvedValue pairs a reference with what it resolved to.
+type resolvedValue struct {
+	expression string // what the file said, e.g. $(keyring get ...)
+	resolved   string // what it produced, e.g. the key itself
+}
+
+// unexpandForWrite swaps resolved values back to the expressions that
+// produced them, and returns a function restoring what it changed.
+//
+// A value the caller has since edited is left alone: the edit is what they
+// asked to save, and it is no longer the secret that was fetched. Only a
+// value still identical to what expansion produced is turned back into its
+// reference.
+func (c *Config) unexpandForWrite() func() {
+	if len(c.resolved) == 0 {
+		return func() {}
+	}
+	changed := make(map[string]string, len(c.resolved))
+	_ = walkStrings(reflect.ValueOf(c), "config", func(path, value string) (string, error) {
+		rv, ok := c.resolved[path]
+		if !ok || value != rv.resolved {
+			return value, nil
+		}
+		changed[path] = value
+		return rv.expression, nil
+	})
+	return func() {
+		_ = walkStrings(reflect.ValueOf(c), "config", func(path, value string) (string, error) {
+			if restored, ok := changed[path]; ok {
+				return restored, nil
+			}
+			return value, nil
+		})
+	}
+}
+
+// stringVisitor transforms one configuration value in the walk. Returning the
+// value unchanged leaves it alone.
+type stringVisitor func(path, value string) (string, error)
+
+// walkStrings rewrites, in place, every string reachable from a value.
+func walkStrings(v reflect.Value, path string, visit stringVisitor) error {
 	switch v.Kind() {
 	case reflect.Pointer, reflect.Interface:
 		if v.IsNil() {
 			return nil
 		}
-		return expandReflected(v.Elem(), path)
+		return walkStrings(v.Elem(), path, visit)
 
 	case reflect.Struct:
 		t := v.Type()
@@ -128,14 +178,14 @@ func expandReflected(v reflect.Value, path string) error {
 				continue
 			}
 			name := fieldName(t.Field(i))
-			if err := expandReflected(v.Field(i), path+"."+name); err != nil {
+			if err := walkStrings(v.Field(i), path+"."+name, visit); err != nil {
 				return err
 			}
 		}
 
 	case reflect.Slice, reflect.Array:
 		for i := range v.Len() {
-			if err := expandReflected(v.Index(i), fmt.Sprintf("%s[%d]", path, i)); err != nil {
+			if err := walkStrings(v.Index(i), fmt.Sprintf("%s[%d]", path, i), visit); err != nil {
 				return err
 			}
 		}
@@ -148,28 +198,28 @@ func expandReflected(v reflect.Value, path string) error {
 				// copied, expanded and written back.
 				copied := reflect.New(entry.Type()).Elem()
 				copied.Set(entry)
-				if err := expandReflected(copied, fmt.Sprintf("%s[%v]", path, key)); err != nil {
+				if err := walkStrings(copied, fmt.Sprintf("%s[%v]", path, key), visit); err != nil {
 					return err
 				}
 				v.SetMapIndex(key, copied)
 				continue
 			}
-			expanded, err := expandValue(entry.String(), fmt.Sprintf("%s[%v]", path, key))
+			next, err := visit(fmt.Sprintf("%s[%v]", path, key), entry.String())
 			if err != nil {
 				return err
 			}
-			v.SetMapIndex(key, reflect.ValueOf(expanded))
+			v.SetMapIndex(key, reflect.ValueOf(next))
 		}
 
 	case reflect.String:
 		if !v.CanSet() {
 			return nil
 		}
-		expanded, err := expandValue(v.String(), path)
+		next, err := visit(path, v.String())
 		if err != nil {
 			return err
 		}
-		v.SetString(expanded)
+		v.SetString(next)
 	}
 	return nil
 }

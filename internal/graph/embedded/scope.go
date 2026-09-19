@@ -30,6 +30,24 @@ import (
 // legal git branch name, so it can never collide with a real one.
 const MeetingScope = "@meetings"
 
+// ReservedScopePrefix marks a scope that is ours rather than a git branch.
+//
+// The leading "@" is what makes such a name illegal as a git branch, which is
+// the property the meeting scope relies on to never collide with one.
+const ReservedScopePrefix = "@"
+
+// IsReservedScope reports whether a scope holds data of ours rather than a
+// branch's view of the code.
+//
+// Branch cleanup deletes every scope in the database that git no longer lists
+// as a branch. A reserved scope is by construction never listed, so without
+// this check it looks permanently stale and is deleted on the next sync —
+// taking the whole meeting corpus with it, silently, for a command the user
+// ran to index code.
+func IsReservedScope(name string) bool {
+	return strings.HasPrefix(name, ReservedScopePrefix)
+}
+
 // OpenMeetings opens the meeting graph, which is shared across branches.
 func OpenMeetings(cfg *config.Config, dbPathOverride string) (*BranchStore, error) {
 	path := cfg.ResolveDBPath(dbPathOverride)

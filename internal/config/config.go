@@ -209,6 +209,20 @@ type QueueConfig struct {
 
 // Config holds all configuration for CodeEagle.
 type Config struct {
+	// resolved remembers which values came from a ${VAR} or $(command)
+	// reference and what each one resolved to.
+	//
+	// Loading expands references in place, so by the time anything reads a
+	// credential it holds the secret rather than the expression that fetched
+	// it. Writing the file back would then replace `$(keyring get ...)` with
+	// the key itself — destroying the reference and committing the secret to
+	// a file, which is the exact outcome the syntax exists to prevent. This
+	// lets the write put the expression back.
+	//
+	// Unexported, so neither yaml nor mapstructure sees it and the reflection
+	// walk skips it.
+	resolved map[string]resolvedValue
+
 	// Project contains project metadata.
 	Project ProjectConfig `mapstructure:"project" yaml:"project"`
 	// Repositories lists the repositories to index.
