@@ -445,10 +445,14 @@ system keyring itself. `$$` is a literal dollar, so a value that merely
 contains one is left alone.
 
 Credentials are named for the service they belong to — `baseten_api_key`,
-`anthropic_api_key`, `jev_api_key` — so several can sit in
-one file and changing `provider` is a one-line edit rather than moving a key
-between settings. The older `api_key`, `api_key_env` and `api_key_command`
-still work for whichever provider is configured.
+`anthropic_api_key`, `jev_api_key` — so several can sit in one file and
+changing `provider` is a one-line edit rather than moving a key between
+settings.
+
+`api_key_env` and `api_key_command` are superseded by this: expansion does
+what both did, on every setting rather than only those given bespoke
+companions. They are still read, so an older configuration keeps working, and
+`-v` says so when one of them is supplying the credential.
 
 A failing command is an error rather than an empty value — an empty credential
 surfaces much later as a confusing authentication failure. Neither the value

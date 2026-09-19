@@ -121,10 +121,16 @@ type TranscriptsConfig struct {
 	// the provider-named settings existed keep working.
 	APIKey string `mapstructure:"api_key" yaml:"api_key,omitempty"`
 	// APIKeyEnv names an environment variable holding the credential.
+	//
+	// Deprecated: write `baseten_api_key: ${THE_VARIABLE}` instead. Any value
+	// in the configuration expands, so a setting does not need its own `_env`
+	// companion. Still read, so older configurations keep working.
 	APIKeyEnv string `mapstructure:"api_key_env" yaml:"api_key_env,omitempty"`
-	// APIKeyCommand is a command whose output is the credential, so the key
-	// can live in the system keyring instead of on disk. For example:
-	// "keyring get baseten.co me@example.com".
+	// APIKeyCommand is a command whose output is the credential.
+	//
+	// Deprecated: write `baseten_api_key: $(keyring get baseten.co you)`
+	// instead. Any value expands, so a setting does not need its own
+	// `_command` companion. Still read, so older configurations keep working.
 	APIKeyCommand string `mapstructure:"api_key_command" yaml:"api_key_command,omitempty"`
 	// BasetenAPIKey and AnthropicAPIKey are credentials named
 	// after the service they belong to, so several can sit in one config and
@@ -597,6 +603,45 @@ func loadEnvFile(path string) {
 			os.Setenv(key, value)
 		}
 	}
+}
+
+// CredentialWarning describes a credential supplied through a setting that
+// has been superseded, or "" when none is.
+//
+// There were four ways to give CodeEagle a key — a literal, a named
+// environment variable, a command, and now expansion of any value — and the
+// last does everything the middle two did, on every setting rather than only
+// those given bespoke companions. Two ways to say one thing is how
+// `sessions_dir` and `sessions_dirs` went wrong. The old settings still work;
+// this is what says they need not be used.
+//
+// Reported only when a superseded setting actually supplies the credential,
+// so a configuration that has moved on never hears about it.
+func (c *TranscriptsConfig) CredentialWarning() string {
+	provider := c.TranscriptProvider()
+	named := map[string]string{
+		"baseten":   c.BasetenAPIKey,
+		"anthropic": c.AnthropicAPIKey,
+	}
+	if strings.TrimSpace(named[provider]) != "" {
+		return ""
+	}
+
+	switch {
+	case strings.TrimSpace(c.APIKeyCommand) != "":
+		return fmt.Sprintf(
+			"transcripts.api_key_command is superseded; write "+
+				"%s_api_key: $(%s) instead", provider, c.APIKeyCommand)
+	case strings.TrimSpace(c.APIKeyEnv) != "" && os.Getenv(c.APIKeyEnv) != "":
+		return fmt.Sprintf(
+			"transcripts.api_key_env is superseded; write "+
+				"%s_api_key: ${%s} instead", provider, c.APIKeyEnv)
+	case strings.TrimSpace(c.APIKey) != "":
+		return fmt.Sprintf(
+			"transcripts.api_key holds the credential for %s; "+
+				"%s_api_key names what it is for", provider, provider)
+	}
+	return ""
 }
 
 // TranscriptProvider returns the configured provider, or the default.
