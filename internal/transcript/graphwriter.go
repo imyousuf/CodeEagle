@@ -163,6 +163,11 @@ func (w *Writer) writeMeeting(ctx context.Context, res *Result) (*graph.Node, er
 		props["audio_path"] = s.AudioPath
 	}
 	props["source_title"] = s.Title
+	// Recorded as text as well as edges: "that meeting with Kevin and Mona" is
+	// how people search, and semantic search reads properties, not edges.
+	if people := res.Participants(w.opts.MinConfidence); len(people) > 0 {
+		props["participants"] = strings.Join(people, ", ")
+	}
 
 	node := &graph.Node{
 		ID:            graph.NewNodeID(string(graph.NodeMeeting), s.Path, s.ID),

@@ -17,7 +17,19 @@ var embeddableProperties = []struct {
 	{graph.PropArchRole, "Role"},
 	{graph.PropDesignPattern, "Pattern"},
 	{graph.PropLayerTag, "Layer"},
+	// Meeting entities: who was there and when is often the whole of what
+	// someone remembers about a meeting, so it has to be searchable text.
+	{propParticipants, "Participants"},
+	{graph.PropAssignee, "Assignee"},
+	{graph.PropDueDate, "Due"},
+	{propKeywords, "Keywords"},
 }
+
+// Property keys written by meeting indexing that are worth embedding.
+const (
+	propParticipants = "participants"
+	propKeywords     = "keywords"
+)
 
 // ChunkConfig controls text chunking behavior.
 type ChunkConfig struct {
@@ -190,6 +202,13 @@ var EmbeddableTypes = []graph.NodeType{
 	graph.NodeDirectory,
 	graph.NodeTopic,
 	graph.NodePerson,
+	// Meeting entities carry their substance in DocComment, so they embed the
+	// same way documents do. Including them is what lets a semantic query
+	// reach what was *said* about something, not only what was written in code.
+	graph.NodeMeeting,
+	graph.NodeTopicSegment,
+	graph.NodeDecision,
+	graph.NodeActionItem,
 }
 
 // IsEmbeddable returns true if the node type should be considered for embedding.

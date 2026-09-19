@@ -51,6 +51,7 @@ func (l *Linker) Phases() []Phase {
 		{Name: "tests", Fn: l.linkTests},
 		{Name: "calls", Fn: l.linkCalls},
 		{Name: "documents", Fn: l.linkDocuments},
+		{Name: "meetings", Fn: l.linkMeetingMentions},
 		{Name: "duplicates", Fn: l.linkDuplicates},
 		{Name: "symlinks", Fn: l.linkSymlinks},
 	}
@@ -168,6 +169,15 @@ func (l *Linker) RunAll(ctx context.Context) error {
 	}
 	if l.verbose {
 		l.log("  Linked %d document-to-code edges", docCount)
+	}
+
+	// 4.95. Connect meetings to the code they discussed.
+	meetingCount, err := l.linkMeetingMentions(ctx)
+	if err != nil {
+		return fmt.Errorf("link meetings: %w", err)
+	}
+	if l.verbose {
+		l.log("  Linked %d meeting-to-code edges", meetingCount)
 	}
 
 	// 4.10. Detect duplicate files by content hash.

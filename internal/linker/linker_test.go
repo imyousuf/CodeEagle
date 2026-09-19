@@ -1242,9 +1242,25 @@ func TestPhasesCount(t *testing.T) {
 	store := newTestStore(t)
 	linker := NewLinker(store, nil, nil, false)
 
+	// Asserting the names rather than only the count means a change to this
+	// list reports which phase appeared or vanished.
+	want := []string{
+		"services", "endpoints", "api_calls", "dependencies", "imports",
+		"implements", "tests", "calls", "documents", "meetings",
+		"duplicates", "symlinks",
+	}
 	allPhases := linker.Phases()
-	if len(allPhases) != 11 {
-		t.Errorf("Phases() returned %d, want 11", len(allPhases))
+	if len(allPhases) != len(want) {
+		t.Errorf("Phases() returned %d, want %d", len(allPhases), len(want))
+	}
+	got := make(map[string]bool, len(allPhases))
+	for _, p := range allPhases {
+		got[p.Name] = true
+	}
+	for _, name := range want {
+		if !got[name] {
+			t.Errorf("Phases() missing %q", name)
+		}
 	}
 
 	newPhases := linker.NewPhases()
