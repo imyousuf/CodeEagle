@@ -170,6 +170,41 @@ func trimTranscript(text string, limit int) string {
 	return text[:head] + "\n\n[...]\n\n" + text[len(text)-tail:]
 }
 
+// pointsAt says why a quote implicates the speaker it was counted for.
+//
+// A quote alone is not evidence of anything: "Thank you, Shaw" names the
+// previous speaker, "Shaw, what do you think?" the next one, and the same five
+// words serve both. The matcher resolved that direction against the turn order
+// when it counted the vote, and dropping the reasoning on the way to the judge
+// leaves it to re-derive adjacency from a flattened transcript — which is the
+// one thing it reliably cannot do.
+func pointsAt(kinds []HintKind) string {
+	seen := make(map[HintKind]bool, len(kinds))
+	var reasons []string
+	for _, k := range kinds {
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		if why := hintImplies[k]; why != "" {
+			reasons = append(reasons, why)
+		}
+	}
+	if len(reasons) == 0 {
+		return "named nearby in the transcript"
+	}
+	return strings.Join(reasons, ", and ")
+}
+
+// hintImplies explains, per hint kind, whose identity the quote reveals.
+var hintImplies = map[HintKind]string{
+	HintSelfIntro: "this speaker introduced themselves by this name",
+	HintVocative:  "addressed by this name, and answered in the turn that follows",
+	HintThanks:    "thanked by this name, having just finished speaking",
+	HintGreeting:  "greeted by this name as they joined",
+	HintHandoff:   "handed the floor under this name, and spoke next",
+}
+
 // identityOptions gathers the names a speaker might be.
 //
 // Candidates the hint extractor found for any speaker come first, because
@@ -262,17 +297,26 @@ func (a *Analyzer) identityState(s *Session, unresolved []SpeakerEvidence, hints
 			if i > 0 {
 				b.WriteString("; ")
 			}
-			fmt.Fprintf(&b, "%s (strength %.1f) from: %s",
-				v.Name, v.Weight, strings.Join(quoteList(v.Quotes), " | "))
+			fmt.Fprintf(&b, "%s (strength %.1f) — %s: %s",
+				v.Name, v.Weight, pointsAt(v.Kinds),
+				strings.Join(quoteList(v.Quotes), " | "))
 		}
 		votes[ev.Stat.Label] = b.String()
 	}
 	if len(votes) > 0 {
 		state["candidate_evidence"] = votes
 		state["candidate_evidence_note"] = "Produced by a pattern matcher reading " +
-			"direct address, self-introduction, thanks and hand-offs. A starting " +
-			"point, not an answer: it makes mistakes and misses people who are " +
-			"never addressed by name."
+			"direct address, self-introduction, thanks and hand-offs, and resolved " +
+			"against the order the turns actually occurred in. Where a quote and " +
+			"the direction given for it fit that order, this is reliable — more so " +
+			"than re-reading a long transcript to work out who answered whom. It " +
+			"misses people who are never addressed by name, and it errs in four " +
+			"ways worth rejecting: a product, model or company name read as a " +
+			"person; a voice from a recording, video or television playing in the " +
+			"room; a name said in negation or doubt (\"I'm not sure if this is X\"); " +
+			"and a common word the transcriber capitalised. Judge the candidate on " +
+			"whether it names a participant in this meeting, not on whether the " +
+			"matcher could in principle be wrong."
 	}
 	return state
 }
