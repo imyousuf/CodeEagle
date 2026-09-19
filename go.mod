@@ -1,6 +1,6 @@
 module github.com/imyousuf/CodeEagle
 
-go 1.24.0
+go 1.27.0
 
 require (
 	github.com/charmbracelet/huh v0.8.0

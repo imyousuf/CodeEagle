@@ -1,4 +1,4 @@
-.PHONY: build build-faces build-app dev-app install clean test test-fast test-smoke lint fmt tidy help \
+.PHONY: build build-faces build-app dev-app install clean test test-fast test-smoke lint lint-tools fmt tidy help \
 	build-linux-amd64 build-linux-arm64 \
 	build-darwin-amd64 build-darwin-arm64 \
 	build-all
@@ -19,6 +19,22 @@ GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 GOMOD=$(GOCMD) mod
 GOFMT=gofmt
+
+# --- Linter ---
+# golangci-lint type-checks against the standard library's export data, so the
+# linter binary must be built with a Go toolchain at least as new as the one
+# compiling this module — otherwise it panics with
+# "file requires newer Go version goX.Y (application built with goX.Z)".
+# We therefore install a pinned version *from source* with the local toolchain
+# instead of relying on whatever prebuilt binary happens to be on PATH.
+GOLANGCI_LINT_VERSION?=v2.13.2
+GOBIN_DIR:=$(shell go env GOBIN)
+ifeq ($(GOBIN_DIR),)
+GOBIN_DIR:=$(shell go env GOPATH)/bin
+endif
+GOLANGCI_LINT=$(GOBIN_DIR)/golangci-lint
+# Export-data compatibility is tied to the Go minor version (e.g. "go1.27").
+GO_MINOR:=$(shell go env GOVERSION | cut -d. -f1-2)
 
 # Build flags — inject version info via ldflags
 LDFLAGS=-ldflags "-s -w \
@@ -164,9 +180,15 @@ test-smoke:
 	$(GOTEST) ./... -tags=llm_smoke -v -count=1 -timeout=120s
 
 ## lint: Run linter
-lint:
-	@which golangci-lint > /dev/null || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
-	golangci-lint run ./...
+lint: lint-tools
+	$(GOLANGCI_LINT) run ./...
+
+## lint-tools: Install the pinned golangci-lint, built with the local Go toolchain
+lint-tools:
+	@if ! $(GOLANGCI_LINT) version 2>/dev/null | grep -q "version $(GOLANGCI_LINT_VERSION:v%=%) built with $(GO_MINOR)"; then \
+		echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION) built with $$(go env GOVERSION)..."; \
+		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
+	fi
 
 ## fmt: Format code
 fmt:

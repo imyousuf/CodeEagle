@@ -98,11 +98,7 @@ func NewIndexer(store graph.Store, analyzer *Analyzer, writer *Writer, opts Inde
 // modification time would not do: copying a corpus rewrites every mtime at
 // once, and the meeting's own timestamp is the only reliable ordering.
 func DiscoverSessions(dir string) ([]string, error) {
-	type candidate struct {
-		path    string
-		started time.Time
-	}
-	var found []candidate
+	var found []export
 
 	// Recordings arrive either as a directory per session, as the local
 	// recorder writes them, or as loose exports downloaded from a conferencing
@@ -134,7 +130,7 @@ func DiscoverSessions(dir string) ([]string, error) {
 		if err != nil {
 			return nil
 		}
-		found = append(found, candidate{path: path, started: started})
+		found = append(found, export{path: path, started: started})
 		return nil
 	})
 	if err != nil {
@@ -147,11 +143,7 @@ func DiscoverSessions(dir string) ([]string, error) {
 		return found[i].path < found[j].path
 	})
 
-	exports := make([]export, 0, len(found))
-	for _, c := range found {
-		exports = append(exports, export{path: c.path, started: c.started})
-	}
-	return preferOneExportPerMeeting(exports), nil
+	return preferOneExportPerMeeting(found), nil
 }
 
 // export is one transcript file and when its meeting began.

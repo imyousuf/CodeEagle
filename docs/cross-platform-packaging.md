@@ -231,7 +231,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.27"
       - name: Install deps (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -288,7 +288,7 @@ build-linux-amd64:
     - uses: actions/checkout@v4
     - uses: actions/setup-go@v5
       with:
-        go-version: "1.24"
+        go-version: "1.27"
     - uses: actions/setup-node@v4
       with:
         node-version: "20"
@@ -329,7 +329,7 @@ build-darwin-arm64:
     - uses: actions/checkout@v4
     - uses: actions/setup-go@v5
       with:
-        go-version: "1.24"
+        go-version: "1.27"
     - uses: actions/setup-node@v4
       with:
         node-version: "20"
@@ -363,7 +363,7 @@ build-windows-amd64:
     - uses: actions/checkout@v4
     - uses: actions/setup-go@v5
       with:
-        go-version: "1.24"
+        go-version: "1.27"
     - uses: actions/setup-node@v4
       with:
         node-version: "20"

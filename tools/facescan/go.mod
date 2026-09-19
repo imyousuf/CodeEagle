@@ -1,6 +1,6 @@
 module github.com/imyousuf/facescan
 
-go 1.24
+go 1.27.0
 
 require gocv.io/x/gocv v0.31.0
 

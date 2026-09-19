@@ -19,7 +19,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.27"
           cache: true
 
       - name: Download dependencies
@@ -33,7 +33,11 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.2.2
+          # Must be a release whose binaries are built with a Go toolchain at
+          # least as new as go-version above, or it cannot read the standard
+          # library's export data. Keep in sync with GOLANGCI_LINT_VERSION in
+          # the Makefile. v2.13.2 is built with Go 1.27.
+          version: v2.13.2
 
       - name: Test
         run: make test
