@@ -61,6 +61,13 @@ type VectorStore struct {
 	progress func(done, total int)
 }
 
+// Embedder returns the provider this store embeds with.
+//
+// A federated index must embed its queries with the same model, or the scores
+// it returns cannot be compared with anything — which is the one thing
+// federation checks before opening it.
+func (vs *VectorStore) Embedder() embedding.Provider { return vs.embedder }
+
 // WithProgress reports how far a rebuild has got.
 func (vs *VectorStore) WithProgress(fn func(done, total int)) *VectorStore {
 	vs.progress = fn

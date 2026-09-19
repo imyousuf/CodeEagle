@@ -205,6 +205,24 @@ type Config struct {
 	Project ProjectConfig `mapstructure:"project" yaml:"project"`
 	// Repositories lists the repositories to index.
 	Repositories []RepositoryConfig `mapstructure:"repositories" yaml:"repositories"`
+	// Federate lists other CodeEagle directories to search alongside this
+	// one, for `query` and `rag` only.
+	//
+	// A project's index holds its code; meetings and personal documents
+	// usually live in the home configuration. Asking "what did we decide
+	// about the retention job?" from inside a repository should find the
+	// meeting, and this is what lets it.
+	//
+	// Listed explicitly rather than discovered by walking up the directory
+	// tree. Discovery would make the same question answer differently
+	// depending on where it was asked from, with nothing on screen explaining
+	// why, and would be unbounded when run from / or a temporary directory.
+	//
+	//	federate:
+	//	  - ~/.CodeEagle
+	//
+	// Reads only. Nothing is ever written outside the local index.
+	Federate []string `mapstructure:"federate" yaml:"federate,omitempty"`
 	// Watch contains file watching configuration.
 	Watch WatchConfig `mapstructure:"watch" yaml:"watch"`
 	// Languages lists the languages to parse.

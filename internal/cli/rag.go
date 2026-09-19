@@ -41,6 +41,8 @@ func newRagCmd() *cobra.Command {
 		language  string
 		jsonOut   bool
 		showEdges bool
+		federate  bool
+		noFede    bool
 		minScore  float64
 		noDocs    bool
 	)
@@ -299,6 +301,20 @@ Examples:
 				fmt.Fprintf(out, "%d results (embedding: %s/%s)\n", len(results), meta.Provider, meta.Model)
 			}
 
+			// Other indices are searched separately and shown under their own
+			// heading. Their scores come from a different corpus, so blending
+			// them into one ranking would put a number on a comparison nobody
+			// has calibrated.
+			if !jsonOut && shouldFederate(cfg, federate, noFede) {
+				indices := openFederated(cfg, vs, logFn)
+				defer func() {
+					for _, idx := range indices {
+						idx.Close()
+					}
+				}()
+				searchFederated(cmd.Context(), out, indices, query, limit)
+			}
+
 			return nil
 		},
 	}
@@ -311,6 +327,8 @@ Examples:
 	cmd.Flags().BoolVar(&showEdges, "edges", false, "include 1-hop relationship edges in output")
 	cmd.Flags().Float64Var(&minScore, "min-score", 0, "minimum similarity score (0-1)")
 	cmd.Flags().BoolVar(&noDocs, "no-docs", false, "exclude Document and AIGuideline nodes from results")
+	cmd.Flags().BoolVar(&federate, "federate", false, "also search the indices named by `federate` in the config")
+	cmd.Flags().BoolVar(&noFede, "no-federate", false, "search only this index, ignoring `federate`")
 
 	return cmd
 }

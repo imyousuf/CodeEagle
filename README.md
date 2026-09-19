@@ -429,6 +429,33 @@ recordings already indexed and unchanged are excluded, and transcripts found
 among your indexed documents are included. It opens the graph read-only and
 needs no API key.
 
+### Searching more than one index
+
+A project's index holds its code; meetings and personal documents usually live
+in the home configuration. Asking "what did we decide about the retention job?"
+from inside a repository should find the meeting:
+
+```yaml
+federate:
+  - ~/.CodeEagle
+```
+
+`rag` then searches those indices too and shows what they found under their own
+heading, local results first. `--no-federate` searches only the local index for
+one command; `--federate` turns it on without configuring anything.
+
+Results are grouped rather than blended into a single ranking. Scores from
+corpora that were never calibrated against one another do not share units, so
+ranking by nearness would bury one decisive meeting under fifty near-miss code
+hits. An index built with a different embedding model is skipped with a reason,
+because its similarity scores cannot be compared with anything here.
+
+Listed explicitly rather than discovered by walking up the directory tree:
+discovery would make the same question answer differently depending on where it
+was asked, with nothing on screen explaining why. Reads only — nothing is ever
+written outside the local index, and federated indices are opened read-only so
+a running `watch` elsewhere cannot block a query.
+
 ### Keeping credentials out of the config file
 
 Any value in the configuration may reference the environment or a command, and
