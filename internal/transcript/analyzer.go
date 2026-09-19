@@ -317,10 +317,20 @@ func (a *Analyzer) sanitizeName(name string) string {
 	}
 	// Prefer the roster's spelling when this is plainly the same person, so
 	// one colleague does not accumulate a spelling per meeting.
+	//
+	// Only when one colleague matches, though. A bare given name matches
+	// every colleague who shares it, and taking the first would settle an
+	// ambiguity by list order — the same coin toss recorded as a fact that
+	// PersonRegistry refuses to make. Left alone, it reaches that refusal
+	// and the speaker stays unidentified.
+	var matched []string
 	for _, known := range a.knownPeople() {
 		if SameName(known, cleaned) {
-			return known
+			matched = append(matched, known)
 		}
+	}
+	if len(matched) == 1 {
+		return matched[0]
 	}
 	return cleaned
 }
