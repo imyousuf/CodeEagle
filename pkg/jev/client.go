@@ -174,7 +174,9 @@ func (c *Client) Ask(ctx context.Context, state any, questions Questions) (*Resp
 
 	body, err := json.Marshal(request{Model: c.model, State: state, Questions: questions})
 	if err != nil {
-		return nil, fmt.Errorf("jev: encode request: %w", err)
+		// A state holding a channel, a NaN or a cycle is the caller's
+		// mistake, and belongs with the other refusals they branch on.
+		return nil, fmt.Errorf("%w: encode request: %w", ErrInvalidRequest, err)
 	}
 
 	var lastErr error
@@ -192,15 +194,18 @@ func (c *Client) Ask(ctx context.Context, state any, questions Questions) (*Resp
 			}
 		}
 
-		resp, err := c.attempt(ctx, body)
+		resp, err := c.attempt(ctx, body, questions)
 		if err == nil {
 			return resp, nil
 		}
 		lastErr = err
 
 		// A refusal the service will repeat, or a cancelled context, ends it.
-		var apiErr *APIError
-		if !errors.As(err, &apiErr) || !apiErr.Retryable() {
+		// Asked of the error itself rather than of one concrete type, so that
+		// a transport failure is retried too -- it is the case retrying helps
+		// most, and it was previously the one case that ended the loop.
+		var can retryable
+		if !errors.As(err, &can) || !can.Retryable() {
 			return nil, err
 		}
 		if ctx.Err() != nil {
@@ -211,10 +216,11 @@ func (c *Client) Ask(ctx context.Context, state any, questions Questions) (*Resp
 }
 
 // attempt performs one round trip.
-func (c *Client) attempt(ctx context.Context, body []byte) (*Response, error) {
+func (c *Client) attempt(parent context.Context, body []byte, questions Questions) (*Response, error) {
+	ctx := parent
 	if c.timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		ctx, cancel = context.WithTimeout(parent, c.timeout)
 		defer cancel()
 	}
 
@@ -227,12 +233,17 @@ func (c *Client) attempt(ctx context.Context, body []byte) (*Response, error) {
 
 	httpResp, err := c.httpClient.Do(req)
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+		// Only the caller's own context ends the call. The per-attempt
+		// deadline is ours, and reporting it as context.DeadlineExceeded told
+		// the caller their deadline had passed when it had not -- and ended
+		// the retry loop, defeating the timeout that exists precisely so a
+		// stalled connection can be abandoned and tried again.
+		if parent.Err() != nil {
+			return nil, parent.Err()
 		}
 		// A connection that failed may or may not have been processed. The
 		// service has no side effects, so retrying is safe.
-		return nil, &APIError{StatusCode: 0, Message: err.Error(), sentinel: ErrOverloaded}
+		return nil, &TransportError{Err: err, Timeout: ctx.Err() != nil}
 	}
 	defer httpResp.Body.Close()
 
@@ -241,15 +252,22 @@ func (c *Client) attempt(ctx context.Context, body []byte) (*Response, error) {
 		return nil, fmt.Errorf("jev: read response: %w", err)
 	}
 
+	requestID := httpResp.Header.Get("X-Typesafe-Request-Id")
+
 	if httpResp.StatusCode != http.StatusOK {
 		apiErr := parseAPIError(httpResp.StatusCode, raw)
 		apiErr.retryAfter = parseRetryAfter(httpResp.Header.Get("Retry-After"))
+		apiErr.RequestID = requestID
 		return nil, apiErr
 	}
 
 	var resp Response
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, fmt.Errorf("jev: decode response: %w", err)
+		return nil, fmt.Errorf("%w: decode response: %w", ErrMalformedResponse, err)
+	}
+	resp.RequestID = requestID
+	if err := resp.Answers.covers(questions); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrMalformedResponse, err)
 	}
 	return &resp, nil
 }

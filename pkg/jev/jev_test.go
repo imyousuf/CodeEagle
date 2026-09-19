@@ -38,8 +38,13 @@ func TestQuestionValidation(t *testing.T) {
 			wantErr:   "needs options",
 		},
 		{
+			name:      "choice with a single option",
+			questions: Questions{"q": Choice("Which?", map[string]string{"only": "the only one"})},
+			wantErr:   "want 2 to 255",
+		},
+		{
 			name:      "choice option with no description",
-			questions: Questions{"q": Choice("Which?", map[string]string{"a": ""})},
+			questions: Questions{"q": Choice("Which?", map[string]string{"a": "", "b": "the other one"})},
 			wantErr:   `option "a" has no description`,
 		},
 		{

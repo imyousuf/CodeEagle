@@ -30,7 +30,77 @@ var (
 
 	// ErrOverloaded means the service is saturated. Transient.
 	ErrOverloaded = errors.New("jev: service overloaded")
+
+	// ErrUnavailable means the service could not be reached, or failed before
+	// producing an answer. Transient, and retried automatically.
+	//
+	// Every transport failure matches this: a name that does not resolve, a
+	// refused connection, a TLS failure, a reset, or an attempt that ran out
+	// of time. So does every 5xx.
+	ErrUnavailable = errors.New("jev: service unavailable")
+
+	// ErrMalformedResponse means the reply did not answer what was asked.
+	// The service itself cannot produce this, so it means something between
+	// here and there rewrote the body.
+	ErrMalformedResponse = errors.New("jev: malformed response")
 )
+
+// TransportError is a failure that happened before any reply arrived.
+//
+// It is kept distinct from a refusal because the two call for different
+// things: a refusal is the service telling you something about your request,
+// while this is the request never having been answered. Conflating them means
+// a typo in a base URL reports itself as the service being overloaded, and the
+// underlying *url.Error is unreachable through errors.As.
+type TransportError struct {
+	// Err is the failure as the HTTP client reported it.
+	Err error
+	// Timeout says the attempt exceeded the client's per-attempt budget
+	// rather than failing outright. The caller's own context was still live.
+	Timeout bool
+}
+
+func (e *TransportError) Error() string {
+	if e.Timeout {
+		return "jev: transport: attempt timed out: " + e.Err.Error()
+	}
+	return "jev: transport: " + e.Err.Error()
+}
+
+// Unwrap exposes the underlying failure, so errors.As reaches *url.Error and
+// the net package's own types.
+func (e *TransportError) Unwrap() error { return e.Err }
+
+// Is reports a transport failure as ErrUnavailable.
+func (e *TransportError) Is(target error) bool { return target == ErrUnavailable }
+
+// Retryable is always true: nothing was answered, and the service has no side
+// effects, so asking again is safe.
+func (e *TransportError) Retryable() bool { return true }
+
+// retryable is what Ask tests to decide whether to try again.
+type retryable interface{ Retryable() bool }
+
+// Violation is one schema failure from a validation refusal.
+//
+// The service validates in two places: its own checks refuse with a message,
+// while the schema layer beneath refuses with a list of exactly which fields
+// were wrong. Without this the second kind arrives as raw JSON in Message.
+type Violation struct {
+	// Loc is the path to the offending field, e.g. ["body", "state"].
+	Loc []string
+	// Msg is the explanation, e.g. "Field required".
+	Msg string
+	// Type is the machine-readable kind, e.g. "missing".
+	Type string
+}
+
+func (v Violation) String() string {
+	if len(v.Loc) == 0 {
+		return v.Msg
+	}
+	return strings.Join(v.Loc, ".") + ": " + v.Msg
+}
 
 // APIError is a refusal from the service, carrying whatever detail came back.
 type APIError struct {
@@ -41,6 +111,12 @@ type APIError struct {
 	// Message is the human-readable detail, when it sent one. Some refusals
 	// carry a kind and nothing else.
 	Message string
+	// Violations lists the individual schema failures, for a refusal that
+	// came from the schema layer rather than the service's own checks.
+	Violations []Violation
+	// RequestID is the service's identifier for this exchange. It is the one
+	// thing the vendor can look up, so it belongs on every failure.
+	RequestID string
 	// kind of failure this maps onto, for errors.Is.
 	sentinel error
 	// retryAfter is how long the service asked us to wait, if it said.
@@ -111,6 +187,26 @@ func parseAPIError(status int, body []byte) *APIError {
 			e.Kind, e.Message = obj.Kind, obj.Message
 		case json.Unmarshal(envelope.Detail, &text) == nil:
 			e.Message = text
+		default:
+			// The schema layer refuses with a list of what was wrong, rather
+			// than a sentence. Without this the raw JSON became the message.
+			var raw []struct {
+				Loc  []any  `json:"loc"`
+				Msg  string `json:"msg"`
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(envelope.Detail, &raw) == nil && len(raw) > 0 {
+				parts := make([]string, 0, len(raw))
+				for _, item := range raw {
+					v := Violation{Msg: item.Msg, Type: item.Type}
+					for _, segment := range item.Loc {
+						v.Loc = append(v.Loc, fmt.Sprint(segment))
+					}
+					e.Violations = append(e.Violations, v)
+					parts = append(parts, v.String())
+				}
+				e.Message = strings.Join(parts, "; ")
+			}
 		}
 	}
 	if e.Kind == "" && e.Message == "" {

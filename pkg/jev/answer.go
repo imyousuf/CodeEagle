@@ -47,6 +47,30 @@ type Response struct {
 	Model   string  `json:"model"`
 	Answers Answers `json:"answers"`
 	Usage   Usage   `json:"usage"`
+	// RequestID is the service's identifier for this exchange, taken from the
+	// response headers. It is what the vendor can look up, so it is worth
+	// logging alongside anything surprising.
+	RequestID string `json:"-"`
+}
+
+// covers checks that every question was answered, and answered in kind.
+//
+// The service cannot return anything else, so a mismatch means the body was
+// rewritten in transit -- by a gateway that aliases the primitive names, or a
+// proxy that reshaped the envelope. Failing here names the real problem;
+// failing later inside an accessor blames the caller's question set.
+func (a Answers) covers(questions Questions) error {
+	for name, q := range questions {
+		ans, ok := a[name]
+		if !ok {
+			return fmt.Errorf("no answer for question %q", name)
+		}
+		if ans.Type != q.Type {
+			return fmt.Errorf("question %q asked for %s, answered as %s",
+				name, q.Type, ans.Type)
+		}
+	}
+	return nil
 }
 
 // Noul returns the probability that the named proposition holds.

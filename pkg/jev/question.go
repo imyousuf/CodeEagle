@@ -45,7 +45,15 @@ const (
 
 // Limits the service imposes, or that it does not impose and should.
 const (
-	// MaxChoiceOptions is the most options one Choice may offer.
+	// MinChoiceOptions and MaxChoiceOptions bound a Choice.
+	//
+	// The upper bound the service enforces. The lower one it does not: a
+	// single-option choice is accepted and answered with that option at
+	// confidence 1.0 -- the same false certainty a one-level rubric produces,
+	// and for the same reason, since there was nothing to choose between.
+	// A caller who reaches one candidate has an answer already and does not
+	// need to pay to be told so.
+	MinChoiceOptions = 2
 	MaxChoiceOptions = 255
 	// MinScoreLevels and MaxScoreLevels bound a Score rubric.
 	//
@@ -136,9 +144,9 @@ func (q Question) validate(name string) error {
 		if !ok || len(options) == 0 {
 			return fmt.Errorf("question %q: a choice needs options", name)
 		}
-		if len(options) > MaxChoiceOptions {
-			return fmt.Errorf("question %q: %d options, at most %d allowed",
-				name, len(options), MaxChoiceOptions)
+		if len(options) < MinChoiceOptions || len(options) > MaxChoiceOptions {
+			return fmt.Errorf("question %q: %d options, want %d to %d",
+				name, len(options), MinChoiceOptions, MaxChoiceOptions)
 		}
 		for key, desc := range options {
 			if key == "" {
