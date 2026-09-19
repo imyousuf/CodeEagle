@@ -1191,25 +1191,36 @@ func newMeetingsTopicsCmd() *cobra.Command {
 func newMeetingsMigrateCmd() *cobra.Command {
 	var (
 		from   string
+		fromDB string
 		dryRun bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "migrate",
-		Short: "Move meetings indexed under a git branch into the shared meeting scope",
-		Long: `Move a meeting corpus filed under a git branch into the shared scope.
+		Short: "Move a meeting corpus into this configuration's shared meeting scope",
+		Long: `Move an existing meeting corpus into the shared meeting scope.
 
-Earlier versions stored meetings under whichever branch was checked out when
-they were indexed, which meant switching or renaming a branch hid the entire
-history and left the next sync re-indexing everything. Meetings now live in
-their own scope, independent of git.
+Two cases, and neither re-indexes anything: the data is already enriched, and
+re-deriving it would mean paying a model to reproduce what is on disk.
 
-This moves an existing corpus across. The scope appears only in the key and
-never in the stored data, so it is a key rename rather than a re-index, and it
-is safe to run twice.`,
+Within one database, --from names the git branch the meetings were filed under.
+Earlier versions stored them under whichever branch was checked out at the
+time, so switching or renaming a branch hid the whole history. The scope lives
+in the key and not in the stored data, so this is a key rename.
+
+Across databases, --from-db names the other database. A corpus indexed against
+one project often belongs somewhere more central — a home configuration
+reachable from any directory — and this carries it over. The source is opened
+read-only and never modified, so the original stays put until the result has
+been checked.
+
+The target scope is merged into rather than replaced, so a corpus split across
+two scopes can be collected into one by running this twice.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if from == "" {
-				return fmt.Errorf("--from is required: the branch name the meetings were indexed under")
+			if from == "" && fromDB == "" {
+				return fmt.Errorf(
+					"nothing to move: pass --from <branch> for a corpus in this database, " +
+						"or --from-db <path> for one in another")
 			}
 			cfg, err := config.Load()
 			if err != nil {
@@ -1221,27 +1232,90 @@ is safe to run twice.`,
 			}
 			defer store.Close()
 
-			res, err := store.Rescope(from, embedded.MeetingScope, dryRun)
-			if err != nil {
-				return err
+			out := cmd.OutOrStdout()
+			var res *embedded.RescopeResult
+
+			if fromDB != "" {
+				// Default to the shared scope: a corpus in another database is
+				// usually already there rather than under a branch.
+				srcScope := from
+				if srcScope == "" {
+					srcScope = embedded.MeetingScope
+				}
+				before, err := store.ScopeNodeTypes(embedded.MeetingScope)
+				if err != nil {
+					return err
+				}
+				res, err = store.ImportScopeFrom(cmd.Context(),
+					expandPath(fromDB), srcScope, embedded.MeetingScope, dryRun)
+				if err != nil {
+					return err
+				}
+				if !dryRun {
+					reportScopeGrowth(out, before, store)
+				}
+			} else {
+				res, err = store.Rescope(from, embedded.MeetingScope, dryRun)
+				if err != nil {
+					return err
+				}
 			}
 
-			out := cmd.OutOrStdout()
 			verb := "Moved"
 			if dryRun {
 				verb = "Would move"
 			}
-			fmt.Fprintf(out, "%s %d keys from %q to %q.\n", verb, res.Keys, res.From, res.To)
+			source := fmt.Sprintf("%q", res.From)
+			if fromDB != "" {
+				source = fmt.Sprintf("%q in %s", res.From, expandPath(fromDB))
+			}
+			fmt.Fprintf(out, "%s %d %s from %s to %q.\n", verb, res.Keys, unit(fromDB), source, res.To)
 			if res.Keys == 0 {
-				fmt.Fprintf(out, "Nothing found under %q. Check the branch name with `git branch`.\n", from)
+				if fromDB != "" {
+					fmt.Fprintf(out, "Nothing found under %q there.\n", res.From)
+				} else {
+					fmt.Fprintf(out, "Nothing found under %q. Check the branch name with `git branch`.\n", from)
+				}
 			}
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVar(&from, "from", "", "the git branch the meetings were indexed under")
+	cmd.Flags().StringVar(&from, "from", "",
+		"the scope to move from: a git branch, or the scope to read in --from-db")
+	cmd.Flags().StringVar(&fromDB, "from-db", "",
+		"another graph database to take the corpus from; it is opened read-only")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report what would move without changing anything")
 	return cmd
+}
+
+// unit names what was counted, which differs between the two paths: a rename
+// within one database moves keys, while a copy between databases moves nodes.
+func unit(fromDB string) string {
+	if fromDB != "" {
+		return "nodes"
+	}
+	return "keys"
+}
+
+// reportScopeGrowth says what the meeting scope gained, so a move that landed
+// nothing is obvious rather than silently reported as a success.
+func reportScopeGrowth(out io.Writer, before map[graph.NodeType]int, store *embedded.BranchStore) {
+	after, err := store.ScopeNodeTypes(embedded.MeetingScope)
+	if err != nil {
+		return
+	}
+	types := make([]string, 0, len(after))
+	for typ, n := range after {
+		if gained := n - before[typ]; gained > 0 {
+			types = append(types, fmt.Sprintf("%s +%d", typ, gained))
+		}
+	}
+	if len(types) == 0 {
+		return
+	}
+	sort.Strings(types)
+	fmt.Fprintf(out, "  %s\n", strings.Join(types, ", "))
 }
 
 // --- taxonomy ---

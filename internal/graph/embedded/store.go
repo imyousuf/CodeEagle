@@ -30,6 +30,9 @@ type BranchStore struct {
 	db           *badger.DB
 	writeBranch  string
 	readBranches []string // ordered by priority; first branch wins for duplicate IDs
+	// path is where this database lives, so an operation taking another
+	// database as an argument can tell whether it is the same one.
+	path string
 }
 
 // NewBranchStore opens (or creates) a BadgerDB-backed graph store at dbPath with
@@ -41,7 +44,7 @@ func NewBranchStore(dbPath, writeBranch string, readBranches []string) (*BranchS
 	if err != nil {
 		return nil, fmt.Errorf("open badger db: %w", err)
 	}
-	return &BranchStore{db: db, writeBranch: writeBranch, readBranches: readBranches}, nil
+	return &BranchStore{db: db, writeBranch: writeBranch, readBranches: readBranches, path: dbPath}, nil
 }
 
 // NewReadOnlyBranchStore opens a BadgerDB-backed graph store in read-only mode,
@@ -53,7 +56,7 @@ func NewReadOnlyBranchStore(dbPath, writeBranch string, readBranches []string) (
 	if err != nil {
 		return nil, err
 	}
-	return &BranchStore{db: db, writeBranch: writeBranch, readBranches: readBranches}, nil
+	return &BranchStore{db: db, writeBranch: writeBranch, readBranches: readBranches, path: dbPath}, nil
 }
 
 // openBadgerReadOnly tries to open BadgerDB in read-only mode. If the WAL needs

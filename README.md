@@ -573,6 +573,15 @@ A corpus indexed by an older version moves across with
 `codeeagle meetings migrate --from <branch>`. The scope appears only in the key
 and never in the stored value, so it is a key rename rather than a re-index.
 
+`--from-db <path>` takes a corpus out of a *different* database — a project's
+index, say, when the meetings belong somewhere more central like the home
+configuration, reachable from any directory. The source is opened read-only and
+never modified, so the original stays put until you have checked the result.
+Neither form re-enriches: the data is already there, and re-deriving it would
+mean paying a model to reproduce what is on disk. The target scope is merged
+into rather than replaced, so a corpus split across two scopes is collected by
+running the command twice.
+
 ### Storage
 
 The embedded graph store uses [BadgerDB](https://github.com/dgraph-io/badger) with secondary indexes. Data is stored per-branch with fallback reads (current branch -> default branch). No external database required.

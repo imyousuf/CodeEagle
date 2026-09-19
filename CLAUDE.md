@@ -127,6 +127,7 @@ codeeagle meetings people               # People, speaking time, follow-up count
 codeeagle meetings topics [--themes]    # Topics, flat or as the induced hierarchy
 codeeagle meetings taxonomy [--rebuild] [--depth N]   # Group topics into concepts
 codeeagle meetings migrate --from <branch>            # Move an older corpus into scope
+codeeagle meetings migrate --from-db <path>           # ...or out of another database
 codeeagle meetings actions [--person P] [--unassigned]     # Follow-ups
 codeeagle meetings identify             # Review unidentified speakers
 codeeagle meetings label <label> <name> --meeting <id>     # Assign by hand

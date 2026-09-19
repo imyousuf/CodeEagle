@@ -1,9 +1,12 @@
 package embedded
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -303,4 +306,72 @@ func appendScopes(read []string, extra ...string) []string {
 		}
 	}
 	return read
+}
+
+// ImportScopeFrom copies a scope out of another database into this one.
+//
+// Meetings are not tied to a repository, so a corpus indexed against one
+// project's database often belongs somewhere more central — a home
+// configuration reachable from any directory. The data is already enriched,
+// and re-deriving it would mean paying a model to reproduce what is sitting on
+// disk, so this moves it rather than rebuilding it.
+//
+// The target scope is merged into, not replaced, so several sources can be
+// collected into one. The source is opened read-only and is never modified:
+// the caller keeps their original until they have checked the result.
+func (s *BranchStore) ImportScopeFrom(
+	ctx context.Context, srcPath, srcScope, dstScope string, dryRun bool,
+) (*RescopeResult, error) {
+	if srcPath == "" || srcScope == "" || dstScope == "" {
+		return nil, fmt.Errorf("source path, source scope and target scope are all required")
+	}
+	if abs, err := filepath.Abs(srcPath); err == nil {
+		if same, err := filepath.Abs(s.path); err == nil && same == abs {
+			return nil, fmt.Errorf("source and target are the same database; use --from without --from-db")
+		}
+	}
+
+	src, err := NewReadOnlyBranchStore(srcPath, srcScope, []string{srcScope})
+	if err != nil {
+		return nil, fmt.Errorf("open source database %s: %w", srcPath, err)
+	}
+	defer src.Close()
+
+	counts, err := src.ScopeNodeTypes(srcScope)
+	if err != nil {
+		return nil, err
+	}
+	if len(counts) == 0 {
+		return &RescopeResult{From: srcScope, To: dstScope}, nil
+	}
+	allowed := meetingScopeTypes()
+	var foreign []string
+	for typ, n := range counts {
+		if !allowed[typ] {
+			foreign = append(foreign, fmt.Sprintf("%s=%d", typ, n))
+		}
+	}
+	if len(foreign) > 0 {
+		sort.Strings(foreign)
+		return nil, fmt.Errorf(
+			"scope %q in %s holds an indexed codebase (%s), not just meetings",
+			srcScope, srcPath, strings.Join(foreign, " "))
+	}
+
+	result := &RescopeResult{From: srcScope, To: dstScope}
+	for _, n := range counts {
+		result.Keys += n
+	}
+	if dryRun {
+		return result, nil
+	}
+
+	var buf bytes.Buffer
+	if err := src.ExportBranch(ctx, &buf, srcScope); err != nil {
+		return result, fmt.Errorf("read scope %q: %w", srcScope, err)
+	}
+	if _, err := s.MergeIntoBranch(ctx, &buf, dstScope); err != nil {
+		return result, fmt.Errorf("write scope %q: %w", dstScope, err)
+	}
+	return result, nil
 }
