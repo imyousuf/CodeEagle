@@ -49,7 +49,7 @@ codeeagle update
 
 ### Build from Source
 
-Requires Go 1.24+ and a C compiler (gcc or clang) — needed for [tree-sitter](https://tree-sitter.github.io/tree-sitter/) parsing via CGO.
+Requires Go 1.27+ and a C compiler (gcc or clang) — needed for [tree-sitter](https://tree-sitter.github.io/tree-sitter/) parsing via CGO.
 
 ```bash
 go install github.com/imyousuf/CodeEagle/cmd/codeeagle@latest
@@ -166,6 +166,32 @@ sweeps on an interval for the same reason — an unchanged recording costs a fil
 read and no model call — and leaves a transcript alone until it has been idle
 for a moment, so a meeting still being recorded is not indexed half-complete.
 
+#### Supported formats
+
+| Format | Written by | Speakers |
+|--------|-----------|----------|
+| `session.json` | local diarizing recorder | anonymous (`Person 1`, `You`) |
+| `.vtt` (WebVTT) | Zoom, Teams live captions | named |
+| `.srt` | Zoom and most recorders | named, when the tool writes them |
+| `.docx` | Teams "Meeting Recording" transcript export | named |
+
+Discovery walks the configured directory, so a folder of loose downloads and a
+folder of per-session directories both work. Files that turn out to be
+something else are counted and skipped, not reported as failures.
+
+Where a transcript names its speakers, identification has nothing to work out
+and the model call is skipped entirely — it would cost money to produce a worse
+answer than the file already contains. Those identities are recorded as
+resolved by the transcript rather than by inference, and the speaking-time
+threshold is dropped for them: it exists to filter diarization debris, which a
+named transcript does not have, and a colleague who said one word was still in
+the meeting.
+
+One meeting is often exported twice — a caption file and a Word document of the
+same call. Duplicates are dropped, keeping the format that carries more, but
+only when the dates agree as well as the names: a weekly standup exports to the
+same filename every week.
+
 #### How speakers are identified
 
 Recording software separates voices but does not know whose they are, so it
@@ -189,6 +215,12 @@ Identity is resolved across recordings too. A transcriber spells the same name
 differently between meetings ("Imran" and "Imron"), so variants are folded in
 as aliases rather than creating a second person. Names that merely resemble one
 another are kept apart.
+
+Where both names carry a surname, the surname decides: "Chris Banner" and
+"Christopher Stookey" are two colleagues, not one spelled two ways. Where one
+name has no surname — all a diarized recording ever offers — the given name
+settles it. Names written surname-first, as some directories export them, are
+recognized as the same person.
 
 People discovered in earlier meetings are fed back as known names for later
 ones, so recordings are processed in the order the meetings happened.

@@ -158,6 +158,22 @@ All agents are grounded in the knowledge graph — they do NOT modify code, they
 - Highlight complexity hotspots in modified code
 - Security pattern checks (auth, input validation, secrets)
 
+### 4a. Transcript Formats
+
+Meetings are recorded by whatever tool the participants used, so indexing reads
+several layouts through one `transcript.Format` interface: the local recorder's
+diarized `session.json`, WebVTT, SRT, and the Word document Teams exports for a
+meeting recording. Discovery walks for any of them, so loose downloads and
+per-session directories both work.
+
+The distinction that matters is whether the file names its speakers. A local
+recording hears distinct voices and calls them "Person 1"; a conferencing
+platform knows who was in the call. Where names are present the identification
+pass is skipped entirely — it would cost a model call to produce a worse answer
+than the file already contains — and those identities are marked as resolved by
+the transcript. The speaking-time threshold is also dropped for them, since it
+exists to filter diarization debris that a named transcript does not have.
+
 ### 4b. Meeting Transcript Understanding
 
 Transcripts arrive diarized but anonymous: voices are labelled "Person 1",
@@ -208,6 +224,12 @@ Design constraints that came out of measuring the real corpus:
   while still reading plausibly. Depth is a choice, defaulting to two.
 - **Meetings are not branch-scoped.** They live outside the per-branch key scopes
   and are added as a fallback read, so they survive branch switches.
+- **Compare surnames when both names have one.** Matching on given names alone
+  was right for diarized transcripts, which offer nothing else, but against full
+  names from a conferencing platform it merged distinct colleagues who happened
+  to share a first name.
+- **A file that is not a transcript is not a failure.** Scanning a folder of
+  mixed downloads is normal; unrecognized files are counted and skipped.
 
 Enrichment runs as two passes: identity first, then content read with real
 names substituted in. The order matters — "Person 3 will update the schema" is
@@ -365,7 +387,7 @@ codeeagle/
 
 ## Tech Stack
 
-- **Language:** Go 1.24+
+- **Language:** Go 1.27+
 - **CLI Framework:** cobra
 - **File Watching:** fsnotify
 - **Go AST Parsing:** stdlib `go/ast`, `go/parser`, `go/types`
