@@ -93,10 +93,6 @@ func init() {
 		registerFacesCmd(rootCmd)
 	}
 
-	// Conditionally register app command (requires -tags app build).
-	if registerAppCmd != nil {
-		registerAppCmd(rootCmd)
-	}
 }
 
 // initConfig reads in config file and ENV variables if set.

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/dgraph-io/badger/v4"
-	"github.com/imyousuf/CodeEagle/internal/badgerutil"
 )
 
 const (
@@ -38,21 +37,11 @@ type Store struct {
 
 // OpenStore opens (or creates) the face store at the given directory path.
 func OpenStore(dbPath string) (*Store, error) {
-	opts := badgerutil.TunedOptions(dbPath, badgerutil.DBRoleTertiary)
+	opts := badger.DefaultOptions(dbPath)
+	opts.Logger = nil
 	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, fmt.Errorf("open face store: %w", err)
-	}
-	return &Store{db: db}, nil
-}
-
-// OpenStoreReadOnly opens the face store in read-only mode. Multiple readers
-// can coexist with each other and with one read-write opener.
-func OpenStoreReadOnly(dbPath string) (*Store, error) {
-	opts := badgerutil.TunedOptionsReadOnly(dbPath, badgerutil.DBRoleTertiary)
-	db, err := badger.Open(opts)
-	if err != nil {
-		return nil, fmt.Errorf("open face store (ro): %w", err)
 	}
 	return &Store{db: db}, nil
 }
@@ -114,25 +103,6 @@ func (s *Store) UpdateCluster(imagePath string, faceIdx, clusterID int) error {
 		}
 		return txn.Set([]byte(prefixFaceCluster+key), []byte(strconv.Itoa(clusterID)))
 	})
-}
-
-// GetFace returns a single face record by image path and face index.
-func (s *Store) GetFace(imagePath string, faceIdx int) (*FaceRecord, error) {
-	key := faceKey(imagePath, faceIdx)
-	var rec FaceRecord
-	err := s.db.View(func(txn *badger.Txn) error {
-		item, err := txn.Get([]byte(prefixFaceBox + key))
-		if err != nil {
-			return err
-		}
-		return item.Value(func(val []byte) error {
-			return json.Unmarshal(val, &rec)
-		})
-	})
-	if err != nil {
-		return nil, fmt.Errorf("get face %s:%d: %w", imagePath, faceIdx, err)
-	}
-	return &rec, nil
 }
 
 // AllFaces returns all face records from the store.

@@ -15,7 +15,6 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/faces"
 	"github.com/imyousuf/CodeEagle/internal/graph"
-	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 )
 
 func init() {
@@ -38,7 +37,6 @@ func newFacesCmd() *cobra.Command {
 	cmd.AddCommand(newFacesSplitCmd())
 	cmd.AddCommand(newFacesUnlabeledCmd())
 	cmd.AddCommand(newFacesSuggestCmd())
-	cmd.AddCommand(newFacesPersonCmd())
 
 	return cmd
 }
@@ -192,7 +190,7 @@ func newFacesScanCmd() *cobra.Command {
 
 			labels := faces.AgglomerativeClustering(embeddings, imgPaths, sim, 2)
 			absorbThr := sim * 0.75
-			labels = faces.AbsorbNoise(embeddings, imgPaths, labels, absorbThr, nil)
+			labels = faces.AbsorbNoise(embeddings, imgPaths, labels, absorbThr)
 
 			for i, f := range allFaces {
 				if err := store.UpdateCluster(f.ImagePath, f.FaceIdx, labels[i]); err != nil {
@@ -312,7 +310,7 @@ func newFacesLabelCmd() *cobra.Command {
 			}
 
 			// Create NodePerson in graph if available.
-			graphStore, _, gsErr := openReadOnlyBranchStore(cfg)
+			graphStore, _, gsErr := openBranchStore(cfg)
 			if gsErr == nil {
 				defer graphStore.Close()
 				personID := graph.NewNodeID(string(graph.NodePerson), "", name)
@@ -638,92 +636,6 @@ func newFacesSuggestCmd() *cobra.Command {
 					s.a, labelA, s.b, labelB, s.avgSim, s.maxSim)
 			}
 
-			return nil
-		},
-	}
-}
-
-func newFacesPersonCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "person",
-		Short: "Manage recognized persons",
-	}
-	cmd.AddCommand(newFacesPersonAddCmd())
-	cmd.AddCommand(newFacesPersonListCmd())
-	return cmd
-}
-
-func newFacesPersonAddCmd() *cobra.Command {
-	var relationship string
-
-	cmd := &cobra.Command{
-		Use:   "add <name>",
-		Short: "Add a new person for face recognition",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-
-			cfg, err := config.Load()
-			if err != nil {
-				return fmt.Errorf("load config: %w", err)
-			}
-
-			graphStore, _, gsErr := openReadOnlyBranchStore(cfg)
-			if gsErr != nil {
-				return fmt.Errorf("open graph store: %w", gsErr)
-			}
-			defer graphStore.Close()
-
-			p := &embedded.Person{Name: name}
-			if relationship != "" {
-				p.Relationships = []string{relationship}
-			}
-			if err := graphStore.CreatePerson(p); err != nil {
-				return fmt.Errorf("create person: %w", err)
-			}
-
-			fmt.Fprintf(cmd.OutOrStdout(), "Created person %q (id: %s)\n", name, p.ID)
-			return nil
-		},
-	}
-
-	cmd.Flags().StringVar(&relationship, "relationship", "", "relationship type (son, daughter, father, mother, brother, sister, husband, wife, spouse, father-in-law, mother-in-law, brother-in-law, sister-in-law, son-in-law, daughter-in-law, grandfather, grandmother, grandson, granddaughter, uncle, aunt, nephew, niece, cousin, friend, colleague, neighbor, other)")
-	return cmd
-}
-
-func newFacesPersonListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "list",
-		Short: "List all known persons",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, err := config.Load()
-			if err != nil {
-				return fmt.Errorf("load config: %w", err)
-			}
-
-			graphStore, _, gsErr := openReadOnlyBranchStore(cfg)
-			if gsErr != nil {
-				return fmt.Errorf("open graph store: %w", gsErr)
-			}
-			defer graphStore.Close()
-
-			persons, err := graphStore.ListPersons()
-			if err != nil {
-				return fmt.Errorf("list persons: %w", err)
-			}
-
-			if len(persons) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "No persons registered.")
-				return nil
-			}
-
-			for _, p := range persons {
-				rel := ""
-				if len(p.Relationships) > 0 {
-					rel = " [" + strings.Join(p.Relationships, ", ") + "]"
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%s  %s%s\n", p.ID[:8], p.Name, rel)
-			}
 			return nil
 		},
 	}
