@@ -125,6 +125,23 @@ type TranscriptsConfig struct {
 	// can live in the system keyring instead of on disk. For example:
 	// "keyring get baseten.co me@example.com".
 	APIKeyCommand string `mapstructure:"api_key_command" yaml:"api_key_command,omitempty"`
+	// JevAPIKey enables adjudicating speaker identity with the TypeSafe Jev
+	// decision model instead of the language model.
+	//
+	// Optional. Without it identification runs as it always has. With it, the
+	// confidence attached to an identification is calibrated against outcomes
+	// rather than self-reported — which matters because MinConfidence decides
+	// whether a speaker is written into the graph at all.
+	//
+	// Keep the key out of this file; the value is expanded at read time:
+	//
+	//	jev_api_key: ${JEV_API_KEY}
+	//	jev_api_key: $(keyring get typesafe.ai me@example.com)
+	JevAPIKey string `mapstructure:"jev_api_key" yaml:"jev_api_key,omitempty"`
+	// JevModel pins the decision model version. Defaults to a pinned release
+	// rather than a rolling alias, because a confidence threshold tuned
+	// against one set of weights does not transfer silently to another.
+	JevModel string `mapstructure:"jev_model" yaml:"jev_model,omitempty"`
 	// MinConfidence is the score at or above which a speaker is automatically
 	// identified. Below it, the speaker is left for manual review.
 	MinConfidence float64 `mapstructure:"min_confidence" yaml:"min_confidence,omitempty"`
@@ -422,6 +439,13 @@ func Load() (*Config, error) {
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("error parsing config: %w", err)
+	}
+
+	// Resolve ${VAR} and $(command) references before anything reads a value,
+	// so a credential can live in the environment or the system keyring
+	// rather than in a file that gets committed.
+	if err := expandConfig(&cfg); err != nil {
+		return nil, fmt.Errorf("error expanding config: %w", err)
 	}
 
 	cfg.ConfigDir = configDir

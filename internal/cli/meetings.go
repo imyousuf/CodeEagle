@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
+	"github.com/imyousuf/CodeEagle/internal/decide"
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/indexer"
@@ -91,7 +92,11 @@ meetings costs nothing for the ones already done.`,
 			defer pipeline.close()
 
 			fmt.Fprintf(out, "Graph scope: %s\n", pipeline.branch)
-			fmt.Fprintf(out, "Provider: %s (%s)\n\n", pipeline.client.Provider(), pipeline.client.Model())
+			fmt.Fprintf(out, "Provider: %s (%s)\n", pipeline.client.Provider(), pipeline.client.Model())
+			if judge := pipeline.analyzer.JudgeName(); judge != "" {
+				fmt.Fprintf(out, "Speakers:  %s\n", judge)
+			}
+			fmt.Fprintln(out)
 
 			report, err := pipeline.indexer.Run(cmd.Context())
 			if err != nil {
@@ -510,6 +515,18 @@ func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*mee
 			return tree
 		},
 	})
+	// A decision model, when one is configured, adjudicates who was speaking.
+	// Everything else — titles, summaries, decisions, follow-ups — stays with
+	// the language model, because none of it is a choice between known
+	// options.
+	if judge, err := newSpeakerJudge(tc); err != nil {
+		_ = client.Close()
+		_ = store.Close()
+		return nil, err
+	} else if judge != nil {
+		analyzer = analyzer.WithJudge(judge)
+	}
+
 	writer := transcript.NewWriter(store, people, transcript.WriterOptions{
 		MinConfidence: tc.MinConfidence,
 		Owner:         tc.Owner,
@@ -1633,6 +1650,25 @@ func speakerStillResolvesTo(
 		}
 	}
 	return false, nil
+}
+
+// newSpeakerJudge builds the decision model that adjudicates speaker
+// identity, or returns nil when none is configured.
+//
+// Optional by design: without a key, identification runs through the language
+// model exactly as before, and nothing about an existing setup changes.
+func newSpeakerJudge(tc config.TranscriptsConfig) (decide.Judge, error) {
+	key := strings.TrimSpace(tc.JevAPIKey)
+	if key == "" {
+		return nil, nil
+	}
+	judge, err := decide.NewJevJudge(key, tc.JevModel)
+	if err != nil {
+		// The key is in hand but unusable, which is a configuration mistake
+		// rather than a reason to quietly fall back to the other path.
+		return nil, fmt.Errorf("speaker decision model: %w", err)
+	}
+	return judge, nil
 }
 
 // openMeetingStore opens the meeting graph for writing.

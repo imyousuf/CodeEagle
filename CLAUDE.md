@@ -236,6 +236,16 @@ Design constraints that came out of measuring the real corpus:
 - **Refuse an ambiguous name.** Surnames only decide when both sides have one, so
   a bare first name matches every colleague who shares it. Resolution reports
   the ambiguity instead of choosing, and the speaker stays unidentified.
+- **Judgment and writing are different jobs.** Choosing which of a few known
+  people a voice belongs to is a bounded decision whose confidence is gated on;
+  writing a summary is generation. Setting `transcripts.jev_api_key` routes only
+  the first to a decision model (`internal/decide`, `pkg/jev`), which answers
+  with a calibrated probability rather than a self-reported one. Titles,
+  summaries, decisions and follow-ups stay with the language model. Measured
+  over 70 real meetings the decision model is markedly more conservative, and
+  most of its disagreements fall below the 0.70 gate and are therefore
+  discarded — which is the threshold doing its job. There is no ground truth
+  for the cases where the two differ, so it stays opt-in.
 - **Compare surnames when both names have one.** Matching on given names alone
   was right for diarized transcripts, which offer nothing else, but against full
   names from a conferencing platform it merged distinct colleagues who happened
@@ -277,6 +287,12 @@ Language parsing and graph extraction:
 - Extensible parser interface for adding new languages
 
 ### 6. Configuration
+
+Any configuration value may reference the environment or a command, resolved
+when the file is read: `${VAR}`, `${VAR:-fallback}`, `$(command)`, and `$$` for
+a literal dollar. This is how a credential stays out of a file that gets
+committed. A failing command is an error rather than an empty value, and
+neither the value nor the command's output ever reaches an error message.
 
 Project config lives in `.codeeagle.yaml` (or similar) at the project root:
 
@@ -337,6 +353,7 @@ transcripts:
   reasoning_effort: low       # low cuts cost without hurting identification
   max_tokens: 65536           # must be generous: reasoning is spent first
   min_confidence: 0.70
+  jev_api_key: ${JEV_API_KEY}   # optional; adjudicate speakers with a decision model
   concurrency: 8
   roster: ["Kevin", "Mona"]   # optional, and markedly improves accuracy
   exclude_names: ["Acme"]     # terms that read like names in conversation
@@ -368,6 +385,7 @@ codeeagle/
 │   ├── gitutil/            # Git operations (branch detection, diffs)
 │   ├── graph/              # Knowledge graph interface + embedded store (BadgerDB)
 │   ├── indexer/            # Orchestrates parsing -> graph updates + LLM summarization
+│   ├── decide/             # Bounded decisions with calibrated confidence (Jev-backed); speaker adjudication
 │   ├── docs/               # Document content extraction providers (Ollama, Vertex AI) with topic extraction + caching
 │   ├── linker/             # Cross-service linker (11 phases: services, endpoints, API calls, deps, imports, implements, tests, calls, documents, duplicates, symlinks)
 │   ├── llm/                # LLM provider implementations (Anthropic, Vertex AI, Claude CLI)
@@ -395,6 +413,7 @@ codeeagle/
 │   ├── queue/              # Async job queue with worker pool (face detection, clustering, document enrichment)
 │   ├── transcript/         # Meeting transcripts: loading, speaker identification, enrichment, graph projection
 │   └── watcher/            # Filesystem watcher (fsnotify + gitignore)
+├── pkg/jev/                # TypeSafe Jev client (decision model: noul/choice/score)
 ├── pkg/llm/                # Public LLM client interface + provider registry
 ├── testdata/               # Test fixtures
 ├── go.mod

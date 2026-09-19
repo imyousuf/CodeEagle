@@ -394,6 +394,11 @@ transcripts:
   min_confidence: 0.70            # bar for automatic identification
   concurrency: 8
 
+  # Optional: adjudicate who was speaking with a decision model instead of
+  # the language model. See "Deciding who spoke" below.
+  jev_api_key: ${JEV_API_KEY}
+  # jev_model: jev-1.13.0
+
   roster:                         # optional, and markedly improves accuracy:
     - Kevin                       # it turns an open guess into a choice
     - Mona                        # among known colleagues
@@ -421,6 +426,57 @@ same code the real run uses, so it counts only what would actually be enriched:
 recordings already indexed and unchanged are excluded, and transcripts found
 among your indexed documents are included. It opens the graph read-only and
 needs no API key.
+
+### Keeping credentials out of the config file
+
+Any value in the configuration may reference the environment or a command, and
+is resolved when the file is read:
+
+```yaml
+jev_api_key: ${JEV_API_KEY}                              # an environment variable
+jev_api_key: ${JEV_API_KEY:-}                            # ...with a fallback
+jev_api_key: $(keyring get typesafe.ai you@example.com)  # a command's output
+```
+
+So a wrapper can put the key in the environment, or the config can go to the
+system keyring itself. `$$` is a literal dollar, so a value that merely
+contains one is left alone.
+
+A failing command is an error rather than an empty value — an empty credential
+surfaces much later as a confusing authentication failure. Neither the value
+nor the command's output ever appears in an error message.
+
+This is the same bargain `git` credential helpers make: running a command named
+in a config file is a real capability, and an intentional one. Nothing runs
+unless you wrote a `$(...)` yourself.
+
+### Deciding who spoke
+
+Identifying a speaker is not writing — it is choosing one of a few known
+people, or declining. `min_confidence` decides whether that choice is written
+into the graph at all, which makes the number attached to it load-bearing. A
+language model reports its own confidence, and reports it high whether or not
+it is right.
+
+Setting `jev_api_key` routes that one judgment to
+[TypeSafe Jev](https://www.datacamp.com/blog/system-one-models-jev), a decision
+model that answers with a calibrated probability instead of prose. The
+deterministic name-hint evidence goes with the transcript — on a sample meeting
+that moved a correct identification from 0.58 to 0.98 — and `unresolved` is
+always among the options, because leaving a speaker unnamed is a correct
+answer.
+
+Everything else stays where it was. Titles, topic summaries, decisions and
+follow-ups are all writing, and none of them go to the decision model.
+
+Measured over 70 real meetings against the identifications already in the
+graph: agreed on 27, disagreed on 6, found 9 the language model missed, and
+declined 43 that it had named. Most disagreements fall *below* the 0.70 gate
+and are therefore rejected rather than recorded — doubt expressed as a low
+number instead of a confident guess. There is no ground truth for the 43, so
+this is a precision/recall tradeoff rather than a clear improvement, and it
+stays opt-in for that reason. Identification cost about $0.0007 per meeting and
+ran in roughly a second.
 
 ### LLM Providers
 

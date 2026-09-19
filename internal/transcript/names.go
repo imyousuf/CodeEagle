@@ -233,6 +233,16 @@ func Surname(s string) string {
 	return ""
 }
 
+// GivenName returns the leading part of a name, or the whole of it when there
+// is only one part.
+func GivenName(s string) string {
+	n := NormalizeName(s)
+	if i := strings.IndexByte(n, ' '); i > 0 {
+		return n[:i]
+	}
+	return n
+}
+
 // nicknames maps familiar forms to the formal name they abbreviate. Entries are
 // one-directional keys; matching consults the table in both directions.
 var nicknames = map[string]string{

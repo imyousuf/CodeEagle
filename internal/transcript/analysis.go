@@ -33,8 +33,12 @@ const (
 	MethodOwnerAnchor = "owner_anchor"
 	// MethodEvidence means deterministic hint voting was decisive on its own.
 	MethodEvidence = "evidence"
-	// MethodLLM means a model adjudicated the evidence.
+	// MethodLLM means a language model adjudicated the evidence.
 	MethodLLM = "llm"
+	// MethodJudge means a decision model adjudicated the evidence. Recorded
+	// separately from MethodLLM because the confidence means something
+	// different: it is calibrated against outcomes rather than self-reported.
+	MethodJudge = "judge"
 	// MethodManual means a human assigned the identity.
 	MethodManual = "manual"
 	// MethodTranscript means the transcript itself named the speaker, as an

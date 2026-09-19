@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/imyousuf/CodeEagle/internal/decide"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 
@@ -21,6 +22,31 @@ import (
 type Analyzer struct {
 	client llm.Client
 	opts   Options
+	// judge adjudicates speaker identity when one is configured.
+	//
+	// Optional, and nil by default: without it identification runs exactly as
+	// it always has, through the language model. Its value is the confidence
+	// figure — a speaker enters the graph only when confidence clears
+	// MinConfidence, and a self-reported number makes that threshold a
+	// formality rather than a filter.
+	judge decide.Judge
+}
+
+// WithJudge returns an analyzer that adjudicates speaker identity with a
+// decision model. A nil judge leaves the analyzer unchanged.
+func (a *Analyzer) WithJudge(j decide.Judge) *Analyzer {
+	if j != nil {
+		a.judge = j
+	}
+	return a
+}
+
+// JudgeName names the decision model in use, or "" when there is none.
+func (a *Analyzer) JudgeName() string {
+	if a.judge == nil {
+		return ""
+	}
+	return a.judge.Name()
 }
 
 // Options configures enrichment.
@@ -167,6 +193,18 @@ func (a *Analyzer) Identify(ctx context.Context, s *Session, usage *Usage) ([]Sp
 		return identities, nil
 	}
 
+	// Whether the recording told us which voice is the host. When it did,
+	// every remaining label is by construction somebody else.
+	hostAnchored := len(identities) > 0
+
+	if a.judge != nil {
+		judged, err := a.adjudicate(ctx, s, unresolved, hints, hostAnchored)
+		if err != nil {
+			return identities, err
+		}
+		return append(identities, judged...), nil
+	}
+
 	prompt := a.identityPrompt(s, unresolved, hints)
 	var out struct {
 		Speakers []SpeakerIdentity `json:"speakers"`
@@ -185,6 +223,15 @@ func (a *Analyzer) Identify(ctx context.Context, s *Session, usage *Usage) ([]Sp
 			continue
 		}
 		id.Name = a.sanitizeName(id.Name)
+		if hostAnchored && a.isOwnerName(id.Name) {
+			// The host is whoever's microphone made the recording, and that
+			// label is already resolved. Another voice claiming the host's
+			// name is a different person who happens to share it, or a
+			// mishearing — either way, not the host. Accepting it would put a
+			// stranger's words in the host's mouth and record them as having
+			// attended twice.
+			id.Name = ""
+		}
 		if id.Name == "" {
 			id.Confidence = 0
 		}
@@ -192,6 +239,41 @@ func (a *Analyzer) Identify(ctx context.Context, s *Session, usage *Usage) ([]Sp
 		identities = append(identities, id)
 	}
 	return identities, nil
+}
+
+// isOwnerName reports whether a name refers to the recording's host.
+//
+// Checked against the configured aliases too, since the point is to catch a
+// name arriving by a route other than the microphone anchor, and transcribers
+// spell the same person several ways.
+func (a *Analyzer) isOwnerName(name string) bool {
+	if name == "" || a.opts.Owner == "" {
+		return false
+	}
+	// A surname settles it. Two people who share a given name and differ in
+	// surname are two people, whatever spellings the host goes by — and the
+	// aliases are bare given names, which would otherwise match every
+	// colleague who happens to share one.
+	ownerSurname := Surname(a.opts.Owner)
+	if s := Surname(name); s != "" && ownerSurname != "" && s != ownerSurname {
+		return false
+	}
+	if SameName(a.opts.Owner, name) {
+		return true
+	}
+	// Compare given names as well, so an alias recorded as a bare first name
+	// still recognizes the host in a transcript that supplies a surname —
+	// "Emran Yousuf" when the host is Imran Yousuf known also as Emran.
+	given := GivenName(name)
+	if SameName(GivenName(a.opts.Owner), given) {
+		return true
+	}
+	for _, alias := range a.opts.OwnerAliases {
+		if SameName(alias, given) {
+			return true
+		}
+	}
+	return false
 }
 
 // identitiesFromTranscript takes the speakers at their word, for a format that
