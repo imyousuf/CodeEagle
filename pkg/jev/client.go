@@ -50,8 +50,15 @@ type Client struct {
 	model      string
 	maxRetries int
 	httpClient *http.Client
-	// timeout is applied after every option has run, so that supplying a
-	// client and a timeout in either order means the same thing.
+	// timeout bounds one attempt, applied to the request's context rather
+	// than to the HTTP client.
+	//
+	// A caller may hand us a client they share with the rest of their
+	// program — that is rather the point of WithHTTPClient, since a shared
+	// client shares a connection pool. Writing a timeout onto it would reach
+	// back into something we do not own, and two goroutines building clients
+	// from the same one would race on the field. Bounding the context instead
+	// leaves the caller's client untouched.
 	timeout time.Duration
 }
 
@@ -92,6 +99,9 @@ func WithHTTPClient(h *http.Client) Option {
 }
 
 // WithTimeout bounds a single attempt.
+//
+// Applied to each request's context, so it holds whatever HTTP client is in
+// use and never modifies one the caller supplied.
 func WithTimeout(d time.Duration) Option {
 	return func(c *Client) {
 		if d > 0 {
@@ -125,13 +135,14 @@ func New(apiKey string, opts ...Option) (*Client, error) {
 	for _, opt := range opts {
 		opt(c)
 	}
-	// Applied last, so a supplied client and a supplied timeout compose
-	// regardless of the order they were given in.
-	switch {
-	case c.timeout > 0:
-		c.httpClient.Timeout = c.timeout
-	case c.httpClient.Timeout == 0:
-		c.httpClient.Timeout = DefaultTimeout
+	// Resolved after every option has run, so a supplied client and a
+	// supplied timeout compose regardless of the order they were given in.
+	// A client that carries its own timeout keeps it.
+	if c.timeout == 0 {
+		c.timeout = c.httpClient.Timeout
+	}
+	if c.timeout == 0 {
+		c.timeout = DefaultTimeout
 	}
 	return c, nil
 }
@@ -201,6 +212,12 @@ func (c *Client) Ask(ctx context.Context, state any, questions Questions) (*Resp
 
 // attempt performs one round trip.
 func (c *Client) attempt(ctx context.Context, body []byte) (*Response, error) {
+	if c.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("jev: build request: %w", err)

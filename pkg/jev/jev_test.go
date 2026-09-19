@@ -383,7 +383,7 @@ func TestOptionsComposeInAnyOrder(t *testing.T) {
 			want: 7 * time.Second,
 		},
 		{
-			name: "an explicit timeout overrides the client's",
+			name: "an explicit timeout wins over the client's",
 			opts: []Option{WithHTTPClient(&http.Client{Timeout: 7 * time.Second}), WithTimeout(want)},
 			want: want,
 		},
@@ -400,9 +400,71 @@ func TestOptionsComposeInAnyOrder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := c.httpClient.Timeout; got != tt.want {
-				t.Errorf("timeout = %s, want %s", got, tt.want)
+			if c.timeout != tt.want {
+				t.Errorf("timeout = %s, want %s", c.timeout, tt.want)
 			}
 		})
+	}
+}
+
+// TestSuppliedClientIsNotModified covers leaving the caller's client alone.
+//
+// Sharing a client is the reason to pass one — it shares a connection pool —
+// so writing a timeout onto it reaches into something this package does not
+// own, and two goroutines building clients from the same one would race on
+// that field. The bound goes on the request context instead.
+func TestSuppliedClientIsNotModified(t *testing.T) {
+	shared := &http.Client{}
+
+	if _, err := New("apikey_test", WithHTTPClient(shared), WithTimeout(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if shared.Timeout != 0 {
+		t.Errorf("the supplied client's Timeout was set to %s; it belongs to the caller", shared.Timeout)
+	}
+
+	// Two clients built from one shared HTTP client, with different bounds,
+	// must not write to it at all. Under -race, this is the check.
+	done := make(chan struct{}, 2)
+	for _, d := range []time.Duration{time.Second, 2 * time.Second} {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			if _, err := New("apikey_test", WithHTTPClient(shared), WithTimeout(d)); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	<-done
+	<-done
+	if shared.Timeout != 0 {
+		t.Errorf("concurrent construction wrote %s onto the shared client", shared.Timeout)
+	}
+}
+
+// TestTimeoutBoundsTheRequest covers the bound actually applying, now that it
+// lives on the context rather than on the client.
+func TestTimeoutBoundsTheRequest(t *testing.T) {
+	// Slower than the client's bound, but bounded itself so shutting the
+	// server down cannot hang the suite if the bound ever stops working.
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(2 * time.Second):
+		}
+	}))
+	defer srv.Close()
+
+	c, err := New("apikey_test",
+		WithBaseURL(srv.URL), WithTimeout(200*time.Millisecond), WithMaxRetries(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	if _, err := c.Ask(context.Background(), "state", Questions{"q": Noul("Is it?")}); err == nil {
+		t.Fatal("Ask returned no error against a server that never answers")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("Ask took %s; the timeout did not bound it", elapsed)
 	}
 }
