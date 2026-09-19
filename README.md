@@ -415,6 +415,7 @@ Once installed, Claude Code gains access to all CodeEagle skills. The skills tea
 | `/codeeagle:codeeagle-sync` | Sync the graph with latest code changes, run linker phases |
 | `/codeeagle:codeeagle-review` | Review code changes and diffs against codebase conventions |
 | `/codeeagle:codeeagle-status` | Show indexing status and graph statistics |
+| `/codeeagle:codeeagle-meetings` | Search meetings for what was discussed, decided, and committed to |
 
 ### MCP Server (alternative)
 
