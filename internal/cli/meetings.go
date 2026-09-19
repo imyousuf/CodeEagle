@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -1760,11 +1761,27 @@ func findMeeting(ctx context.Context, store graph.Store, ref string) (*graph.Nod
 	if err != nil {
 		return nil, err
 	}
+	// A node ID hashes the file path and so is unique; a qualified name is the
+	// recording's own identifier, which for formats that carry none is derived
+	// from the filename alone. Two unrelated exports sharing a name would
+	// therefore answer to the same reference, and picking the first would show
+	// the wrong meeting without saying so.
+	var exact []*graph.Node
 	for _, m := range meetings {
-		if m.QualifiedName == ref || m.ID == ref {
+		if m.ID == ref {
 			return m, nil
 		}
+		if m.QualifiedName == ref {
+			exact = append(exact, m)
+		}
 	}
+	if len(exact) == 1 {
+		return exact[0], nil
+	}
+	if len(exact) > 1 {
+		return nil, ambiguousMeetings(ref, exact)
+	}
+
 	var partial []*graph.Node
 	for _, m := range meetings {
 		if strings.Contains(strings.ToLower(m.Name), strings.ToLower(ref)) {
@@ -1797,12 +1814,40 @@ func findMeetingByID(ctx context.Context, store graph.Store, sessionID string) (
 	if err != nil {
 		return nil, err
 	}
+	var exact []*graph.Node
 	for _, m := range meetings {
 		if m.QualifiedName == sessionID {
-			return m, nil
+			exact = append(exact, m)
 		}
 	}
-	return nil, nil
+	switch len(exact) {
+	case 0:
+		return nil, nil
+	case 1:
+		return exact[0], nil
+	default:
+		// Threading a series onto the wrong meeting is worse than not
+		// threading it, so an ambiguous identifier is reported rather than
+		// resolved arbitrarily.
+		return nil, ambiguousMeetings(sessionID, exact)
+	}
+}
+
+// ambiguousMeetings reports several meetings answering to one identifier,
+// listing enough of each to tell them apart.
+func ambiguousMeetings(ref string, matches []*graph.Node) error {
+	sorted := append([]*graph.Node(nil), matches...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].FilePath < sorted[j].FilePath })
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d meetings answer to %q; use the full id to choose one:", len(sorted), ref)
+	for _, m := range sorted {
+		fmt.Fprintf(&b, "\n  %s  %s", m.ID, m.Name)
+		if m.FilePath != "" {
+			fmt.Fprintf(&b, "  (%s)", m.FilePath)
+		}
+	}
+	return errors.New(b.String())
 }
 
 func attendeeNames(ctx context.Context, store graph.Store, meetingID string) ([]string, error) {
