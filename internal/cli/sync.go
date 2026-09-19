@@ -159,16 +159,20 @@ func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, v
 
 	// Create indexer.
 	idx := indexer.NewIndexer(indexer.IndexerConfig{
-		GraphStore:     store,
-		ParserRegistry: registry,
-		WatcherConfig:  wcfg,
-		RepoRoots:      paths,
-		NonGitRoots:    nonGitRoots,
-		Verbose:        verboseMode,
-		ShowProgress:   sopts.showProgress,
-		Logger:         logFn,
-		LLMClient:      llmClient,
-		AutoSummarize:  cfg.Agents.AutoSummarize,
+		// A transcript in a repository belongs to the meeting pipeline, which
+		// extracts speakers, decisions and follow-ups from it; indexing it here
+		// as a document would keep the words and lose all of that.
+		SkipTranscripts: cfg.Transcripts.Enabled,
+		GraphStore:      store,
+		ParserRegistry:  registry,
+		WatcherConfig:   wcfg,
+		RepoRoots:       paths,
+		NonGitRoots:     nonGitRoots,
+		Verbose:         verboseMode,
+		ShowProgress:    sopts.showProgress,
+		Logger:          logFn,
+		LLMClient:       llmClient,
+		AutoSummarize:   cfg.Agents.AutoSummarize,
 	})
 
 	mode := "incremental"

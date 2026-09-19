@@ -3,6 +3,7 @@ package transcript
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -50,7 +51,7 @@ func (ix *Indexer) Watch(ctx context.Context, opts WatchOptions) error {
 	ix.minAge = settle
 
 	ix.opts.Log("Watching %s every %s (a recording is indexed once it has been idle for %s)",
-		ix.opts.SessionsDir, interval, settle)
+		strings.Join(ix.opts.SessionsDirs, ", "), interval, settle)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()

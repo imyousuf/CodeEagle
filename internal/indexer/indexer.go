@@ -13,6 +13,7 @@ import (
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/parser"
+	"github.com/imyousuf/CodeEagle/internal/transcript"
 	"github.com/imyousuf/CodeEagle/internal/watcher"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
@@ -30,6 +31,16 @@ type IndexerConfig struct {
 	AutoSummarize  bool                             // enable post-index LLM summarization
 	PostIndexHook  func(ctx context.Context) error  // optional hook called after initial full index (e.g., linker)
 	ShowProgress   bool                             // show progress bars during sync/index (independent of Verbose)
+	// SkipTranscripts leaves meeting transcripts to `codeeagle meetings sync`.
+	//
+	// A Teams transcript is a Word document and a Zoom one is a caption file,
+	// so without this a transcript sitting in a repository is indexed as a
+	// generic document: its text is summarized, but the speakers, decisions
+	// and follow-ups inside it are never extracted, and the same meeting ends
+	// up represented twice if it is also indexed properly. Enabled when
+	// transcript indexing is configured, so nothing changes for projects that
+	// do not use it.
+	SkipTranscripts bool
 }
 
 // IndexStats holds statistics about the indexing state.
@@ -43,18 +54,19 @@ type IndexStats struct {
 
 // Indexer orchestrates file parsing and knowledge graph updates.
 type Indexer struct {
-	store         graph.Store
-	registry      *parser.Registry
-	wcfg          *watcher.WatcherConfig
-	matcher       *watcher.GitIgnoreMatcher
-	repoRoots     []string
-	nonGitRoots   map[string]bool // non-git repo roots needing basename prefix
-	verbose       bool
-	showProgress  bool
-	log           func(format string, args ...any)
-	llmClient     llm.Client
-	autoSummarize bool
-	postIndexHook func(ctx context.Context) error
+	store           graph.Store
+	registry        *parser.Registry
+	wcfg            *watcher.WatcherConfig
+	matcher         *watcher.GitIgnoreMatcher
+	repoRoots       []string
+	nonGitRoots     map[string]bool // non-git repo roots needing basename prefix
+	verbose         bool
+	showProgress    bool
+	log             func(format string, args ...any)
+	llmClient       llm.Client
+	autoSummarize   bool
+	skipTranscripts bool
+	postIndexHook   func(ctx context.Context) error
 
 	mu           sync.Mutex
 	filesIndexed int
@@ -87,19 +99,20 @@ func NewIndexer(cfg IndexerConfig) *Indexer {
 	}
 
 	return &Indexer{
-		store:         cfg.GraphStore,
-		registry:      cfg.ParserRegistry,
-		wcfg:          cfg.WatcherConfig,
-		matcher:       matcher,
-		repoRoots:     cfg.RepoRoots,
-		nonGitRoots:   cfg.NonGitRoots,
-		verbose:       cfg.Verbose,
-		showProgress:  cfg.ShowProgress,
-		log:           logFn,
-		llmClient:     cfg.LLMClient,
-		autoSummarize: cfg.AutoSummarize,
-		postIndexHook: cfg.PostIndexHook,
-		changedFiles:  make(map[string]struct{}),
+		store:           cfg.GraphStore,
+		registry:        cfg.ParserRegistry,
+		wcfg:            cfg.WatcherConfig,
+		matcher:         matcher,
+		repoRoots:       cfg.RepoRoots,
+		nonGitRoots:     cfg.NonGitRoots,
+		verbose:         cfg.Verbose,
+		showProgress:    cfg.ShowProgress,
+		log:             logFn,
+		llmClient:       cfg.LLMClient,
+		autoSummarize:   cfg.AutoSummarize,
+		skipTranscripts: cfg.SkipTranscripts,
+		postIndexHook:   cfg.PostIndexHook,
+		changedFiles:    make(map[string]struct{}),
 	}
 }
 
@@ -187,6 +200,18 @@ func (idx *Indexer) IndexFileWithTimestamp(ctx context.Context, filePath string,
 // This avoids redundant file reads and hash computations when the caller
 // has already read the file (e.g., during sync with duplicate detection).
 func (idx *Indexer) IndexFileWithContent(ctx context.Context, filePath string, content []byte, contentHash string, updatedAt time.Time) error {
+	// A transcript that happens to live in a repository belongs to the meeting
+	// pipeline, which extracts who spoke, what was decided and what was agreed.
+	// Indexing it here as a document would capture the words and lose all of
+	// that, and would represent the same meeting twice.
+	if idx.skipTranscripts && transcript.MayBeTranscript(filePath) &&
+		transcript.FormatFor(filePath, content) != nil {
+		if idx.verbose {
+			idx.log("Skipping %s: a meeting transcript, indexed by `codeeagle meetings sync`", idx.toRelativePath(filePath))
+		}
+		return nil
+	}
+
 	p, ok := idx.registry.ParserForFile(filePath)
 	if !ok {
 		return nil // no parser for this file

@@ -196,16 +196,20 @@ func newWatchCmd() *cobra.Command {
 
 			// Create indexer.
 			idx := indexer.NewIndexer(indexer.IndexerConfig{
-				GraphStore:     store,
-				ParserRegistry: registry,
-				WatcherConfig:  wcfg,
-				RepoRoots:      paths,
-				NonGitRoots:    nonGitRoots,
-				Verbose:        verbose,
-				Logger:         logFn,
-				LLMClient:      llmClient,
-				AutoSummarize:  cfg.Agents.AutoSummarize,
-				PostIndexHook:  postIndexHook,
+				// A transcript in a repository belongs to the meeting pipeline, which
+				// extracts speakers, decisions and follow-ups from it; indexing it here
+				// as a document would keep the words and lose all of that.
+				SkipTranscripts: cfg.Transcripts.Enabled,
+				GraphStore:      store,
+				ParserRegistry:  registry,
+				WatcherConfig:   wcfg,
+				RepoRoots:       paths,
+				NonGitRoots:     nonGitRoots,
+				Verbose:         verbose,
+				Logger:          logFn,
+				LLMClient:       llmClient,
+				AutoSummarize:   cfg.Agents.AutoSummarize,
+				PostIndexHook:   postIndexHook,
 			})
 
 			// Set up signal handling.

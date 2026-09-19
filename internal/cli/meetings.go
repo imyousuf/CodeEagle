@@ -58,7 +58,7 @@ was said, by whom, and what it committed anyone to.`,
 
 func newMeetingsSyncCmd() *cobra.Command {
 	var (
-		dir         string
+		dirs        []string
 		force       bool
 		limit       int
 		concurrency int
@@ -82,18 +82,21 @@ meetings costs nothing for the ones already done.`,
 				if err != nil {
 					return fmt.Errorf("load config: %w", err)
 				}
-				sessionsDir := cfg.Transcripts.SessionsDir
-				if dir != "" {
-					sessionsDir = dir
+				scan := dirs
+				if len(scan) == 0 {
+					scan = cfg.TranscriptDirs()
 				}
-				if sessionsDir == "" {
+				if len(scan) == 0 {
 					return fmt.Errorf("no transcripts directory configured; set transcripts.sessions_dir or pass --dir")
 				}
-				return meetingsDryRun(out, expandPath(sessionsDir), limit)
+				for i, d := range scan {
+					scan[i] = expandPath(d)
+				}
+				return meetingsDryRun(out, scan, limit)
 			}
 
 			pipeline, err := buildMeetingPipeline(cmd, meetingPipelineOverrides{
-				dir: dir, model: model, provider: provider,
+				dirs: dirs, model: model, provider: provider,
 				concurrency: concurrency, force: force, limit: limit,
 			})
 			if err != nil {
@@ -120,7 +123,8 @@ meetings costs nothing for the ones already done.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&dir, "dir", "", "directory of recorded sessions (overrides config)")
+	cmd.Flags().StringSliceVar(&dirs, "dir", nil,
+		"directory to search for transcripts; repeatable, and replaces the configured set")
 	cmd.Flags().BoolVar(&force, "force", false, "re-enrich recordings that are already indexed")
 	cmd.Flags().IntVar(&limit, "limit", 0, "process at most N recordings")
 	cmd.Flags().IntVar(&concurrency, "concurrency", 0, "recordings to analyse at once")
@@ -131,8 +135,8 @@ meetings costs nothing for the ones already done.`,
 }
 
 // meetingsDryRun reports what a run would cover without spending anything.
-func meetingsDryRun(out io.Writer, dir string, limit int) error {
-	paths, err := transcript.DiscoverSessions(dir)
+func meetingsDryRun(out io.Writer, dirs []string, limit int) error {
+	paths, err := transcript.DiscoverSessionsIn(dirs)
 	if err != nil {
 		return err
 	}
@@ -141,12 +145,20 @@ func meetingsDryRun(out io.Writer, dir string, limit int) error {
 	}
 
 	var speech, chars float64
-	var empty, participants int
+	var empty, participants, recordings, other int
+	byFormat := map[string]int{}
+
 	for _, p := range paths {
+		// Discovery matches on the filename, which is a cheap filter rather
+		// than a verdict. Counting those as recordings would report every
+		// stray JSON file in a downloads folder as a meeting.
 		s, err := transcript.Load(p)
 		if err != nil {
+			other++
 			continue
 		}
+		recordings++
+		byFormat[s.Format]++
 		if s.IsEmpty() {
 			empty++
 			continue
@@ -156,7 +168,18 @@ func meetingsDryRun(out io.Writer, dir string, limit int) error {
 		participants += len(s.SubstantiveSpeakers())
 	}
 
-	fmt.Fprintf(out, "Recordings:       %d (%d with no speech)\n", len(paths), empty)
+	fmt.Fprintf(out, "Recordings:       %d (%d with no speech)\n", recordings, empty)
+	if len(byFormat) > 0 {
+		formats := make([]string, 0, len(byFormat))
+		for name, n := range byFormat {
+			formats = append(formats, fmt.Sprintf("%s %d", name, n))
+		}
+		sort.Strings(formats)
+		fmt.Fprintf(out, "Formats:          %s\n", strings.Join(formats, ", "))
+	}
+	if other > 0 {
+		fmt.Fprintf(out, "Not transcripts:  %d files skipped\n", other)
+	}
 	fmt.Fprintf(out, "Speech:           %.1f hours\n", speech/3600)
 	fmt.Fprintf(out, "Participants:     %d across all recordings\n", participants)
 	// Both enrichment passes send the transcript, so the prompt cost is
@@ -266,7 +289,7 @@ func newTranscriptClient(tc config.TranscriptsConfig) (llm.Client, error) {
 
 func newMeetingsWatchCmd() *cobra.Command {
 	var (
-		dir      string
+		dirs     []string
 		interval time.Duration
 		settle   time.Duration
 	)
@@ -286,7 +309,7 @@ The first sweep runs immediately, so starting the watcher catches up on
 anything recorded while it was not running. Press Ctrl-C to stop.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
-			pipeline, err := buildMeetingPipeline(cmd, meetingPipelineOverrides{dir: dir})
+			pipeline, err := buildMeetingPipeline(cmd, meetingPipelineOverrides{dirs: dirs})
 			if err != nil {
 				return err
 			}
@@ -301,7 +324,8 @@ anything recorded while it was not running. Press Ctrl-C to stop.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&dir, "dir", "", "directory of recorded sessions (overrides config)")
+	cmd.Flags().StringSliceVar(&dirs, "dir", nil,
+		"directory to search for transcripts; repeatable, and replaces the configured set")
 	cmd.Flags().DurationVar(&interval, "interval", transcript.DefaultWatchInterval, "how often to sweep for new recordings")
 	cmd.Flags().DurationVar(&settle, "settle", transcript.DefaultSettleTime,
 		"how long a transcript must be idle before indexing, so a recording in progress is left alone")
@@ -340,7 +364,7 @@ func (p *meetingPipeline) close() {
 
 // meetingPipelineOverrides carries the flags that can override config.
 type meetingPipelineOverrides struct {
-	dir         string
+	dirs        []string
 	model       string
 	provider    string
 	concurrency int
@@ -357,9 +381,6 @@ func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*mee
 	}
 
 	tc := cfg.Transcripts
-	if ov.dir != "" {
-		tc.SessionsDir = ov.dir
-	}
 	if ov.model != "" {
 		tc.Model = ov.model
 	}
@@ -369,10 +390,18 @@ func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*mee
 	if ov.concurrency > 0 {
 		tc.Concurrency = ov.concurrency
 	}
-	if tc.SessionsDir == "" {
+	// A directory named on the command line replaces the configured set, so a
+	// one-off scan of a downloads folder does not also re-walk everything else.
+	dirs := ov.dirs
+	if len(dirs) == 0 {
+		dirs = cfg.TranscriptDirs()
+	}
+	for i, d := range dirs {
+		dirs[i] = expandPath(d)
+	}
+	if len(dirs) == 0 {
 		return nil, fmt.Errorf("no transcripts directory configured; set transcripts.sessions_dir or pass --dir")
 	}
-	tc.SessionsDir = expandPath(tc.SessionsDir)
 
 	client, err := newTranscriptClient(tc)
 	if err != nil {
@@ -428,10 +457,10 @@ func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*mee
 
 	out := cmd.OutOrStdout()
 	indexer := transcript.NewIndexer(store, analyzer, writer, transcript.IndexOptions{
-		SessionsDir: tc.SessionsDir,
-		Concurrency: tc.Concurrency,
-		Force:       ov.force,
-		Limit:       ov.limit,
+		SessionsDirs: dirs,
+		Concurrency:  tc.Concurrency,
+		Force:        ov.force,
+		Limit:        ov.limit,
 		Log: func(format string, args ...any) {
 			fmt.Fprintf(out, format+"\n", args...)
 		},

@@ -38,8 +38,10 @@ type Indexer struct {
 
 // IndexOptions configures a batch run.
 type IndexOptions struct {
-	// SessionsDir holds one directory per recording.
-	SessionsDir string
+	// SessionsDirs are the directories to search. Recordings accumulate in
+	// more than one place — a recorder's own folder, a downloads folder, a
+	// shared drive — and a single path would silently miss the rest.
+	SessionsDirs []string
 	// Concurrency is how many recordings are analysed at once.
 	Concurrency int
 	// Force re-enriches recordings that are already indexed and unchanged.
@@ -97,7 +99,42 @@ func NewIndexer(store graph.Store, analyzer *Analyzer, writer *Writer, opts Inde
 // a colleague recognized in January is a known name by March. Sorting on file
 // modification time would not do: copying a corpus rewrites every mtime at
 // once, and the meeting's own timestamp is the only reliable ordering.
+// DiscoverSessions finds the transcripts under one directory.
 func DiscoverSessions(dir string) ([]string, error) {
+	return DiscoverSessionsIn([]string{dir})
+}
+
+// DiscoverSessionsIn finds the transcripts under several directories, in the
+// order the meetings happened.
+//
+// A file reachable from two of the directories — nested paths, or a symlink —
+// is returned once, so overlapping configuration costs nothing.
+func DiscoverSessionsIn(dirs []string) ([]string, error) {
+	var found []export
+	seen := make(map[string]bool)
+
+	for _, dir := range dirs {
+		if strings.TrimSpace(dir) == "" {
+			continue
+		}
+		batch, err := discoverOne(dir, seen)
+		if err != nil {
+			return nil, err
+		}
+		found = append(found, batch...)
+	}
+
+	sort.Slice(found, func(i, j int) bool {
+		if !found[i].started.Equal(found[j].started) {
+			return found[i].started.Before(found[j].started)
+		}
+		return found[i].path < found[j].path
+	})
+	return preferOneExportPerMeeting(found), nil
+}
+
+// discoverOne walks a single directory, skipping anything already found.
+func discoverOne(dir string, seen map[string]bool) ([]export, error) {
 	var found []export
 
 	// Recordings arrive either as a directory per session, as the local
@@ -126,24 +163,27 @@ func DiscoverSessions(dir string) ([]string, error) {
 		if !MayBeTranscript(path) {
 			return nil
 		}
+		// Resolve before recording it, so the same file reached through two
+		// configured directories is not indexed twice.
+		key := path
+		if abs, err := filepath.Abs(path); err == nil {
+			key = abs
+		}
+		if seen[key] {
+			return nil
+		}
 		started, err := sessionStartTime(path)
 		if err != nil {
 			return nil
 		}
+		seen[key] = true
 		found = append(found, export{path: path, started: started})
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("read sessions directory: %w", err)
+		return nil, fmt.Errorf("read sessions directory %s: %w", dir, err)
 	}
-	sort.Slice(found, func(i, j int) bool {
-		if !found[i].started.Equal(found[j].started) {
-			return found[i].started.Before(found[j].started)
-		}
-		return found[i].path < found[j].path
-	})
-
-	return preferOneExportPerMeeting(found), nil
+	return found, nil
 }
 
 // export is one transcript file and when its meeting began.
@@ -320,14 +360,14 @@ func (ix *Indexer) Run(ctx context.Context) (*RunReport, error) {
 	start := time.Now()
 	report := &RunReport{}
 
-	paths, err := DiscoverSessions(ix.opts.SessionsDir)
+	paths, err := DiscoverSessionsIn(ix.opts.SessionsDirs)
 	if err != nil {
 		return nil, err
 	}
 	if ix.opts.Limit > 0 && len(paths) > ix.opts.Limit {
 		paths = paths[:ix.opts.Limit]
 	}
-	ix.opts.Log("Found %d recordings in %s", len(paths), ix.opts.SessionsDir)
+	ix.opts.Log("Found %d recordings in %s", len(paths), strings.Join(ix.opts.SessionsDirs, ", "))
 
 	// Decide what actually needs work before spending anything on it.
 	var todo []string

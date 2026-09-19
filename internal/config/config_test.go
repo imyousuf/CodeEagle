@@ -436,3 +436,41 @@ func searchString(s, substr string) bool {
 	}
 	return false
 }
+
+func TestTranscriptDirs(t *testing.T) {
+	cfg := &Config{
+		Repositories: []RepositoryConfig{{Path: "/repo/one"}, {Path: "/repo/two"}},
+		Transcripts: TranscriptsConfig{
+			SessionsDir: "/recordings",
+			// The singular and plural keys are merged, so either spelling works
+			// and a duplicate between them costs nothing.
+			SessionsDirs: []string{"/downloads", "/recordings", "  "},
+		},
+	}
+
+	got := cfg.TranscriptDirs()
+	want := []string{"/recordings", "/downloads"}
+	if len(got) != len(want) {
+		t.Fatalf("TranscriptDirs() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("TranscriptDirs()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	// Repositories are searched only when asked for: a transcript committed
+	// beside the code it concerns is then indexed as a meeting.
+	cfg.Transcripts.ScanRepositories = true
+	got = cfg.TranscriptDirs()
+	if len(got) != 4 || got[2] != "/repo/one" || got[3] != "/repo/two" {
+		t.Errorf("with ScanRepositories = %v, want the repositories appended", got)
+	}
+}
+
+func TestTranscriptDirsEmpty(t *testing.T) {
+	cfg := &Config{}
+	if got := cfg.TranscriptDirs(); len(got) != 0 {
+		t.Errorf("TranscriptDirs() = %v, want none", got)
+	}
+}

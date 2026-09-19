@@ -91,8 +91,16 @@ type FacesConfig struct {
 type TranscriptsConfig struct {
 	// Enabled turns on meeting transcript indexing.
 	Enabled bool `mapstructure:"enabled" yaml:"enabled,omitempty"`
-	// SessionsDir is the directory holding one folder per recorded session.
+	// SessionsDir is a directory to search for transcripts.
 	SessionsDir string `mapstructure:"sessions_dir" yaml:"sessions_dir,omitempty"`
+	// SessionsDirs lists further directories to search. Recordings accumulate
+	// in more than one place — a recorder's folder, a downloads folder, a
+	// shared drive — and both keys are merged so either spelling works.
+	SessionsDirs []string `mapstructure:"sessions_dirs" yaml:"sessions_dirs,omitempty"`
+	// ScanRepositories also searches the configured repositories, so a
+	// transcript committed alongside the code it concerns is indexed as a
+	// meeting rather than as a document.
+	ScanRepositories bool `mapstructure:"scan_repositories" yaml:"scan_repositories,omitempty"`
 	// Owner is the person whose microphone made these recordings. Microphone
 	// audio is always this person, which anchors identity resolution.
 	Owner string `mapstructure:"owner" yaml:"owner,omitempty"`
@@ -550,4 +558,30 @@ func loadEnvFile(path string) {
 			os.Setenv(key, value)
 		}
 	}
+}
+
+// TranscriptDirs returns every directory to search for transcripts, with the
+// single and plural config keys merged and duplicates removed.
+func (c *Config) TranscriptDirs() []string {
+	var out []string
+	seen := make(map[string]bool)
+	add := func(dir string) {
+		dir = strings.TrimSpace(dir)
+		if dir == "" || seen[dir] {
+			return
+		}
+		seen[dir] = true
+		out = append(out, dir)
+	}
+
+	add(c.Transcripts.SessionsDir)
+	for _, d := range c.Transcripts.SessionsDirs {
+		add(d)
+	}
+	if c.Transcripts.ScanRepositories {
+		for _, r := range c.Repositories {
+			add(r.Path)
+		}
+	}
+	return out
 }

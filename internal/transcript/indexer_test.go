@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,7 +109,7 @@ func newTestIndexer(t *testing.T, root string) (*Indexer, graph.Store) {
 		t.Fatalf("load people: %v", err)
 	}
 	writer := NewWriter(store, people, WriterOptions{})
-	ix := NewIndexer(store, nil, writer, IndexOptions{SessionsDir: root})
+	ix := NewIndexer(store, nil, writer, IndexOptions{SessionsDirs: []string{root}})
 	return ix, store
 }
 
@@ -272,5 +273,55 @@ func TestWatchStopsOnContextCancel(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Watch did not return after cancellation")
+	}
+}
+
+func TestDiscoverSessionsAcrossDirectories(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	writeSession(t, a, "january", time.Date(2026, 1, 1, 9, 0, 0, 0, time.UTC),
+		[3]string{"You", SourceMic, "january"})
+	writeSession(t, b, "february", time.Date(2026, 2, 1, 9, 0, 0, 0, time.UTC),
+		[3]string{"You", SourceMic, "february"})
+
+	got, err := DiscoverSessionsIn([]string{a, b})
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d sessions across two directories, want 2: %v", len(got), got)
+	}
+	// Still ordered by when the meetings happened, not by which directory.
+	if !strings.Contains(got[0], "january") || !strings.Contains(got[1], "february") {
+		t.Errorf("order = %v, want january then february", got)
+	}
+}
+
+func TestDiscoverSessionsDeduplicatesOverlappingDirectories(t *testing.T) {
+	root := t.TempDir()
+	writeSession(t, root, "one", time.Now(), [3]string{"You", SourceMic, "hello"})
+
+	// The same directory named twice, and once as its own parent: a file
+	// reachable more than once must still be indexed once.
+	got, err := DiscoverSessionsIn([]string{root, root})
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("got %d, want 1 despite overlapping directories: %v", len(got), got)
+	}
+}
+
+func TestDiscoverSessionsSkipsEmptyDirEntries(t *testing.T) {
+	root := t.TempDir()
+	writeSession(t, root, "one", time.Now(), [3]string{"You", SourceMic, "hello"})
+
+	// A blank entry in configuration must not be treated as the root of the
+	// filesystem.
+	got, err := DiscoverSessionsIn([]string{"", root, "  "})
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	if len(got) != 1 {
+		t.Errorf("got %d, want 1: %v", len(got), got)
 	}
 }
