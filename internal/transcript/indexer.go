@@ -115,18 +115,26 @@ func DiscoverSessions(dir string) ([]string, error) {
 // A file reachable from two of the directories — nested paths, or a symlink —
 // is returned once, so overlapping configuration costs nothing.
 func DiscoverSessionsIn(dirs []string) ([]string, error) {
-	return DiscoverSessionsWith(dirs, nil)
+	kept, _, err := discoverSessions(dirs, nil)
+	return kept, err
 }
 
 // DiscoverSessionsWith finds the transcripts under several directories and
 // merges in individually named ones, in the order the meetings happened.
+func DiscoverSessionsWith(dirs []string, extra []string) ([]string, error) {
+	kept, _, err := discoverSessions(dirs, extra)
+	return kept, err
+}
+
+// discoverSessions finds the transcripts to index and the ones a better export
+// of the same meeting replaced.
 //
 // The named transcripts are the ones document indexing marked, and they are
 // sorted in among the discovered files rather than appended after them.
 // Chronological order is not cosmetic here: a batch feeds the people it has
 // identified into later meetings, so a recording processed out of order loses
 // the names the earlier ones would have taught it.
-func DiscoverSessionsWith(dirs []string, extra []string) ([]string, error) {
+func discoverSessions(dirs []string, extra []string) (kept, superseded []string, err error) {
 	var found []export
 	seen := make(map[string]bool)
 
@@ -136,7 +144,7 @@ func DiscoverSessionsWith(dirs []string, extra []string) ([]string, error) {
 		}
 		batch, err := discoverOne(dir, seen)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		found = append(found, batch...)
 	}
@@ -148,7 +156,8 @@ func DiscoverSessionsWith(dirs []string, extra []string) ([]string, error) {
 		}
 		return found[i].path < found[j].path
 	})
-	return preferOneExportPerMeeting(found), nil
+	kept, superseded = preferOneExportPerMeeting(found)
+	return kept, superseded, nil
 }
 
 // namedExports turns individually named transcripts into exports, skipping any
@@ -232,6 +241,30 @@ func discoverOne(dir string, seen map[string]bool) ([]export, error) {
 	return found, nil
 }
 
+// clearSuperseded removes what was indexed from exports that a better one
+// replaced, and reports how many actually held anything.
+//
+// Deleting by file path only affects nodes belonging to that recording; people
+// and topics are keyed globally and are untouched.
+func (ix *Indexer) clearSuperseded(ctx context.Context, paths []string) int {
+	cleared := 0
+	for _, path := range paths {
+		nodes, err := ix.store.QueryNodes(ctx, graph.NodeFilter{
+			Type:     graph.NodeMeeting,
+			FilePath: path,
+		})
+		if err != nil || len(nodes) == 0 {
+			continue
+		}
+		if err := ix.store.DeleteByFile(ctx, path); err != nil {
+			ix.opts.Log("Warning: could not clear superseded %s: %v", filepath.Base(path), err)
+			continue
+		}
+		cleared++
+	}
+	return cleared
+}
+
 // searchedDescription names where the recordings came from, for the log.
 //
 // With no directory configured they came from the document index alone, and
@@ -288,7 +321,7 @@ const sameMeetingWindow = 48 * time.Hour
 // the tool's suffixes are removed, *and* their dates are close. The name alone
 // is not enough: a weekly standup exports to the same filename every week, so
 // matching on it would keep one instance and discard the rest.
-func preferOneExportPerMeeting(exports []export) []string {
+func preferOneExportPerMeeting(exports []export) (kept, superseded []string) {
 	type pick struct {
 		path    string
 		started time.Time
@@ -321,9 +354,16 @@ func preferOneExportPerMeeting(exports []export) []string {
 			if absDuration(inst.started.Sub(e.started)) > sameMeetingWindow {
 				continue
 			}
-			// Same meeting: keep whichever format carries more.
+			// Same meeting: keep whichever format carries more, and report the
+			// loser. Dropping it silently leaves whatever was already indexed
+			// from it stranded in the graph — nothing else ever visits that
+			// path again — while the winner is enriched from scratch and the
+			// one meeting appears twice.
 			if rankOf(e.path) < inst.rank {
+				superseded = append(superseded, inst.path)
 				instances[i] = pick{path: e.path, started: inst.started, rank: rankOf(e.path)}
+			} else {
+				superseded = append(superseded, e.path)
 			}
 			matched = true
 			break
@@ -334,13 +374,13 @@ func preferOneExportPerMeeting(exports []export) []string {
 		groups[key] = instances
 	}
 
-	out := make([]string, 0, len(exports))
+	kept = make([]string, 0, len(exports))
 	for _, key := range order {
 		for _, inst := range groups[key] {
-			out = append(out, inst.path)
+			kept = append(kept, inst.path)
 		}
 	}
-	return out
+	return kept, superseded
 }
 
 // absDuration returns the magnitude of a duration.
@@ -437,6 +477,11 @@ type Plan struct {
 	NotTranscripts int
 	// Failures are files that claimed to be transcripts and could not be read.
 	Failures []Failure
+	// Superseded are recordings a better export of the same meeting replaced.
+	// Whatever was indexed from them is stale and is cleared, or the meeting
+	// would appear twice: once from the export that won, once stranded under
+	// a path nothing visits again.
+	Superseded []string
 }
 
 // Plan decides what a run would enrich, without spending anything.
@@ -444,13 +489,13 @@ type Plan struct {
 // Run uses this too, so `--dry-run` reports what will actually happen rather
 // than an estimate that can drift away from it.
 func (ix *Indexer) Plan(ctx context.Context) (*Plan, error) {
-	paths, err := DiscoverSessionsWith(ix.opts.SessionsDirs, ix.opts.ExtraPaths)
+	paths, superseded, err := discoverSessions(ix.opts.SessionsDirs, ix.opts.ExtraPaths)
 	if err != nil {
 		return nil, err
 	}
 	ix.opts.Log("Found %d recordings in %s", len(paths), ix.searchedDescription())
 
-	plan := &Plan{}
+	plan := &Plan{Superseded: superseded}
 	for _, p := range paths {
 		needed, reason, err := ix.needsIndexing(ctx, p)
 		if err != nil {
@@ -499,6 +544,13 @@ func (ix *Indexer) Run(ctx context.Context) (*RunReport, error) {
 		Failures:       plan.Failures,
 	}
 	todo := plan.Todo
+
+	// Clear what a better export replaced before writing the replacement, so
+	// the meeting is represented once rather than once per format it was
+	// exported in.
+	if n := ix.clearSuperseded(ctx, plan.Superseded); n > 0 {
+		ix.opts.Log("Cleared %d superseded export(s) of the same meetings", n)
+	}
 
 	ix.opts.Log("%d to enrich, %d already indexed, %d empty%s%s", len(todo), report.Skipped, report.Empty,
 		pendingSuffix(report.Pending), notTranscriptSuffix(report.NotTranscripts))

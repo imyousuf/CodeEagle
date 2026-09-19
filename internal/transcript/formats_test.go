@@ -212,7 +212,7 @@ func TestPreferOneExportPerMeeting(t *testing.T) {
 	// The third is a different file type; name it plausibly for the test.
 	exports[2].path = "/y/Opti Models Standup.vtt"
 
-	got := preferOneExportPerMeeting(exports)
+	got, _ := preferOneExportPerMeeting(exports)
 	if len(got) != 2 {
 		t.Fatalf("got %d kept, want 2 (one per instance): %v", len(got), got)
 	}
@@ -233,7 +233,7 @@ func TestPreferOneExportKeepsDistinctMeetings(t *testing.T) {
 		{path: "/x/Architecture Review.vtt", started: now},
 		{path: "/x/Budget Planning.vtt", started: now},
 	}
-	if got := preferOneExportPerMeeting(exports); len(got) != 2 {
+	if got, _ := preferOneExportPerMeeting(exports); len(got) != 2 {
 		t.Errorf("got %d, want both distinct meetings: %v", len(got), got)
 	}
 }
