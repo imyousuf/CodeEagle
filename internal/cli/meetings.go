@@ -48,6 +48,7 @@ was said, by whom, and what it committed anyone to.`,
 		newMeetingsLabelCmd(),
 		newMeetingsTopicsCmd(),
 		newMeetingsTaxonomyCmd(),
+		newMeetingsMigrateCmd(),
 		newMeetingsActionsCmd(),
 	)
 	return cmd
@@ -100,7 +101,7 @@ meetings costs nothing for the ones already done.`,
 			}
 			defer pipeline.close()
 
-			fmt.Fprintf(out, "Graph branch: %s\n", pipeline.branch)
+			fmt.Fprintf(out, "Graph scope: %s\n", pipeline.branch)
 			fmt.Fprintf(out, "Provider: %s (%s)\n\n", pipeline.client.Provider(), pipeline.client.Model())
 
 			report, err := pipeline.indexer.Run(cmd.Context())
@@ -374,10 +375,10 @@ func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*mee
 		return nil, err
 	}
 
-	store, branch, err := openBranchStore(cfg)
+	store, err := openMeetingStore(cfg)
 	if err != nil {
 		_ = client.Close()
-		return nil, fmt.Errorf("open graph store: %w", err)
+		return nil, err
 	}
 
 	ctx := cmd.Context()
@@ -435,7 +436,7 @@ func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*mee
 	return &meetingPipeline{
 		client:   client,
 		store:    store,
-		branch:   branch,
+		branch:   embedded.MeetingScope,
 		indexer:  indexer,
 		analyzer: analyzer,
 		people:   people,
@@ -899,9 +900,9 @@ func newMeetingsLabelCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
-			store, _, err := openBranchStore(cfg)
+			store, err := openMeetingStore(cfg)
 			if err != nil {
-				return fmt.Errorf("open graph store: %w", err)
+				return err
 			}
 			defer store.Close()
 
@@ -1057,6 +1058,64 @@ func newMeetingsTopicsCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVar(&limit, "limit", 40, "maximum topics to show (0 for all)")
 	cmd.Flags().BoolVar(&themes, "themes", false, "show the induced theme hierarchy instead of flat topics")
+	return cmd
+}
+
+// --- migrate ---
+
+func newMeetingsMigrateCmd() *cobra.Command {
+	var (
+		from   string
+		dryRun bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "migrate",
+		Short: "Move meetings indexed under a git branch into the shared meeting scope",
+		Long: `Move a meeting corpus filed under a git branch into the shared scope.
+
+Earlier versions stored meetings under whichever branch was checked out when
+they were indexed, which meant switching or renaming a branch hid the entire
+history and left the next sync re-indexing everything. Meetings now live in
+their own scope, independent of git.
+
+This moves an existing corpus across. The scope appears only in the key and
+never in the stored data, so it is a key rename rather than a re-index, and it
+is safe to run twice.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if from == "" {
+				return fmt.Errorf("--from is required: the branch name the meetings were indexed under")
+			}
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			store, err := openMeetingStore(cfg)
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			res, err := store.Rescope(from, embedded.MeetingScope, dryRun)
+			if err != nil {
+				return err
+			}
+
+			out := cmd.OutOrStdout()
+			verb := "Moved"
+			if dryRun {
+				verb = "Would move"
+			}
+			fmt.Fprintf(out, "%s %d keys from %q to %q.\n", verb, res.Keys, res.From, res.To)
+			if res.Keys == 0 {
+				fmt.Fprintf(out, "Nothing found under %q. Check the branch name with `git branch`.\n", from)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&from, "from", "", "the git branch the meetings were indexed under")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report what would move without changing anything")
 	return cmd
 }
 
@@ -1283,18 +1342,28 @@ func newMeetingsActionsCmd() *cobra.Command {
 
 // --- shared helpers ---
 
-// withGraph opens the graph read-only and runs fn.
+// withGraph opens the meeting graph read-only and runs fn.
 func withGraph(cmd *cobra.Command, fn func(ctx context.Context, store graph.Store) error) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	store, _, err := openReadOnlyBranchStore(cfg)
+	store, err := embedded.OpenMeetingsReadOnly(cfg, dbPath)
 	if err != nil {
-		return fmt.Errorf("open graph store: %w", err)
+		return err
 	}
 	defer store.Close()
 	return fn(cmd.Context(), store)
+}
+
+// openMeetingStore opens the meeting graph for writing.
+//
+// Meetings are stored outside the per-branch scopes the code graph uses: a
+// meeting happened, and it does not belong to a git branch. Filing them by
+// branch would hide the whole history the moment a branch is switched or
+// renamed, and make the next sync re-index everything.
+func openMeetingStore(cfg *config.Config) (*embedded.BranchStore, error) {
+	return embedded.OpenMeetings(cfg, dbPath)
 }
 
 func findMeeting(ctx context.Context, store graph.Store, ref string) (*graph.Node, error) {
