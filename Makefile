@@ -6,7 +6,10 @@
 # Binary name
 BINARY_NAME=codeeagle
 # Version (can be overridden)
-VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+# Module tags are excluded: pkg/jev is released on its own `pkg/jev/vX.Y.Z`
+# tags, and without a filter the nearest of those becomes the application's
+# reported version, so `codeeagle version` would print a library's number.
+VERSION?=$(shell git describe --tags --always --dirty --exclude='pkg/*' 2>/dev/null || echo "dev")
 COMMIT?=$(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE?=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 # Build directory

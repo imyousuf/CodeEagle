@@ -9,8 +9,8 @@ require (
 	github.com/dgraph-io/badger/v4 v4.5.1
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
+	github.com/imyousuf/CodeEagle/pkg/jev v0.1.0
 	github.com/pelletier/go-toml/v2 v2.2.4
-	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	github.com/shirou/gopsutil/v4 v4.26.2
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
 	github.com/spf13/cobra v1.10.2
