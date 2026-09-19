@@ -10,6 +10,7 @@ It supports monorepos, multi-repo setups, and multi-language codebases (Go, Pyth
 - **15 language parsers**: Go (stdlib AST), Python, TypeScript, JavaScript, Java, Rust, C# (with ASP.NET), Ruby (with Rails), HTML, Markdown, Makefile, Shell, Terraform, YAML, plus a manifest parser (go.mod, package.json, pyproject.toml, requirements.txt)
 - **Document format extraction**: Text extraction from DOCX, PPTX, XLSX, ODT, ODS, ODP (pure Go, stdlib only) and PDF (`dslipak/pdf`). Documents are indexed, topic-extracted via LLM, and semantically searchable
 - **Non-code file indexing**: Changelogs, design docs, CSVs, images, config templates — all indexed as Document nodes with optional LLM-based topic extraction and image description
+- **Meeting transcripts**: Diarized recordings are indexed with speaker identification, topic segmentation, per-topic summaries, decisions, and follow-ups. Speakers arrive anonymous ("Person 1", "Person 2") and are resolved to durable people, shared with face recognition
 - **Face detection & recognition** (optional, `-tags faces`): OpenCV DNN-based face detection with 128-dim embeddings, agglomerative clustering, KNN classification, person management, and EXIF metadata extraction
 - **Cross-service dependency analysis**: API endpoint extraction, HTTP client call detection, import-to-manifest linking, cross-file interface implements resolution
 - **Test coverage mapping**: automatic test file/function detection across 8 languages with `EdgeTests` linking to source counterparts
@@ -133,6 +134,64 @@ codeeagle update [--check] [--force]        Check for and install updates
 
 Global flags: `--config <path>`, `--db-path <path>`, `-p <project-name>`, `-v` (verbose).
 
+### Meeting transcripts
+
+```bash
+codeeagle meetings sync                    # Enrich transcripts and index them
+codeeagle meetings sync --dry-run          # Report scope and token cost, call no model
+codeeagle meetings sync --limit 20         # Process a subset
+codeeagle meetings sync --force            # Re-enrich already-indexed recordings
+
+codeeagle meetings list                    # List indexed meetings
+codeeagle meetings list --person Kevin     # Meetings a person attended
+codeeagle meetings list --since 2026-03-01 # Meetings after a date
+codeeagle meetings show <meeting-id>       # Participants, topics, decisions, follow-ups
+codeeagle meetings people                  # People, with speaking time and follow-up counts
+codeeagle meetings topics                  # Topics discussed, by meeting count
+codeeagle meetings actions --person Kevin  # Follow-ups owned by someone
+codeeagle meetings actions --unassigned    # Follow-ups nobody owns
+
+codeeagle meetings identify                # Review speakers that could not be identified
+codeeagle meetings label "Person 3" Kevin --meeting <id>   # Assign one by hand
+```
+
+Recordings already indexed and unchanged are skipped on a content hash, so
+re-running after a few new meetings costs almost nothing.
+
+#### How speakers are identified
+
+Recording software separates voices but does not know whose they are, so it
+labels them `Person 1`, `Person 2`, and those labels mean nothing outside a
+single recording. Three signals resolve them:
+
+1. **Microphone audio is the recording's owner**, by construction. This is
+   structural rather than inferred, needs no model call, and is never wrong.
+2. **People say each other's names**, and each usage points somewhere.
+   "Kevin, what do you think?" names the next speaker; "Thanks, Kevin" names
+   the previous one; "this is Saki" names the speaker. Resolving direction
+   against turn order yields weighted votes for specific labels — computed
+   without a model, so it is free and reproducible.
+3. **A model adjudicates** the remaining ambiguity, given those votes and the
+   transcript. Leaving a speaker unidentified is an expected outcome: a wrong
+   name silently attributes one person's words to another, so the model is
+   instructed to return nothing when the evidence is thin, and
+   `meetings identify` lists what is left for a human.
+
+Identity is resolved across recordings too. A transcriber spells the same name
+differently between meetings ("Imran" and "Imron"), so variants are folded in
+as aliases rather than creating a second person. Names that merely resemble one
+another are kept apart.
+
+People discovered in earlier meetings are fed back as known names for later
+ones, so recordings are processed in the order the meetings happened.
+
+#### Verifying what was extracted
+
+Every decision and follow-up carries a verbatim quote, and whether that quote
+really appears in the transcript is recorded on the node. `meetings show` marks
+the ones that fail with `?`, and the agent tools say so in as many words — an
+unverified quote is the one claim that should not be taken on trust.
+
 ## Configuration
 
 Project config lives in `.CodeEagle/config.yaml`:
@@ -190,6 +249,50 @@ docs:
     - ".pb.go"
 ```
 
+### Meeting transcripts
+
+```yaml
+transcripts:
+  enabled: true
+  sessions_dir: ~/.local/share/tomoe/sessions   # one directory per recording
+  owner: "Your Name"              # microphone audio is always this person
+  owner_aliases: ["Yourname"]     # spellings the transcriber produces
+
+  provider: baseten               # baseten | ollama | anthropic | vertex-ai
+  model: deepseek-ai/DeepSeek-V4.1-Flash
+  api_key_command: "keyring get baseten.co you@example.com"
+  # api_key_env: BASETEN_API_KEY  # or an environment variable
+  # api_key: ...                  # or a literal, though config files get committed
+
+  reasoning_effort: low           # see the note below
+  max_tokens: 65536
+  min_confidence: 0.70            # bar for automatic identification
+  concurrency: 8
+
+  roster:                         # optional, and markedly improves accuracy:
+    - Kevin                       # it turns an open guess into a choice
+    - Mona                        # among known colleagues
+
+  exclude_names:                  # terms that read like names in conversation
+    - Acme
+    - Opal
+```
+
+Supplying a `roster` is the single most effective setting: it both raises
+recall on people who are never introduced by name and settles on one spelling
+for each of them.
+
+`reasoning_effort` and `max_tokens` matter more than they look. A reasoning
+model spends its token budget deliberating *before* emitting any answer, so too
+small a `max_tokens` produces an **empty** reply rather than a short one — on a
+32-minute transcript one model consumed 30,000 tokens reasoning and returned
+nothing. Low effort measurably reduces cost with no loss of identification
+quality; switching reasoning off entirely does hurt it, so that is used only as
+an automatic fallback when a request exhausts its budget.
+
+`meetings sync --dry-run` reports how many recordings, hours of speech, and
+prompt tokens a run involves before any of it is spent.
+
 ### LLM Providers
 
 | Provider | Config | Auth |
@@ -232,11 +335,16 @@ codeeagle -p my-project status
 | Document | Documentation file, office document (DOCX, PPTX, XLSX, ODT, ODS, ODP, PDF), or other non-code file |
 | Directory | Directory in the file hierarchy |
 | Topic | Extracted topic from document content (via LLM) |
-| Person | Named person (from face detection, requires `-tags faces` build) |
+| Person | Named person, identified by voice in meetings and/or by face in images |
 | AIGuideline | AI-related guideline files (CLAUDE.md, etc.) |
 | Year | Calendar year node (e.g., "2024") — part of date hierarchy |
 | Month | Calendar month node (e.g., "2024-03") — part of date hierarchy |
 | Date | Calendar date node (e.g., "2024-03-15") — part of date hierarchy |
+| Meeting | A recorded meeting, with title, summary, duration, and participants |
+| Speaker | A per-meeting diarization label; meaningful only once linked to a Person |
+| TopicSegment | A span of one meeting about one topic, with its own summary |
+| Decision | A choice a meeting settled on, with a supporting quote |
+| ActionItem | A follow-up arising from a meeting, with owner and due date |
 
 ### Edge Types
 
@@ -258,6 +366,12 @@ codeeagle -p my-project status
 | UpdatedOn | File node linked to its last-modified Date node |
 | DuplicateOf | File has identical content (same content_hash + mime_type) as canonical file |
 | SymLink | Symbolic link points to resolved target file |
+| Attended | Person participated in a meeting |
+| IdentifiedAs | Speaker resolves to a Person, with confidence, evidence, and method |
+| AssignedTo | Action item is owned by a person |
+| RaisedBy | Decision or action item was raised by a person |
+| Mentions | Meeting or topic segment refers to a code entity or person |
+| FollowsUp | Action item implements a decision, or a meeting follows an earlier one |
 | References | General cross-reference |
 | Embeds | Struct embeds another type |
 

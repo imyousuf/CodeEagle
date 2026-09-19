@@ -29,6 +29,14 @@ Build and maintain a rich knowledge graph that captures:
 - Architecture diagrams (reference/link tracking)
 - CLAUDE.md and similar development guideline files
 
+**Meeting Transcript Entities**
+- Meetings (diarized recordings), with LLM-generated titles and summaries
+- Speakers (per-recording diarization labels), resolved to Person nodes
+- Topic segments — spans of a meeting about one subject, each summarized from
+  that subject's point of view
+- Decisions, with rationale and a verbatim supporting quote
+- Action items / follow-ups, with owner and due date
+
 **Relationships**
 - `CONTAINS` — repo -> service -> package -> file -> symbol
 - `IMPORTS` / `DEPENDS_ON` — inter-package, inter-service, external deps
@@ -45,6 +53,12 @@ Build and maintain a rich knowledge graph that captures:
 - `UPDATED_ON` — file -> date node (Year/Month/Date hierarchy)
 - `DUPLICATE_OF` — file -> canonical file with identical content (same content_hash + mime_type)
 - `SYM_LINK` — symlink file -> resolved target file
+- `ATTENDED` — person -> meeting
+- `IDENTIFIED_AS` — speaker -> person (carries confidence, evidence, method)
+- `ASSIGNED_TO` — action item -> person
+- `RAISED_BY` — decision/action item -> person
+- `MENTIONS` — meeting/topic segment -> code entity or person
+- `FOLLOWS_UP` — action item -> decision, meeting -> earlier meeting
 
 **Code Quality Metrics** (attached to graph nodes)
 - Cyclomatic complexity per function
@@ -104,6 +118,15 @@ codeeagle faces unlabeled              # Show unassigned clusters
 codeeagle faces suggest                # Auto-suggest face assignments
 codeeagle faces person [...]           # Person CRUD (add, list, edit, delete)
 
+codeeagle meetings sync [--dry-run] [--limit N] [--force]   # Index transcripts
+codeeagle meetings list [--person P] [--since DATE]        # List meetings
+codeeagle meetings show <id>            # Participants, topics, decisions, follow-ups
+codeeagle meetings people               # People, speaking time, follow-up counts
+codeeagle meetings topics               # Topics across meetings
+codeeagle meetings actions [--person P] [--unassigned]     # Follow-ups
+codeeagle meetings identify             # Review unidentified speakers
+codeeagle meetings label <label> <name> --meeting <id>     # Assign by hand
+
 codeeagle version                       # Print version, commit, build date
 codeeagle update [--check] [--force]    # Check for and install updates
 ```
@@ -130,6 +153,53 @@ All agents are grounded in the knowledge graph — they do NOT modify code, they
 - Identify missing tests for changed code paths
 - Highlight complexity hotspots in modified code
 - Security pattern checks (auth, input validation, secrets)
+
+### 4b. Meeting Transcript Understanding
+
+Transcripts arrive diarized but anonymous: voices are labelled "Person 1",
+"Person 2", and those labels are meaningful only within one recording.
+Resolving them is most of the work, and it rests on three signals:
+
+1. **The microphone anchor.** Mic audio is by construction whoever made the
+   recording. This is structural, costs no model call, and cannot be wrong.
+   In the reference corpus it holds without exception and covers half of all
+   speech.
+2. **Directional name evidence, computed deterministically.** People say each
+   other's names constantly, and each usage points somewhere: "Kevin, what do
+   you think?" names the next speaker, "Thanks, Kevin" the previous one, "this
+   is Saki" the speaker themselves. Resolving direction against turn order
+   yields weighted votes for specific labels. This is done without a model — it
+   is free, reproducible, and a small model asked to track twenty anonymous
+   labels across an hour of talk loses the thread.
+3. **A model adjudicates what is left**, given those votes and the transcript.
+   Its job is the narrow one it is good at: judging which candidates are real
+   and breaking ties.
+
+Design constraints that came out of measuring the real corpus:
+
+- **Most speaker labels are noise.** 85% carry under five seconds of speech —
+  diarization hands a fresh label to every "mm-hmm" — while the eight busiest
+  labels in a meeting hold over 99% of what was said. Participants are
+  therefore separated from debris by speaking time before anything else
+  happens, or the graph fills with thousands of phantom people.
+- **Transcription mangles names.** One person appears as both "Imran" and
+  "Imron"; honorifics get absorbed ("Rupak bhai" becomes "Rupad Bai"). Matching
+  tolerates those edits, but refuses to merge names that merely look alike:
+  conflating two people silently misattributes one person's words, which is
+  worse than recording one person under two spellings.
+- **Unidentified is a valid answer.** A wrong name is worse than no name, so
+  the model is instructed to return nothing when evidence is thin, and
+  `meetings identify` lists what remains for a human.
+- **Claims are checkable.** Every decision and follow-up carries a verbatim
+  quote, and whether that quote is really in the transcript is recorded on the
+  node. The CLI and agent tools flag the ones that fail.
+
+Enrichment runs as two passes: identity first, then content read with real
+names substituted in. The order matters — "Person 3 will update the schema" is
+not an assignable follow-up, while "Kevin will update the schema" is.
+
+People identified in earlier meetings are fed back as known names for later
+ones, so recordings are processed in the order the meetings happened.
 
 ### 5. Multi-Language Support
 
@@ -201,6 +271,21 @@ agents:
   # project: my-gcp-project  # for Vertex AI
   # location: us-central1    # for Vertex AI
 
+transcripts:
+  enabled: true
+  sessions_dir: ~/.local/share/tomoe/sessions
+  owner: "Your Name"          # microphone audio is always this person
+  owner_aliases: ["Yourname"] # spellings the transcriber produces
+  provider: baseten           # baseten | ollama | anthropic | vertex-ai
+  model: deepseek-ai/DeepSeek-V4.1-Flash
+  api_key_command: "keyring get baseten.co you@example.com"
+  reasoning_effort: low       # low cuts cost without hurting identification
+  max_tokens: 65536           # must be generous: reasoning is spent first
+  min_confidence: 0.70
+  concurrency: 8
+  roster: ["Kevin", "Mona"]   # optional, and markedly improves accuracy
+  exclude_names: ["Acme"]     # terms that read like names in conversation
+
 docs:
   # provider: ollama          # auto-detected if omitted (ollama -> vertex-ai -> disabled)
   # model: qwen3.5:9b         # Ollama model for topic extraction
@@ -253,6 +338,7 @@ codeeagle/
 │   │   └── manifest/       # Manifest parser (go.mod, package.json, pyproject.toml, requirements.txt)
 │   ├── faces/              # Face detection & recognition (OpenCV DNN, Caffe SSD + ONNX SFace, agglomerative clustering, KNN classification)
 │   ├── queue/              # Async job queue with worker pool (face detection, clustering, document enrichment)
+│   ├── transcript/         # Meeting transcripts: loading, speaker identification, enrichment, graph projection
 │   └── watcher/            # Filesystem watcher (fsnotify + gitignore)
 ├── pkg/llm/                # Public LLM client interface + provider registry
 ├── testdata/               # Test fixtures
@@ -274,7 +360,9 @@ codeeagle/
 - **Face Detection:** OpenCV DNN (Caffe SSD detector + ONNX SFace recognizer) via `gocv.io/x/gocv`; 128-dim L2-normalized embeddings; requires `-tags faces` build and `libopencv-dev`
 - **Face Classification:** KNN-based with temporal decay, agglomerative hierarchical clustering, majority voting, auto-assignment at high confidence
 - **Graph Storage:** Embedded (BadgerDB with secondary indexes), branch-aware with fallback reads; separate face.db for face embeddings/clusters
-- **LLM Integration:** Anthropic API (direct) + Vertex AI (Claude & Gemini on GCP), extensible to others
+- **LLM Integration:** Anthropic API (direct), Vertex AI (Claude & Gemini on GCP), Baseten (OpenAI-compatible: GLM, DeepSeek, Kimi), Ollama, Claude CLI — extensible via a provider registry
+- **Structured output:** Providers that can enforce a JSON Schema do so (`llm.StructuredClient`); those that cannot are asked for JSON and their reply is salvaged
+- **Meeting transcripts:** Diarized JSON, content-sniffed; deterministic name-hint extraction with Jaro-Winkler variant matching, LLM adjudication, cross-recording identity resolution
 - **Config:** viper (YAML config loading)
 - **Testing:** stdlib `testing` + testify
 
@@ -312,3 +400,7 @@ Use [agentic-test-runner](https://github.com/imyousuf/agentic-test-runner) (`/ho
 - Agents are read-only — they query the graph and advise, never modify code
 - Embedded storage by default — no external DB dependency for basic usage
 - CLI-first — no web UI (keep it terminal-native)
+- Never assert an identity the evidence does not support — an unidentified
+  speaker is a correct outcome, a misattributed one corrupts the graph silently
+- Ground extracted claims in verbatim quotes, and record whether the quote
+  checks out rather than assuming it does
