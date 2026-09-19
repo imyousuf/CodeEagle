@@ -38,6 +38,10 @@ jobs:
           # library's export data. Keep in sync with GOLANGCI_LINT_VERSION in
           # the Makefile. v2.13.2 is built with Go 1.27.
           version: v2.13.2
+          # pkg/jev is a separate module, so the repository root's ./...
+          # stops at its directory. Named explicitly, or it is never linted.
+          # Keep in sync with PACKAGES in the Makefile.
+          args: ./... ./pkg/jev/...
 
       - name: Test
         run: make test

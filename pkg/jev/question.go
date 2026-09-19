@@ -1,29 +1,3 @@
-// Package jev is a client for TypeSafe Jev, a decision model that answers
-// typed questions about a state instead of generating text.
-//
-// A request carries one state — a struct, a map, or a string — and any number
-// of questions about it. Every question is answered in the same pass, so
-// asking ten costs about what asking one costs, and the answers come back as
-// values with calibrated probabilities rather than prose to be parsed.
-//
-// The three question types are deliberately narrow:
-//
-//   - [Noul] asks whether something is true, and answers with the probability
-//     that it is.
-//   - [Choice] picks one of a set of options, and answers with the winner, the
-//     distribution over all options, and how concentrated it is.
-//   - [Score] places the state on an ordered rubric, and answers with a
-//     continuous position between the levels.
-//
-// What the model cannot do matters as much as what it can. It does not do
-// arithmetic, does not compare dates, and does not write prose. Count the
-// items, compute the elapsed days, and pass the results in as part of the
-// state; ask a generative model for the explanation.
-//
-// Sampling is bounded to the question, so an answer is always one of the
-// options asked for. That is a guarantee about the shape of the answer and not
-// about its truth: a confident wrong answer remains possible, which is what
-// the confidence figures are for.
 package jev
 
 import (
@@ -109,8 +83,10 @@ func NoulWithCriteria(instructions, whenTrue, whenFalse string) Question {
 //
 // Always offer an option for "none of these". Without one the model must
 // spread its belief across answers it has already rejected, which inflates the
-// entropy of every other option and makes the confidence figure mean less. In
-// this codebase that option is what lets a speaker stay unidentified.
+// entropy of every other option and makes the confidence figure mean less. It
+// is also how declining becomes a valid answer: a pipeline identifying voices
+// in a transcript offers "unresolved", and treats it as correct rather than as
+// a failure.
 func Choice(instructions string, options map[string]string) Question {
 	return Question{Type: TypeChoice, Instructions: instructions, Criteria: options}
 }

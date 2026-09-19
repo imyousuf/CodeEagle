@@ -62,6 +62,17 @@ type Client struct {
 	timeout time.Duration
 }
 
+// Asker is what a [Client] does, reduced to the one method a consumer calls.
+//
+// Depend on this rather than on *Client, and substitute a recording or a
+// scripted answerer in tests: the jevtest subpackage provides the first, and
+// a two-line type satisfies the interface for the second.
+type Asker interface {
+	Ask(ctx context.Context, state any, questions Questions) (*Response, error)
+}
+
+var _ Asker = (*Client)(nil)
+
 // Option configures a [Client].
 type Option func(*Client)
 

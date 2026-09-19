@@ -249,9 +249,6 @@ func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, v
 	return nil
 }
 
-// facesAvailable is set to true by sync_faces.go init() when the faces build tag is active.
-var facesAvailable bool
-
 func newSyncCmd() *cobra.Command {
 	var full bool
 	var exportGraph bool
@@ -387,9 +384,6 @@ func runQueueEnrichment(
 	paths := repoPaths(cfg)
 	pool.Register(queue.JobDocExtract, queue.NewDocExtractHandler(docsProvider, docsCache, graphStore, paths))
 	pool.Register(queue.JobImageDescribe, queue.NewImageDescribeHandler(docsProvider, docsCache, graphStore, cfg.Docs.MaxImageRes, paths))
-
-	cleanupFaces := registerFaceHandlers(pool, cfg, graphStore, warnFn)
-	defer cleanupFaces()
 
 	maxW := cfg.Queue.MaxWorkers
 	if maxW <= 0 {

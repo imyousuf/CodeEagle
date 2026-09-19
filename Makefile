@@ -1,4 +1,4 @@
-.PHONY: build build-faces install clean test test-fast test-smoke lint lint-tools fmt tidy help \
+.PHONY: build build-faces install clean test test-fast test-smoke lint lint-tools fmt tidy jev-record help \
 	build-linux-amd64 build-linux-arm64 \
 	build-darwin-amd64 build-darwin-arm64 \
 	build-all
@@ -19,6 +19,10 @@ GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 GOMOD=$(GOCMD) mod
 GOFMT=gofmt
+
+# pkg/jev is a separate module (see go.work), so the root's ./... no longer
+# reaches it: every target that walks the tree names both.
+PACKAGES=./... ./pkg/jev/...
 
 # --- Linter ---
 # golangci-lint type-checks against the standard library's export data, so the
@@ -133,11 +137,11 @@ clean:
 
 ## test: Run tests with race detector
 test:
-	$(GOTEST) -race -v ./...
+	$(GOTEST) -race -v $(PACKAGES)
 
 ## test-fast: Run tests without race detector
 test-fast:
-	$(GOTEST) -v ./...
+	$(GOTEST) -v $(PACKAGES)
 
 ## test-smoke: Run smoke tests requiring real LLM APIs
 test-smoke:
@@ -145,7 +149,7 @@ test-smoke:
 
 ## lint: Run linter
 lint: lint-tools
-	$(GOLANGCI_LINT) run ./...
+	$(GOLANGCI_LINT) run $(PACKAGES)
 
 ## lint-tools: Install the pinned golangci-lint, built with the local Go toolchain
 lint-tools:
@@ -162,6 +166,14 @@ fmt:
 tidy:
 	$(GOMOD) tidy
 	$(GOMOD) verify
+
+## jev-record: Re-record pkg/jev's fixture corpus from the live Jev service (paid; GROUP=<name> narrows it)
+jev-record:
+	@if [ -z "$$TYPESAFE_API_KEY$$JEV_API_KEY$$JEV_KEYRING_ACCOUNT" ]; then \
+		echo "jev-record: set TYPESAFE_API_KEY, or JEV_KEYRING_ACCOUNT to read the key from the keyring" >&2; exit 1; \
+	fi
+	python3 pkg/jev/testdata/record_corpus.py $(GROUP)
+	cd pkg/jev && $(GOTEST) ./... -count=1
 
 ## help: Show this help
 help:

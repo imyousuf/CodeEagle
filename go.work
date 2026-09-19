@@ -1,0 +1,10 @@
+// pkg/jev is its own module so that other projects can depend on the Jev
+// client without pulling in this application's dependencies. The workspace
+// lets the application build against the working copy; a release pins a
+// tagged version instead (see pkg/jev/RELEASING.md).
+go 1.27.0
+
+use (
+	.
+	./pkg/jev
+)
