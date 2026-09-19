@@ -7,6 +7,7 @@ import (
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/imyousuf/CodeEagle/internal/config"
+	"github.com/imyousuf/CodeEagle/internal/gitutil"
 )
 
 // MeetingScope is the key scope meeting data is stored under.
@@ -168,4 +169,57 @@ func (s *BranchStore) Rescope(from, to string, dryRun bool) (*RescopeResult, err
 	}
 
 	return result, nil
+}
+
+// OpenReadWriteWithScopes opens the code graph for writing, with extra scopes
+// added to the read path.
+//
+// Writes go to the current branch as usual; the extra scopes only widen what
+// can be read, which is how branch-independent data such as meetings becomes
+// visible from any branch without a code sync being able to overwrite it.
+func OpenReadWriteWithScopes(cfg *config.Config, repoPaths []string, dbPathOverride string, extra ...string) (*BranchStore, string, error) {
+	path := cfg.ResolveDBPath(dbPathOverride)
+	if path == "" {
+		return nil, "", fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
+	}
+	current, read := gitutil.BuildReadBranches(repoPaths)
+	store, err := NewBranchStore(path, current, appendScopes(read, extra...))
+	if err != nil {
+		return nil, "", fmt.Errorf("open graph store: %w", err)
+	}
+	return store, current, nil
+}
+
+// OpenReadOnlyWithScopes opens the code graph for reading, with extra scopes
+// added to the read path.
+func OpenReadOnlyWithScopes(cfg *config.Config, repoPaths []string, dbPathOverride string, extra ...string) (*BranchStore, string, error) {
+	path := cfg.ResolveDBPath(dbPathOverride)
+	if path == "" {
+		return nil, "", fmt.Errorf("no graph database path configured")
+	}
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil, "", fmt.Errorf("graph database not found at %s; run 'codeeagle sync' first to build the index", path)
+	}
+	current, read := gitutil.BuildReadBranches(repoPaths)
+	store, err := NewReadOnlyBranchStore(path, current, appendScopes(read, extra...))
+	if err != nil {
+		return nil, "", fmt.Errorf("open graph store (read-only): %w", err)
+	}
+	return store, current, nil
+}
+
+// appendScopes adds scopes to a read list, skipping any already present so the
+// first match still wins for a duplicate id.
+func appendScopes(read []string, extra ...string) []string {
+	seen := make(map[string]bool, len(read))
+	for _, r := range read {
+		seen[r] = true
+	}
+	for _, e := range extra {
+		if e != "" && !seen[e] {
+			read = append(read, e)
+			seen[e] = true
+		}
+	}
+	return read
 }
