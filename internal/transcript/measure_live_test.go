@@ -192,9 +192,13 @@ func jevKey(t *testing.T) string {
 	if key := os.Getenv("JEV_API_KEY"); key != "" {
 		return key
 	}
-	out, err := exec.Command("keyring", "get", "typesafe.ai", "imran@sosuke.ai").Output()
+	account := os.Getenv("JEV_KEYRING_ACCOUNT")
+	if account == "" {
+		t.Skip("set JEV_API_KEY, or JEV_KEYRING_ACCOUNT to read it from the keyring")
+	}
+	out, err := exec.Command("keyring", "get", "typesafe.ai", account).Output()
 	if err != nil {
-		t.Skipf("no key available: %v", err)
+		t.Skipf("keyring lookup for %q failed: %v", account, err)
 	}
 	return strings.TrimSpace(string(out))
 }

@@ -384,10 +384,16 @@ func TestExtractPDF(t *testing.T) {
 }
 
 func TestExtractPDF_LargeFile(t *testing.T) {
-	pdfPath := "../../../testdata/2020-cx-5-owners-manual.pdf"
+	// A fixture big enough to be worth testing is far too big to commit —
+	// an already-compressed PDF does not delta, so it would weigh on every
+	// clone forever. Point this at one locally instead.
+	pdfPath := os.Getenv("CODEEAGLE_LARGE_PDF")
+	if pdfPath == "" {
+		t.Skip("set CODEEAGLE_LARGE_PDF to the path of a large PDF to run this")
+	}
 	content, err := os.ReadFile(pdfPath)
 	if err != nil {
-		t.Skipf("large PDF test fixture not available: %v", err)
+		t.Skipf("large PDF at %s not readable: %v", pdfPath, err)
 	}
 
 	text, err := extractPDF(context.Background(), content)

@@ -14,6 +14,9 @@ import (
 // Gated on JEV_LIVE_TEST rather than on the key being present: the key is
 // meant to sit in the environment for ordinary use, and `make test` must not
 // start calling a paid service because someone exported it.
+// keyringService is the service name the vendor's key is filed under.
+const keyringService = "typesafe.ai"
+
 func liveClient(t *testing.T) *Client {
 	t.Helper()
 	if os.Getenv("JEV_LIVE_TEST") == "" {
@@ -22,9 +25,16 @@ func liveClient(t *testing.T) *Client {
 
 	key := os.Getenv("JEV_API_KEY")
 	if key == "" {
-		out, err := exec.Command("keyring", "get", "typesafe.ai", "imran@sosuke.ai").Output()
+		// A developer who keeps the key in a keyring rather than the
+		// environment names their account here. There is no default: whose
+		// account it would be is not something this repository should know.
+		account := os.Getenv("JEV_KEYRING_ACCOUNT")
+		if account == "" {
+			t.Skip("set JEV_API_KEY, or JEV_KEYRING_ACCOUNT to read it from the keyring")
+		}
+		out, err := exec.Command("keyring", "get", keyringService, account).Output()
 		if err != nil {
-			t.Skipf("no key in JEV_API_KEY and keyring lookup failed: %v", err)
+			t.Skipf("keyring lookup for %q failed: %v", account, err)
 		}
 		key = strings.TrimSpace(string(out))
 	}
