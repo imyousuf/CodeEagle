@@ -87,6 +87,57 @@ type FacesConfig struct {
 	ConfidenceDecayWarning float64 `mapstructure:"confidence_decay_warning" yaml:"confidence_decay_warning,omitempty"`
 }
 
+// TranscriptsConfig holds meeting transcript indexing configuration.
+type TranscriptsConfig struct {
+	// Enabled turns on meeting transcript indexing.
+	Enabled bool `mapstructure:"enabled" yaml:"enabled,omitempty"`
+	// SessionsDir is the directory holding one folder per recorded session.
+	SessionsDir string `mapstructure:"sessions_dir" yaml:"sessions_dir,omitempty"`
+	// Owner is the person whose microphone made these recordings. Microphone
+	// audio is always this person, which anchors identity resolution.
+	Owner string `mapstructure:"owner" yaml:"owner,omitempty"`
+	// OwnerAliases lists other spellings of the owner's name, including ones
+	// speech recognition produces (e.g. "Imron" for "Imran").
+	OwnerAliases []string `mapstructure:"owner_aliases" yaml:"owner_aliases,omitempty"`
+	// Provider is the LLM provider used for enrichment ("baseten", "ollama",
+	// "anthropic", "vertex-ai").
+	Provider string `mapstructure:"provider" yaml:"provider,omitempty"`
+	// Model is the model identifier for the chosen provider.
+	Model string `mapstructure:"model" yaml:"model,omitempty"`
+	// BaseURL overrides the provider endpoint.
+	BaseURL string `mapstructure:"base_url" yaml:"base_url,omitempty"`
+	// APIKey is a literal credential. Prefer APIKeyEnv or APIKeyCommand:
+	// config files get committed.
+	APIKey string `mapstructure:"api_key" yaml:"api_key,omitempty"`
+	// APIKeyEnv names an environment variable holding the credential.
+	APIKeyEnv string `mapstructure:"api_key_env" yaml:"api_key_env,omitempty"`
+	// APIKeyCommand is a command whose output is the credential, so the key
+	// can live in the system keyring instead of on disk. For example:
+	// "keyring get baseten.co me@example.com".
+	APIKeyCommand string `mapstructure:"api_key_command" yaml:"api_key_command,omitempty"`
+	// MinConfidence is the score at or above which a speaker is automatically
+	// identified. Below it, the speaker is left for manual review.
+	MinConfidence float64 `mapstructure:"min_confidence" yaml:"min_confidence,omitempty"`
+	// MaxTokens caps enrichment responses. It needs to be generous: reasoning
+	// models spend this budget on internal deliberation before emitting any
+	// answer, and too small a cap yields an empty reply rather than a short one.
+	MaxTokens int `mapstructure:"max_tokens" yaml:"max_tokens,omitempty"`
+	// ReasoningEffort budgets a reasoning model's deliberation ("low",
+	// "medium", "high"). Low measurably reduces cost on meeting transcripts
+	// without hurting identification quality; switching reasoning off entirely
+	// does hurt it, so that is only used as a fallback.
+	ReasoningEffort string `mapstructure:"reasoning_effort" yaml:"reasoning_effort,omitempty"`
+	// Concurrency is how many sessions are enriched in parallel.
+	Concurrency int `mapstructure:"concurrency" yaml:"concurrency,omitempty"`
+	// Roster lists people known to attend these meetings. Supplying it
+	// markedly improves identification: it turns an open-ended guess into a
+	// choice among known colleagues and fixes the spelling of their names.
+	Roster []string `mapstructure:"roster" yaml:"roster,omitempty"`
+	// ExcludeNames lists terms never to treat as people — product and team
+	// names that otherwise look like names in conversation.
+	ExcludeNames []string `mapstructure:"exclude_names" yaml:"exclude_names,omitempty"`
+}
+
 // QueueConfig holds enrichment queue configuration.
 type QueueConfig struct {
 	// MaxWorkers is the maximum number of concurrent workers (0 = NumCPU/2).
@@ -115,6 +166,8 @@ type Config struct {
 	Docs DocsConfig `mapstructure:"docs" yaml:"docs"`
 	// Queue contains enrichment queue configuration.
 	Queue QueueConfig `mapstructure:"queue" yaml:"queue,omitempty"`
+	// Transcripts contains meeting transcript indexing configuration.
+	Transcripts TranscriptsConfig `mapstructure:"transcripts" yaml:"transcripts,omitempty"`
 	// ConfigDir is the resolved .CodeEagle directory path (not persisted in YAML).
 	ConfigDir string `mapstructure:"-" yaml:"-"`
 	// ProjectConf is the parsed .CodeEagle.conf if found (not persisted).
@@ -441,6 +494,15 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("docs.faces.confidence_threshold", 0.7)
 	v.SetDefault("docs.faces.object_detection", true)
 	v.SetDefault("docs.faces.object_confidence", 0.5)
+
+	v.SetDefault("transcripts.enabled", false)
+	v.SetDefault("transcripts.provider", "baseten")
+	v.SetDefault("transcripts.model", "deepseek-ai/DeepSeek-V4.1-Flash")
+	v.SetDefault("transcripts.api_key_env", "BASETEN_API_KEY")
+	v.SetDefault("transcripts.min_confidence", 0.70)
+	v.SetDefault("transcripts.max_tokens", 65536)
+	v.SetDefault("transcripts.reasoning_effort", "low")
+	v.SetDefault("transcripts.concurrency", 4)
 	v.SetDefault("docs.faces.checkpoint_clusters", 10)
 	v.SetDefault("docs.faces.auto_accept_threshold", 0.55)
 	v.SetDefault("docs.faces.reject_threshold", 0.30)

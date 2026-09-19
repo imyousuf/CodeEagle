@@ -1,0 +1,603 @@
+package transcript
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/imyousuf/CodeEagle/pkg/llm"
+)
+
+// Analyzer enriches sessions using an LLM.
+//
+// Enrichment runs as two passes rather than one. The first works out who was
+// speaking; the second reads the transcript with those names substituted in.
+// The order matters: "Person 3 will update the schema" is not an assignable
+// follow-up, while "Kevin will update the schema" is. Splitting the work also
+// keeps each prompt narrow, which is what makes a small, inexpensive model
+// reliable enough to run over hundreds of hours of recordings.
+type Analyzer struct {
+	client llm.Client
+	opts   Options
+}
+
+// Options configures enrichment.
+type Options struct {
+	// Owner is the person whose microphone made the recordings.
+	Owner string
+	// OwnerAliases lists other spellings of the owner's name.
+	OwnerAliases []string
+	// Roster lists people known to attend. Supplying it converts an
+	// open-ended guess into a choice among known colleagues.
+	Roster []string
+	// ExcludeNames lists terms never to treat as people, such as product and
+	// team names that read like names in conversation.
+	ExcludeNames []string
+	// MinConfidence is the bar for accepting an identification.
+	MinConfidence float64
+	// MaxTranscriptChars bounds how much transcript is sent in one request.
+	MaxTranscriptChars int
+}
+
+const (
+	// defaultMaxTranscriptChars is generous because the default model holds a
+	// million tokens of context and whole-meeting coherence matters more than
+	// a marginal saving. Every session in the reference corpus fits well
+	// inside it.
+	defaultMaxTranscriptChars = 600_000
+
+	// defaultMinConfidence is the bar for automatic identification.
+	defaultMinConfidence = 0.70
+)
+
+// NewAnalyzer creates an Analyzer.
+func NewAnalyzer(client llm.Client, opts Options) *Analyzer {
+	if opts.MaxTranscriptChars <= 0 {
+		opts.MaxTranscriptChars = defaultMaxTranscriptChars
+	}
+	if opts.MinConfidence <= 0 {
+		opts.MinConfidence = defaultMinConfidence
+	}
+	return &Analyzer{client: client, opts: opts}
+}
+
+// Enrich runs both passes over a session.
+func (a *Analyzer) Enrich(ctx context.Context, s *Session) (*Result, error) {
+	res := &Result{Session: s}
+	if s.IsEmpty() {
+		return res, nil
+	}
+
+	identities, err := a.Identify(ctx, s, &res.Usage)
+	if err != nil {
+		return nil, fmt.Errorf("identify speakers: %w", err)
+	}
+	res.Identities = identities
+
+	analysis, err := a.Analyze(ctx, res, &res.Usage)
+	if err != nil {
+		return nil, fmt.Errorf("analyze content: %w", err)
+	}
+	res.Analysis = analysis
+	return res, nil
+}
+
+// --- Pass 1: identity ---
+
+const identitySystemPrompt = `You work out who was speaking in a meeting transcript.
+
+The recording software separated the voices it heard but does not know who
+they belong to. It labelled them "Person 1", "Person 2", and so on. Your job
+is to map each label to a real person's name.
+
+Work only from what the transcript actually says:
+
+- A name identifies a speaker only when the transcript shows it refers to that
+  specific speaker: they introduce themselves ("this is Saki"), someone
+  addresses them and they answer next, or someone thanks them for what they
+  just finished saying.
+- A name merely being spoken in the room identifies nobody. People discuss
+  absent colleagues constantly.
+- Product names, company names, team names, and place names are not people.
+- Speech recognition mangles names. Prefer a spelling from the known-people
+  list when it plainly refers to the same person.
+
+Leaving a speaker unidentified is a correct and expected outcome. A wrong name
+is far worse than no name, because it silently attributes one person's words
+to another. When the evidence is thin, return an empty name.
+
+Confidence:
+  0.9-1.0  explicit self-introduction, or direct address answered immediately
+  0.7-0.9  consistent indirect evidence across several exchanges
+  0.4-0.7  suggestive but not conclusive
+  0.0-0.4  guessing — return an empty name instead`
+
+// Identify resolves diarization labels to people.
+func (a *Analyzer) Identify(ctx context.Context, s *Session, usage *Usage) ([]SpeakerIdentity, error) {
+	speakers := s.SubstantiveSpeakers()
+	if len(speakers) == 0 {
+		return nil, nil
+	}
+
+	hints := ExtractHints(s)
+	evidence := Evidence(s, hints)
+
+	var identities []SpeakerIdentity
+	var unresolved []SpeakerEvidence
+
+	for _, ev := range evidence {
+		// The microphone owner is known structurally: mic audio is by
+		// definition whoever made the recording. Never spend a model call, or
+		// risk a model disagreement, on a fact the format guarantees.
+		if ev.Stat.IsOwner {
+			identities = append(identities, SpeakerIdentity{
+				Label:      ev.Stat.Label,
+				Name:       a.opts.Owner,
+				Confidence: 1.0,
+				Evidence:   "microphone audio is the recording owner",
+				Method:     MethodOwnerAnchor,
+			})
+			continue
+		}
+		unresolved = append(unresolved, ev)
+	}
+
+	if len(unresolved) == 0 {
+		return identities, nil
+	}
+
+	prompt := a.identityPrompt(s, unresolved, hints)
+	var out struct {
+		Speakers []SpeakerIdentity `json:"speakers"`
+	}
+	if err := a.chatJSON(ctx, identitySystemPrompt, prompt, identitySchema(), &out, usage); err != nil {
+		return identities, err
+	}
+
+	known := make(map[string]bool, len(unresolved))
+	for _, ev := range unresolved {
+		known[ev.Stat.Label] = true
+	}
+	for _, id := range out.Speakers {
+		// A model may echo back a label that was not asked about.
+		if !known[id.Label] {
+			continue
+		}
+		id.Name = a.sanitizeName(id.Name)
+		if id.Name == "" {
+			id.Confidence = 0
+		}
+		id.Method = MethodLLM
+		identities = append(identities, id)
+	}
+	return identities, nil
+}
+
+// sanitizeName rejects names the model should not have produced: ordinary
+// words, honorific fragments, and terms the user has excluded.
+func (a *Analyzer) sanitizeName(name string) string {
+	cleaned := CleanName(name)
+	if cleaned == "" {
+		return ""
+	}
+	for _, ex := range a.opts.ExcludeNames {
+		if SameName(ex, cleaned) {
+			return ""
+		}
+	}
+	// Prefer the roster's spelling when this is plainly the same person, so
+	// one colleague does not accumulate a spelling per meeting.
+	for _, known := range a.knownPeople() {
+		if SameName(known, cleaned) {
+			return known
+		}
+	}
+	return cleaned
+}
+
+// knownPeople is the roster plus the owner and their aliases.
+func (a *Analyzer) knownPeople() []string {
+	var out []string
+	if a.opts.Owner != "" {
+		out = append(out, a.opts.Owner)
+	}
+	out = append(out, a.opts.Roster...)
+	return out
+}
+
+// identityPrompt assembles the speaker table, the deterministic evidence, and
+// the transcript into one request.
+func (a *Analyzer) identityPrompt(s *Session, unresolved []SpeakerEvidence, hints []Hint) string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "MEETING: %s\n", s.Title)
+	fmt.Fprintf(&b, "DATE: %s\n", s.StartedAt().Format("2006-01-02 15:04"))
+	fmt.Fprintf(&b, "LENGTH: %s\n\n", FormatTimestamp(s.DurationSeconds()))
+
+	if people := a.knownPeople(); len(people) > 0 {
+		fmt.Fprintf(&b, "KNOWN PEOPLE (prefer these spellings):\n  %s\n\n", strings.Join(people, ", "))
+	}
+	if a.opts.Owner != "" {
+		fmt.Fprintf(&b, "The speaker labelled %q is %s, who made the recording. Do not reassign that label.\n\n",
+			OwnerLabel, a.opts.Owner)
+	}
+	if len(a.opts.ExcludeNames) > 0 {
+		fmt.Fprintf(&b, "NOT PEOPLE (products, teams): %s\n\n", strings.Join(a.opts.ExcludeNames, ", "))
+	}
+
+	b.WriteString("SPEAKERS TO IDENTIFY:\n")
+	for _, ev := range unresolved {
+		fmt.Fprintf(&b, "  %s — spoke %s across %d turns (%d words), from %s to %s\n",
+			ev.Stat.Label,
+			FormatTimestamp(ev.Stat.SpeakingSeconds),
+			ev.Stat.Utterances,
+			ev.Stat.Words,
+			FormatTimestamp(ev.Stat.FirstAt),
+			FormatTimestamp(ev.Stat.LastAt))
+		for _, v := range ev.Votes {
+			fmt.Fprintf(&b, "      candidate %q (evidence strength %.1f) from: %s\n",
+				v.Name, v.Weight, strings.Join(quoteList(v.Quotes), " | "))
+		}
+	}
+	b.WriteString("\n")
+
+	if names := Roster(hints); len(names) > 0 {
+		fmt.Fprintf(&b, "NAMES MENTIONED ANYWHERE IN THIS MEETING (some are people not present):\n  %s\n\n",
+			strings.Join(names, ", "))
+	}
+
+	b.WriteString("The candidate lists above come from a pattern matcher that reads direct\n")
+	b.WriteString("address, self-introduction, thanks, and hand-offs. It is a starting point,\n")
+	b.WriteString("not an answer: it makes mistakes, and it misses people who are never\n")
+	b.WriteString("addressed by name. Check every candidate against the transcript, and return\n")
+	b.WriteString("an empty name where the transcript does not settle it.\n\n")
+
+	b.WriteString("TRANSCRIPT:\n")
+	b.WriteString(a.budgetedTranscript(s.Transcript()))
+	return b.String()
+}
+
+func quoteList(quotes []string) []string {
+	out := make([]string, 0, len(quotes))
+	for _, q := range quotes {
+		out = append(out, fmt.Sprintf("%q", q))
+	}
+	return out
+}
+
+// identitySchema constrains the identity response.
+func identitySchema() *llm.JSONSchema {
+	return &llm.JSONSchema{
+		Name:   "speaker_identities",
+		Strict: true,
+		Schema: object(map[string]any{
+			"speakers": map[string]any{
+				"type": "array",
+				"items": object(map[string]any{
+					"label": map[string]any{
+						"type":        "string",
+						"description": "the diarization label being resolved, exactly as given",
+					},
+					"name": map[string]any{
+						"type":        "string",
+						"description": "the person's name, or an empty string if the transcript does not identify them",
+					},
+					"confidence": map[string]any{
+						"type":        "number",
+						"description": "0 to 1, how strongly the transcript supports this name",
+					},
+					"evidence": map[string]any{
+						"type":        "string",
+						"description": "the verbatim quote that justifies the name, or why it is unknown",
+					},
+				}, "label", "name", "confidence", "evidence"),
+			},
+		}, "speakers"),
+	}
+}
+
+// --- Pass 2: content ---
+
+const analysisSystemPrompt = `You analyse a meeting transcript and extract what it would be
+useful to remember later.
+
+The transcript is machine-transcribed, so it contains mishearings, false
+starts, and filler. Read through that to what people meant.
+
+Ground everything in the transcript:
+
+- Summarize each topic from that topic's point of view — what was said about
+  that subject specifically, not a restatement of the meeting as a whole.
+  Someone looking up "authentication" should learn what this meeting concluded
+  about authentication.
+- A decision is a choice the group actually settled on, not a suggestion
+  someone floated. If it was left open, it is not a decision.
+- An action item is something a specific person committed to doing. Assign it
+  only to someone who appears in the transcript by name. If nobody clearly
+  owns it, leave the assignee empty rather than guessing.
+- Quote verbatim. Quotes are what let a reader verify a claim, so they must
+  appear in the transcript word for word.
+- List systems, services, repositories, and tools that were discussed, using
+  the names the speakers used. These connect the meeting to a codebase.
+
+Write a title that says what the meeting was about. Recording software names
+meetings things like "Unknown Meeting 2026-08-20 11:33"; yours should be
+useful in a list of hundreds.
+
+If the recording is too short or fragmentary to analyse, return empty arrays
+rather than inventing content.`
+
+// Analyze extracts topics, decisions, and follow-ups from a session whose
+// speakers have already been resolved.
+func (a *Analyzer) Analyze(ctx context.Context, res *Result, usage *Usage) (*Analysis, error) {
+	s := res.Session
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "MEETING DATE: %s\n", s.StartedAt().Format("2006-01-02 15:04 (Monday)"))
+	fmt.Fprintf(&b, "LENGTH: %s\n", FormatTimestamp(s.DurationSeconds()))
+	if s.Platform != "" && s.Platform != "Unknown" && s.Platform != "None" {
+		fmt.Fprintf(&b, "PLATFORM: %s\n", s.Platform)
+	}
+	if people := res.Participants(a.opts.MinConfidence); len(people) > 0 {
+		fmt.Fprintf(&b, "IDENTIFIED PARTICIPANTS: %s\n", strings.Join(people, ", "))
+	}
+	b.WriteString("\nTimestamps below are mm:ss (or h:mm:ss) from the start of the meeting.\n")
+	b.WriteString("Use them for topic start and end times, expressed in seconds.\n\n")
+	b.WriteString("TRANSCRIPT:\n")
+	b.WriteString(a.budgetedTranscript(res.NamedTranscript(a.opts.MinConfidence)))
+
+	var analysis Analysis
+	if err := a.chatJSON(ctx, analysisSystemPrompt, b.String(), analysisSchema(), &analysis, usage); err != nil {
+		return nil, err
+	}
+
+	if strings.TrimSpace(analysis.Title) == "" {
+		analysis.Title = s.Title
+	}
+	analysis.clampTo(s.DurationSeconds())
+	return &analysis, nil
+}
+
+// clampTo keeps model-supplied time ranges inside the real recording.
+func (a *Analysis) clampTo(duration float64) {
+	for i := range a.Topics {
+		t := &a.Topics[i]
+		if t.StartTime < 0 {
+			t.StartTime = 0
+		}
+		if duration > 0 && t.EndTime > duration {
+			t.EndTime = duration
+		}
+		if t.EndTime < t.StartTime {
+			t.EndTime = t.StartTime
+		}
+	}
+	sort.SliceStable(a.Topics, func(i, j int) bool {
+		return a.Topics[i].StartTime < a.Topics[j].StartTime
+	})
+}
+
+// analysisSchema constrains the content response.
+func analysisSchema() *llm.JSONSchema {
+	strs := func(desc string) map[string]any {
+		return map[string]any{
+			"type":        "array",
+			"items":       map[string]any{"type": "string"},
+			"description": desc,
+		}
+	}
+	return &llm.JSONSchema{
+		Name:   "meeting_analysis",
+		Strict: true,
+		Schema: object(map[string]any{
+			"title": map[string]any{
+				"type":        "string",
+				"description": "a descriptive title for this meeting",
+			},
+			"summary": map[string]any{
+				"type":        "string",
+				"description": "an overview of the meeting in a few sentences",
+			},
+			"topics": map[string]any{
+				"type": "array",
+				"items": object(map[string]any{
+					"name":    map[string]any{"type": "string"},
+					"summary": map[string]any{"type": "string", "description": "what this meeting established about this topic specifically"},
+					"start_time": map[string]any{
+						"type":        "number",
+						"description": "seconds from the start of the meeting where this topic begins",
+					},
+					"end_time":     map[string]any{"type": "number"},
+					"participants": strs("names of people who spoke on this topic"),
+					"keywords":     strs("short search terms for this topic"),
+				}, "name", "summary", "start_time", "end_time", "participants", "keywords"),
+			},
+			"decisions": map[string]any{
+				"type": "array",
+				"items": object(map[string]any{
+					"text":       map[string]any{"type": "string", "description": "the decision reached"},
+					"rationale":  map[string]any{"type": "string", "description": "why, if stated"},
+					"decided_by": strs("people who made the call"),
+					"topic":      map[string]any{"type": "string"},
+					"quote":      map[string]any{"type": "string", "description": "verbatim supporting quote"},
+				}, "text", "rationale", "decided_by", "topic", "quote"),
+			},
+			"action_items": map[string]any{
+				"type": "array",
+				"items": object(map[string]any{
+					"text":     map[string]any{"type": "string", "description": "what needs doing"},
+					"assignee": map[string]any{"type": "string", "description": "who committed to it, or empty"},
+					"due_date": map[string]any{"type": "string", "description": "ISO-8601 date, or empty if none was given"},
+					"topic":    map[string]any{"type": "string"},
+					"quote":    map[string]any{"type": "string", "description": "verbatim supporting quote"},
+				}, "text", "assignee", "due_date", "topic", "quote"),
+			},
+			"mentions": strs("systems, services, repositories, and tools discussed"),
+		}, "title", "summary", "topics", "decisions", "action_items", "mentions"),
+	}
+}
+
+// --- shared plumbing ---
+
+// object builds a strict JSON Schema object. Strict mode requires every
+// property to be listed as required and forbids extras, so the helper makes
+// that the default rather than something to remember.
+func object(props map[string]any, required ...string) map[string]any {
+	if required == nil {
+		required = make([]string, 0, len(props))
+		for k := range props {
+			required = append(required, k)
+		}
+		sort.Strings(required)
+	}
+	return map[string]any{
+		"type":                 "object",
+		"properties":           props,
+		"required":             required,
+		"additionalProperties": false,
+	}
+}
+
+// chatJSON sends a request and decodes the reply into out.
+//
+// Providers that can enforce a schema do so. Those that cannot — a local
+// Ollama model, for instance — are asked for JSON and their reply is salvaged,
+// since small models habitually wrap JSON in prose or a code fence.
+func (a *Analyzer) chatJSON(ctx context.Context, system, user string, schema *llm.JSONSchema, out any, usage *Usage) error {
+	messages := []llm.Message{{Role: llm.RoleUser, Content: user}}
+
+	var resp *llm.Response
+	var err error
+	if sc, ok := a.client.(llm.StructuredClient); ok {
+		resp, err = sc.ChatJSON(ctx, system, messages, schema)
+	} else {
+		resp, err = a.client.Chat(ctx, system+"\n\nRespond with JSON only. No prose, no code fences.", messages)
+	}
+	if err != nil {
+		return err
+	}
+	if usage != nil {
+		usage.Add(resp.Usage.InputTokens, resp.Usage.OutputTokens)
+	}
+
+	body := extractJSON(resp.Content)
+	if body == "" {
+		return fmt.Errorf("no JSON in response (%d bytes)", len(resp.Content))
+	}
+	if err := json.Unmarshal([]byte(body), out); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	return nil
+}
+
+// extractJSON pulls the JSON document out of a reply that may be wrapped in a
+// code fence or surrounded by commentary.
+func extractJSON(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if fenced := insideFence(s); fenced != "" {
+		s = fenced
+	}
+	start := strings.IndexAny(s, "{[")
+	if start < 0 {
+		return ""
+	}
+	open := rune(s[start])
+	close := '}'
+	if open == '[' {
+		close = ']'
+	}
+	// Scan for the matching close, ignoring braces inside string literals.
+	depth := 0
+	inString := false
+	escaped := false
+	for i, r := range s[start:] {
+		switch {
+		case escaped:
+			escaped = false
+		case r == '\\' && inString:
+			escaped = true
+		case r == '"':
+			inString = !inString
+		case inString:
+			// Braces inside a string are not structural.
+		case r == open:
+			depth++
+		case r == close:
+			depth--
+			if depth == 0 {
+				return s[start : start+i+len(string(r))]
+			}
+		}
+	}
+	return s[start:]
+}
+
+// insideFence returns the contents of the first fenced code block, if any.
+func insideFence(s string) string {
+	const fence = "```"
+	start := strings.Index(s, fence)
+	if start < 0 {
+		return ""
+	}
+	rest := s[start+len(fence):]
+	// Drop an optional language tag on the opening fence.
+	if nl := strings.IndexByte(rest, '\n'); nl >= 0 && !strings.Contains(rest[:nl], fence) {
+		rest = rest[nl+1:]
+	}
+	if end := strings.Index(rest, fence); end >= 0 {
+		return rest[:end]
+	}
+	return rest
+}
+
+// budgetedTranscript keeps a transcript within the request budget.
+//
+// When a recording is too long, the middle is thinned rather than the tail
+// dropped: meetings routinely settle their decisions and hand out follow-ups
+// in the closing minutes, so truncating the end discards the most valuable
+// part.
+func (a *Analyzer) budgetedTranscript(text string) string {
+	limit := a.opts.MaxTranscriptChars
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+
+	lines := strings.Split(text, "\n")
+	headBudget := limit * 40 / 100
+	tailBudget := limit * 40 / 100
+
+	var head []string
+	used := 0
+	for _, ln := range lines {
+		if used+len(ln) > headBudget {
+			break
+		}
+		head = append(head, ln)
+		used += len(ln) + 1
+	}
+
+	var tail []string
+	used = 0
+	for i := len(lines) - 1; i >= len(head); i-- {
+		if used+len(lines[i]) > tailBudget {
+			break
+		}
+		tail = append(tail, lines[i])
+		used += len(lines[i]) + 1
+	}
+	for i, j := 0, len(tail)-1; i < j; i, j = i+1, j-1 {
+		tail[i], tail[j] = tail[j], tail[i]
+	}
+
+	omitted := len(lines) - len(head) - len(tail)
+	var b strings.Builder
+	b.WriteString(strings.Join(head, "\n"))
+	fmt.Fprintf(&b, "\n\n[... %d turns from the middle of the meeting omitted for length ...]\n\n", omitted)
+	b.WriteString(strings.Join(tail, "\n"))
+	return b.String()
+}
