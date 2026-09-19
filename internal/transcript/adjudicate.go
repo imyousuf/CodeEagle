@@ -101,7 +101,7 @@ func (a *Analyzer) adjudicate(
 
 	// Ordered by label so a re-run writes the graph the same way.
 	sort.Slice(identities, func(i, j int) bool { return identities[i].Label < identities[j].Label })
-	return identities, nil
+	return resolveCollisions(identities, unresolved), nil
 }
 
 // identityOptions gathers the names a speaker might be.

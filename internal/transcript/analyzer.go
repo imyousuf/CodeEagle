@@ -238,7 +238,90 @@ func (a *Analyzer) Identify(ctx context.Context, s *Session, usage *Usage) ([]Sp
 		id.Method = MethodLLM
 		identities = append(identities, id)
 	}
-	return identities, nil
+	return resolveCollisions(identities, evidence), nil
+}
+
+// resolveCollisions unresolves speakers that were given the same name while
+// speaking at the same time as one another.
+//
+// One person's label sometimes changes partway through a recording, and both
+// halves should resolve to them — but two labels that overlap in time are two
+// people, and giving them one name puts one person's words in the other's
+// mouth. The evidence for a name is weakest in exactly this case, so the
+// project's rule applies: unresolved beats a guess.
+//
+// Spans that do not overlap are left alone. That is the drift case, and it is
+// the one the merge is for.
+func resolveCollisions(identities []SpeakerIdentity, evidence []SpeakerEvidence) []SpeakerIdentity {
+	spans := make(map[string]SpeakerStat, len(evidence))
+	for _, ev := range evidence {
+		spans[ev.Stat.Label] = ev.Stat
+	}
+
+	// Group the resolved, non-host speakers by the name they were given.
+	byName := make(map[string][]int)
+	for i, id := range identities {
+		if id.Name == "" || id.Method == MethodOwnerAnchor {
+			continue
+		}
+		byName[NormalizeName(id.Name)] = append(byName[NormalizeName(id.Name)], i)
+	}
+
+	for _, idx := range byName {
+		if len(idx) < 2 {
+			continue
+		}
+		if spansAreDisjoint(idx, identities, spans) {
+			continue
+		}
+
+		// Keep the best-supported one; the rest lose their name. A tie means
+		// nothing distinguishes them, so none of them survives.
+		best, tied := bestSupported(idx, identities)
+		for _, i := range idx {
+			if !tied && i == best {
+				continue
+			}
+			identities[i].Evidence = fmt.Sprintf(
+				"collided with another speaker also identified as %s", identities[i].Name)
+			identities[i].Name = ""
+			identities[i].Confidence = 0
+		}
+	}
+	return identities
+}
+
+// spansAreDisjoint reports whether every pair of the given speakers stops
+// before the next one starts.
+func spansAreDisjoint(idx []int, identities []SpeakerIdentity, spans map[string]SpeakerStat) bool {
+	for a := range idx {
+		for b := a + 1; b < len(idx); b++ {
+			x, okX := spans[identities[idx[a]].Label]
+			y, okY := spans[identities[idx[b]].Label]
+			if !okX || !okY {
+				return false
+			}
+			if x.LastAt > y.FirstAt && y.LastAt > x.FirstAt {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// bestSupported returns the index of the most confident identification, and
+// whether the best score is shared.
+func bestSupported(idx []int, identities []SpeakerIdentity) (best int, tied bool) {
+	best = idx[0]
+	for _, i := range idx[1:] {
+		switch {
+		case identities[i].Confidence > identities[best].Confidence:
+			best, tied = i, false
+		case identities[i].Confidence == identities[best].Confidence:
+			tied = true
+		}
+	}
+	return best, tied
 }
 
 // isOwnerName reports whether a name refers to the recording's host.

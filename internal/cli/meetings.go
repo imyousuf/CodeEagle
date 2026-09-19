@@ -1072,16 +1072,13 @@ func newMeetingsLabelCmd() *cobra.Command {
 				return err
 			}
 
-			if err := store.AddEdge(ctx, &graph.Edge{
-				ID:       graph.NewNodeID("edge", person.ID, meetingNodeID+":"+string(graph.EdgeAttended)),
-				Type:     graph.EdgeAttended,
-				SourceID: person.ID,
-				TargetID: meetingNodeID,
-				Properties: map[string]string{
-					graph.PropSpeakerLabel:    speaker.Name,
-					graph.PropSpeakingSeconds: speaker.Properties[graph.PropSpeakingSeconds],
-				},
-			}); err != nil {
+			// Recomputed from every label that resolves to this person, not
+			// written from this one. Diarization splits a person across
+			// labels, and the attendance edge is keyed on the person and the
+			// meeting alone — so writing this label's figures would replace
+			// the total rather than add to it, and labelling a second
+			// fragment would quietly shrink the first one's credit.
+			if err := recomputeAttendance(ctx, store, person, speaker, meetingNodeID); err != nil {
 				return err
 			}
 
@@ -1736,6 +1733,65 @@ func newSpeakerJudge(tc config.TranscriptsConfig) (decide.Judge, error) {
 		return nil, fmt.Errorf("speaker decision model: %w", err)
 	}
 	return judge, nil
+}
+
+// recomputeAttendance rewrites a person's attendance of one meeting from
+// every speaker label in it that resolves to them.
+//
+// This is what the attendance linker does after a sync; doing it here too
+// means a hand-assigned label agrees with the graph immediately rather than
+// only after the next one.
+func recomputeAttendance(
+	ctx context.Context,
+	store *embedded.BranchStore,
+	person, speaker *graph.Node,
+	meetingNodeID string,
+) error {
+	speakers, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeSpeaker})
+	if err != nil {
+		return err
+	}
+
+	var seconds float64
+	var labels []string
+	for _, sp := range speakers {
+		if sp.Properties[graph.PropMeetingID] != speaker.Properties[graph.PropMeetingID] {
+			continue
+		}
+		people, err := store.GetNeighbors(ctx, sp.ID, graph.EdgeIdentifiedAs, graph.Outgoing)
+		if err != nil {
+			return err
+		}
+		if !identifiesAs(people, person.ID) {
+			continue
+		}
+		labels = append(labels, sp.Name)
+		if v, err := strconv.ParseFloat(sp.Properties[graph.PropSpeakingSeconds], 64); err == nil {
+			seconds += v
+		}
+	}
+	sort.Strings(labels)
+
+	return store.AddEdge(ctx, &graph.Edge{
+		ID:       graph.NewNodeID("edge", person.ID, meetingNodeID+":"+string(graph.EdgeAttended)),
+		Type:     graph.EdgeAttended,
+		SourceID: person.ID,
+		TargetID: meetingNodeID,
+		Properties: map[string]string{
+			graph.PropSpeakerLabel:    strings.Join(labels, ", "),
+			graph.PropSpeakingSeconds: strconv.FormatFloat(seconds, 'f', 1, 64),
+		},
+	})
+}
+
+// identifiesAs reports whether a person is among a speaker's identifications.
+func identifiesAs(people []*graph.Node, personID string) bool {
+	for _, p := range people {
+		if p.ID == personID {
+			return true
+		}
+	}
+	return false
 }
 
 // openMeetingStore opens the meeting graph for writing.
