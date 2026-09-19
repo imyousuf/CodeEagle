@@ -32,6 +32,13 @@ type PersonRegistry struct {
 	byNormalized map[string]*graph.Node
 	// people is the distinct set, used for fuzzy matching.
 	people []*graph.Node
+	// recent lists people most recently created or confirmed first.
+	//
+	// Identification feeds known people into later meetings and the prompt
+	// keeps only the first sixty, so this order decides who survives that
+	// cut. Alphabetical order would quietly drop the colleague recognized
+	// last week in favour of one whose name begins with A.
+	recent []*graph.Node
 	// created counts people added during this run.
 	created int
 }
@@ -53,10 +60,27 @@ func LoadPersonRegistry(ctx context.Context, store graph.Store) (*PersonRegistry
 	return r, nil
 }
 
+// noteUse moves a person to the front of the recency order.
+//
+// Called when they are created or matched, so "recently confirmed" means what
+// it says. The list is short — a corpus of hundreds of meetings yields low
+// hundreds of people — so the linear scan is cheaper than the bookkeeping to
+// avoid it.
+func (r *PersonRegistry) noteUse(n *graph.Node) {
+	for i, p := range r.recent {
+		if p.ID == n.ID {
+			r.recent = append(r.recent[:i], r.recent[i+1:]...)
+			break
+		}
+	}
+	r.recent = append([]*graph.Node{n}, r.recent...)
+}
+
 // index records a person under their name and all known aliases.
 func (r *PersonRegistry) index(n *graph.Node) {
 	if _, seen := r.byNormalized[NormalizeName(n.Name)]; !seen {
 		r.people = append(r.people, n)
+		r.recent = append(r.recent, n)
 	}
 	r.byNormalized[NormalizeName(n.Name)] = n
 	for _, alias := range aliasesOf(n) {
@@ -99,11 +123,10 @@ func (r *PersonRegistry) Created() int {
 func (r *PersonRegistry) Names() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	out := make([]string, 0, len(r.people))
-	for _, p := range r.people {
+	out := make([]string, 0, len(r.recent))
+	for _, p := range r.recent {
 		out = append(out, p.Name)
 	}
-	sort.Strings(out)
 	return out
 }
 
@@ -123,14 +146,23 @@ func (r *PersonRegistry) Resolve(ctx context.Context, name string) (*graph.Node,
 
 	// Exact match on a name or a known alias.
 	if n, ok := r.byNormalized[norm]; ok {
+		r.noteUse(n)
 		return n, nil
 	}
 
 	// A transcription variant of someone already known.
-	if existing := r.fuzzyMatch(cleaned); existing != nil {
+	existing, ambiguous := r.fuzzyMatch(cleaned)
+	if ambiguous {
+		// Refusing leaves the speaker unidentified, which the caller treats as
+		// an ordinary outcome. Guessing would put one colleague's words in
+		// another's mouth, and nothing downstream would show it was a guess.
+		return nil, fmt.Errorf("several known people answer to %q", cleaned)
+	}
+	if existing != nil {
 		if err := r.addAlias(ctx, existing, cleaned); err != nil {
 			return nil, err
 		}
+		r.noteUse(existing)
 		return existing, nil
 	}
 
@@ -144,6 +176,7 @@ func (r *PersonRegistry) Resolve(ctx context.Context, name string) (*graph.Node,
 		return nil, fmt.Errorf("add person %q: %w", cleaned, err)
 	}
 	r.index(node)
+	r.noteUse(node)
 	r.created++
 	return node, nil
 }
@@ -151,27 +184,43 @@ func (r *PersonRegistry) Resolve(ctx context.Context, name string) (*graph.Node,
 // fuzzyMatch finds an existing person whose name is the same as this one, up
 // to the edits a transcriber makes.
 //
-// Where several people match — which real name sets make possible — the
-// longest-established spelling wins, so resolution stays stable between runs
-// rather than depending on map iteration order.
-func (r *PersonRegistry) fuzzyMatch(name string) *graph.Node {
+// It reports ambiguity rather than resolving it. Names are compared on the
+// surname only when both sides carry one, so a bare first name matches every
+// colleague who shares it — "Imran" is equally Imran Khan and Imran Sharma.
+// Choosing between them would be a coin toss recorded in the graph as a fact,
+// so the caller is told instead and the speaker stays unidentified.
+func (r *PersonRegistry) fuzzyMatch(name string) (match *graph.Node, ambiguous bool) {
 	var matches []*graph.Node
+	seen := make(map[string]bool)
+	add := func(p *graph.Node) {
+		if seen[p.ID] {
+			return
+		}
+		seen[p.ID] = true
+		matches = append(matches, p)
+	}
+
 	for _, p := range r.people {
 		if SameName(p.Name, name) {
-			matches = append(matches, p)
+			add(p)
+			continue
 		}
 		for _, alias := range aliasesOf(p) {
 			if SameName(alias, name) {
-				matches = append(matches, p)
+				add(p)
 				break
 			}
 		}
 	}
-	if len(matches) == 0 {
-		return nil
+
+	switch len(matches) {
+	case 0:
+		return nil, false
+	case 1:
+		return matches[0], false
+	default:
+		return nil, true
 	}
-	sort.Slice(matches, func(i, j int) bool { return matches[i].Name < matches[j].Name })
-	return matches[0]
 }
 
 // addAlias records an alternate spelling on a person.

@@ -1,13 +1,16 @@
 package embedded
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
+	"github.com/imyousuf/CodeEagle/internal/graph"
 )
 
 // MeetingScope is the key scope meeting data is stored under.
@@ -67,6 +70,55 @@ var keyScopePrefixes = []string{
 	prefixIdxPkg, prefixIdxEdge, prefixIdxReverseEdge, prefixIdxRole,
 }
 
+// meetingScopeTypes are the node types a meeting corpus may consist of.
+//
+// Person, Topic and the date hierarchy are shared with code indexing rather
+// than exclusive to meetings, so finding them proves nothing on its own — but
+// finding anything outside this set proves the scope holds a codebase.
+func meetingScopeTypes() map[graph.NodeType]bool {
+	allowed := map[graph.NodeType]bool{
+		graph.NodePerson: true,
+		graph.NodeTopic:  true,
+		graph.NodeYear:   true,
+		graph.NodeMonth:  true,
+		graph.NodeDate:   true,
+	}
+	for _, t := range graph.MeetingNodeTypes() {
+		allowed[t] = true
+	}
+	return allowed
+}
+
+// ScopeNodeTypes counts the node types filed under a scope.
+func (s *BranchStore) ScopeNodeTypes(scope string) (map[graph.NodeType]int, error) {
+	counts := make(map[graph.NodeType]int)
+	prefix := []byte(prefixNode + scope + ":")
+
+	err := s.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = prefix
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			val, err := it.Item().ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+			var n graph.Node
+			if err := json.Unmarshal(val, &n); err != nil {
+				continue
+			}
+			counts[n.Type]++
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scan %s: %w", scope, err)
+	}
+	return counts, nil
+}
+
 // Rescope moves every key filed under one scope to another.
 //
 // The scope appears only in the key, never in the stored value, so this is a
@@ -76,12 +128,41 @@ var keyScopePrefixes = []string{
 //
 // It refuses to overwrite: a key already present under the target scope is
 // left alone and the source copy is dropped, so running it twice is harmless.
+//
+// It also refuses to move a scope that holds an indexed codebase. A scope is
+// moved whole, because a key carries its scope but not its type, and the
+// meeting scope is a fallback read for every branch — so moving a branch that
+// was also used for `codeeagle sync` would take that branch's entire code
+// graph with it, delete it from the branch, and leak it into every other
+// branch's reads. Moving only the meeting nodes would be no better: Person and
+// Topic nodes are shared with code indexing, and removing them from the branch
+// would strip a document of the topics attached to it.
 func (s *BranchStore) Rescope(from, to string, dryRun bool) (*RescopeResult, error) {
 	if from == "" || to == "" {
 		return nil, fmt.Errorf("both scopes must be named")
 	}
 	if from == to {
 		return &RescopeResult{From: from, To: to}, nil
+	}
+
+	counts, err := s.ScopeNodeTypes(from)
+	if err != nil {
+		return nil, err
+	}
+	allowed := meetingScopeTypes()
+	var foreign []string
+	for typ, n := range counts {
+		if !allowed[typ] {
+			foreign = append(foreign, fmt.Sprintf("%s=%d", typ, n))
+		}
+	}
+	if len(foreign) > 0 {
+		sort.Strings(foreign)
+		return nil, fmt.Errorf(
+			"scope %q holds an indexed codebase (%s), not just meetings: "+
+				"moving it would take the code graph with it. Index meetings "+
+				"into their own database with graph.db_path instead",
+			from, strings.Join(foreign, " "))
 	}
 
 	result := &RescopeResult{From: from, To: to}

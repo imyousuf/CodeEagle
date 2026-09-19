@@ -313,9 +313,16 @@ func addVote(ev *SpeakerEvidence, name string, w float64, kind HintKind, quote s
 func Roster(hints []Hint) []string {
 	counts := make(map[string]int)
 	canonical := make(map[string]string)
+	// Kept in the order names were first mentioned. Which existing name a new
+	// mention merges into decides the counts, so ranging the map made the
+	// result depend on iteration order: the same transcript produced a
+	// different candidate list — and so a different identification — on every
+	// run, in code whose whole point is to be reproducible.
+	var order []string
+
 	for _, h := range hints {
 		key := ""
-		for existing := range canonical {
+		for _, existing := range order {
 			if SameName(existing, h.Name) {
 				key = existing
 				break
@@ -323,7 +330,10 @@ func Roster(hints []Hint) []string {
 		}
 		if key == "" {
 			key = NormalizeName(h.Name)
-			canonical[key] = h.Name
+			if _, seen := canonical[key]; !seen {
+				canonical[key] = h.Name
+				order = append(order, key)
+			}
 		}
 		counts[key]++
 	}

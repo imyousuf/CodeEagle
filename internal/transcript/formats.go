@@ -246,7 +246,9 @@ func timeFromName(path string) (time.Time, bool) {
 		if m == "" {
 			continue
 		}
-		normalized := strings.NewReplacer("_", "_", "T", " ", ".", "-").Replace(m)
+		// Separators vary by exporter. A layout that wants one of these back
+		// is served by the raw attempt below, so normalizing costs nothing.
+		normalized := strings.NewReplacer("_", " ", "T", " ", ".", "-").Replace(m)
 		if t, err := time.Parse(l.layout, normalized); err == nil {
 			return t.UTC(), true
 		}

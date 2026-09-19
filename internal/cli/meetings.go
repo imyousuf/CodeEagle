@@ -1036,6 +1036,18 @@ func newMeetingsLabelCmd() *cobra.Command {
 				return err
 			}
 
+			// A speaker is one person. Correcting an identification has to
+			// remove the one it replaces, or the graph asserts both — and the
+			// attendance linker, which picks the first neighbour in an order
+			// derived from edge hashes, may go on preferring the wrong one and
+			// silently discard the correction.
+			meetingNodeID := graph.NewNodeID(string(graph.NodeMeeting), speaker.FilePath,
+				speaker.Properties[graph.PropMeetingID])
+			replaced, err := replacePriorIdentity(ctx, store, speaker, person, meetingNodeID)
+			if err != nil {
+				return err
+			}
+
 			if err := store.AddEdge(ctx, &graph.Edge{
 				ID:       graph.NewNodeID("edge", speaker.ID, person.ID+":"+string(graph.EdgeIdentifiedAs)),
 				Type:     graph.EdgeIdentifiedAs,
@@ -1050,8 +1062,6 @@ func newMeetingsLabelCmd() *cobra.Command {
 				return err
 			}
 
-			meetingNodeID := graph.NewNodeID(string(graph.NodeMeeting), speaker.FilePath,
-				speaker.Properties[graph.PropMeetingID])
 			if err := store.AddEdge(ctx, &graph.Edge{
 				ID:       graph.NewNodeID("edge", person.ID, meetingNodeID+":"+string(graph.EdgeAttended)),
 				Type:     graph.EdgeAttended,
@@ -1065,8 +1075,12 @@ func newMeetingsLabelCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "%s in meeting %s is %s\n",
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "%s in meeting %s is %s\n",
 				label, speaker.Properties[graph.PropMeetingID], person.Name)
+			for _, name := range replaced {
+				fmt.Fprintf(out, "  replaced the earlier identification as %s\n", name)
+			}
 			return nil
 		},
 	}
@@ -1541,6 +1555,84 @@ func resolveIndexedPath(cfg *config.Config, rel string) string {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+// replacePriorIdentity removes any identification of this speaker as someone
+// other than the person now named, and returns the names it removed.
+//
+// It also drops that person's attendance of the meeting when this speaker was
+// the only reason to believe they were there. Diarization often splits one
+// person across several labels, so attendance is only withdrawn if no other
+// label in the same meeting still resolves to them — otherwise correcting one
+// label would erase a person who really did attend.
+func replacePriorIdentity(
+	ctx context.Context,
+	store *embedded.BranchStore,
+	speaker, person *graph.Node,
+	meetingNodeID string,
+) ([]string, error) {
+	edges, err := store.GetEdges(ctx, speaker.ID, graph.EdgeIdentifiedAs)
+	if err != nil {
+		return nil, err
+	}
+
+	var replaced []string
+	for _, e := range edges {
+		if e.SourceID != speaker.ID || e.TargetID == person.ID {
+			continue
+		}
+		previous, err := store.GetNode(ctx, e.TargetID)
+		if err == nil && previous != nil {
+			replaced = append(replaced, previous.Name)
+		}
+		if err := store.DeleteEdge(ctx, e.ID); err != nil {
+			return nil, err
+		}
+		stillPresent, err := speakerStillResolvesTo(ctx, store, speaker, e.TargetID, meetingNodeID)
+		if err != nil {
+			return nil, err
+		}
+		if stillPresent {
+			continue
+		}
+		attended := graph.NewNodeID("edge", e.TargetID, meetingNodeID+":"+string(graph.EdgeAttended))
+		if err := store.DeleteEdge(ctx, attended); err != nil {
+			return nil, err
+		}
+	}
+	return replaced, nil
+}
+
+// speakerStillResolvesTo reports whether any label in the meeting other than
+// this one is still identified as the given person.
+func speakerStillResolvesTo(
+	ctx context.Context,
+	store *embedded.BranchStore,
+	speaker *graph.Node,
+	personID, meetingNodeID string,
+) (bool, error) {
+	speakers, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeSpeaker})
+	if err != nil {
+		return false, err
+	}
+	for _, other := range speakers {
+		if other.ID == speaker.ID {
+			continue
+		}
+		if other.Properties[graph.PropMeetingID] != speaker.Properties[graph.PropMeetingID] {
+			continue
+		}
+		edges, err := store.GetEdges(ctx, other.ID, graph.EdgeIdentifiedAs)
+		if err != nil {
+			return false, err
+		}
+		for _, e := range edges {
+			if e.SourceID == other.ID && e.TargetID == personID {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // openMeetingStore opens the meeting graph for writing.

@@ -223,7 +223,19 @@ Design constraints that came out of measuring the real corpus:
   concepts worth searching by; a third, chasing a tidy top level, mis-filed them
   while still reading plausibly. Depth is a choice, defaulting to two.
 - **Meetings are not branch-scoped.** They live outside the per-branch key scopes
-  and are added as a fallback read, so they survive branch switches.
+  and are added as a fallback read, so they survive branch switches. A key
+  carries its scope but not its type, so `meetings migrate` moves a scope whole
+  — and since the meeting scope is read from every branch, moving a branch that
+  also holds indexed code would relocate that code graph and leak it everywhere.
+  Migration therefore refuses any scope containing code, and meetings belong in
+  their own `graph.db_path`.
+- **A speaker is one person.** Correcting an identification replaces the one it
+  supersedes rather than adding to it: the attendance linker takes the first
+  neighbour it finds, so two identifications mean one of them is silently
+  ignored and both people are recorded as having attended.
+- **Refuse an ambiguous name.** Surnames only decide when both sides have one, so
+  a bare first name matches every colleague who shares it. Resolution reports
+  the ambiguity instead of choosing, and the speaker stays unidentified.
 - **Compare surnames when both names have one.** Matching on given names alone
   was right for diarized transcripts, which offer nothing else, but against full
   names from a conferencing platform it merged distinct colleagues who happened
