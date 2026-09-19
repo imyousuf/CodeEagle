@@ -69,15 +69,27 @@ type Session struct {
 
 	// Path is where this session was loaded from. Not part of the wire format.
 	Path string `json:"-"`
+	// Format names the file layout this was read from ("tomoe", "webvtt",
+	// "teams-docx", ...). Not part of the wire format.
+	Format string `json:"-"`
+	// NamedSpeakers reports that the speaker labels are real people's names
+	// rather than diarization labels.
+	//
+	// A local recorder hears distinct voices and calls them "Person 1";
+	// a conferencing platform knows who was in the call and writes their names.
+	// Where the names are already present, identification has nothing to work
+	// out, and spending a model call to rediscover what the file states would
+	// be both wasteful and less accurate.
+	NamedSpeakers bool `json:"-"`
 }
 
-// Load reads a session transcript from disk.
+// Load reads a transcript from disk, in whichever format it is written.
 func Load(path string) (*Session, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read session: %w", err)
 	}
-	return Parse(data, path)
+	return ParseAny(path, data)
 }
 
 // Parse decodes a session transcript. The path is recorded on the result for
@@ -275,8 +287,16 @@ func (st SpeakerStat) IsSubstantive() bool {
 
 // SubstantiveSpeakers returns only the speakers who were really participating,
 // ordered by speaking time descending.
+//
+// The thresholds exist to filter diarization debris, which a transcript that
+// names its speakers does not have. Where the names came from the meeting
+// platform, everyone listed was genuinely in the call, and a colleague who said
+// one word is still an attendee — so they are all kept.
 func (s *Session) SubstantiveSpeakers() []SpeakerStat {
 	all := s.SpeakerStats()
+	if s.NamedSpeakers {
+		return all
+	}
 	out := make([]SpeakerStat, 0, len(all))
 	for _, st := range all {
 		if st.IsSubstantive() {

@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -92,26 +94,47 @@ func NewIndexer(store graph.Store, analyzer *Analyzer, writer *Writer, opts Inde
 // modification time would not do: copying a corpus rewrites every mtime at
 // once, and the meeting's own timestamp is the only reliable ordering.
 func DiscoverSessions(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("read sessions directory: %w", err)
-	}
-
 	type candidate struct {
 		path    string
 		started time.Time
 	}
 	var found []candidate
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+
+	// Recordings arrive either as a directory per session, as the local
+	// recorder writes them, or as loose exports downloaded from a conferencing
+	// tool. Walking handles both, and the name filter keeps the cost to a
+	// directory listing for everything that is not a transcript.
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			// A missing or unreadable root is a real configuration problem and
+			// must be reported; a single unreadable entry beneath it is not,
+			// and is skipped so one bad directory cannot stop the scan.
+			if path == dir {
+				return err
+			}
+			if d != nil && d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
-		path := filepath.Join(dir, e.Name(), SessionFileName)
+		if d.IsDir() {
+			if d.Name() != filepath.Base(dir) && strings.HasPrefix(d.Name(), ".") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !MayBeTranscript(path) {
+			return nil
+		}
 		started, err := sessionStartTime(path)
 		if err != nil {
-			continue
+			return nil
 		}
 		found = append(found, candidate{path: path, started: started})
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read sessions directory: %w", err)
 	}
 	sort.Slice(found, func(i, j int) bool {
 		if !found[i].started.Equal(found[j].started) {
@@ -120,11 +143,135 @@ func DiscoverSessions(dir string) ([]string, error) {
 		return found[i].path < found[j].path
 	})
 
-	paths := make([]string, len(found))
-	for i, c := range found {
-		paths[i] = c.path
+	exports := make([]export, 0, len(found))
+	for _, c := range found {
+		exports = append(exports, export{path: c.path, started: c.started})
 	}
-	return paths, nil
+	return preferOneExportPerMeeting(exports), nil
+}
+
+// export is one transcript file and when its meeting began.
+type export struct {
+	path    string
+	started time.Time
+}
+
+// formatPreference ranks formats for the same meeting, best first.
+//
+// A meeting exported twice — say a caption file and a Word document of one
+// call — should be indexed once. The local recorder's own file wins because it
+// alone carries the microphone channel that identifies the owner; between the
+// conferencing exports, captions win because they timestamp every cue while a
+// document records only when each utterance began.
+var formatPreference = map[string]int{
+	"tomoe":      0,
+	"webvtt":     1,
+	"srt":        2,
+	"teams-docx": 3,
+}
+
+// sameMeetingWindow is how far apart two exports of one meeting may be dated
+// and still be recognized as the same.
+//
+// It is not zero because the two files rarely agree. A Word export carries the
+// meeting's own timestamp, while a caption file often carries none at all and
+// falls back to when it was downloaded — a day or two later. It is not large
+// either: a standing meeting recurs weekly, and collapsing two instances of it
+// would silently lose one.
+const sameMeetingWindow = 48 * time.Hour
+
+// preferOneExportPerMeeting drops duplicate exports of the same meeting,
+// keeping the format that carries the most.
+//
+// Two files are the same meeting when their names agree, once the extension and
+// the tool's suffixes are removed, *and* their dates are close. The name alone
+// is not enough: a weekly standup exports to the same filename every week, so
+// matching on it would keep one instance and discard the rest.
+func preferOneExportPerMeeting(exports []export) []string {
+	type pick struct {
+		path    string
+		started time.Time
+		rank    int
+	}
+	// Grouped by name; each group holds the instances kept so far, since a
+	// recurring meeting legitimately has several.
+	groups := make(map[string][]pick, len(exports))
+	var order []string
+	seenKey := make(map[string]bool, len(exports))
+
+	rankOf := func(path string) int {
+		rank, known := formatPreference[formatNameForPath(path)]
+		if !known {
+			return len(formatPreference)
+		}
+		return rank
+	}
+
+	for _, e := range exports {
+		key := meetingKeyFromPath(e.path)
+		if !seenKey[key] {
+			seenKey[key] = true
+			order = append(order, key)
+		}
+
+		instances := groups[key]
+		matched := false
+		for i, inst := range instances {
+			if absDuration(inst.started.Sub(e.started)) > sameMeetingWindow {
+				continue
+			}
+			// Same meeting: keep whichever format carries more.
+			if rankOf(e.path) < inst.rank {
+				instances[i] = pick{path: e.path, started: inst.started, rank: rankOf(e.path)}
+			}
+			matched = true
+			break
+		}
+		if !matched {
+			instances = append(instances, pick{path: e.path, started: e.started, rank: rankOf(e.path)})
+		}
+		groups[key] = instances
+	}
+
+	out := make([]string, 0, len(exports))
+	for _, key := range order {
+		for _, inst := range groups[key] {
+			out = append(out, inst.path)
+		}
+	}
+	return out
+}
+
+// absDuration returns the magnitude of a duration.
+func absDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
+}
+
+// meetingKeyFromPath reduces a filename to what identifies the meeting,
+// discarding the extension and the suffixes exporters append.
+func meetingKeyFromPath(path string) string {
+	base := slugify(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)))
+	for _, suffix := range []string{"-transcript", "-recording", "-meeting-recording", "-captions"} {
+		base = strings.TrimSuffix(base, suffix)
+	}
+	// A session directory names the meeting when the file inside does not.
+	if base == "session" {
+		return slugify(filepath.Base(filepath.Dir(path)))
+	}
+	return base
+}
+
+// formatNameForPath reports which format claims a path, by name alone.
+func formatNameForPath(path string) string {
+	for _, f := range Formats() {
+		if f.Matches(path) {
+			return f.Name()
+		}
+	}
+	return ""
 }
 
 // startTimeProbe reads only the timestamp, so ordering the corpus does not
@@ -133,17 +280,31 @@ type startTimeProbe struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// sessionStartTime returns when a recording began, falling back to the file's
-// modification time if the transcript does not say.
+// sessionStartTime returns when a recording began.
+//
+// The transcript's own timestamp is preferred, then one embedded in the
+// filename by the tool that exported it, and only then the file's modification
+// time — which reflects when the file was written or downloaded rather than
+// when the meeting happened.
 func sessionStartTime(path string) (time.Time, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return time.Time{}, err
 	}
+
 	var probe startTimeProbe
 	if err := json.Unmarshal(data, &probe); err == nil && !probe.CreatedAt.IsZero() {
 		return probe.CreatedAt, nil
 	}
+	if t, ok := timeFromName(path); ok {
+		return t, nil
+	}
+	// A format with its own header may still carry the time; parsing is the
+	// only way to find it, and the result is discarded apart from the time.
+	if s, err := ParseAny(path, data); err == nil && !s.StartedAt().IsZero() {
+		return s.StartedAt(), nil
+	}
+
 	info, err := os.Stat(path)
 	if err != nil {
 		return time.Time{}, err
@@ -314,10 +475,7 @@ func (ix *Indexer) needsIndexing(ctx context.Context, path string) (bool, skipRe
 	if err != nil {
 		return false, skipNone, fmt.Errorf("read %s: %w", path, err)
 	}
-	if !LooksLikeSession(data) {
-		return false, skipNone, fmt.Errorf("%s is not a meeting transcript", path)
-	}
-	s, err := Parse(data, path)
+	s, err := ParseAny(path, data)
 	if err != nil {
 		return false, skipNone, err
 	}

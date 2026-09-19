@@ -133,6 +133,13 @@ func (a *Analyzer) Identify(ctx context.Context, s *Session, usage *Usage) ([]Sp
 		return nil, nil
 	}
 
+	// A conferencing platform writes the names of everyone in the call, so
+	// there is nothing to infer. Spending a model call to rediscover what the
+	// file states would cost money to produce a worse answer.
+	if s.NamedSpeakers {
+		return a.identitiesFromTranscript(speakers), nil
+	}
+
 	hints := ExtractHints(s)
 	evidence := Evidence(s, hints)
 
@@ -185,6 +192,33 @@ func (a *Analyzer) Identify(ctx context.Context, s *Session, usage *Usage) ([]Sp
 		identities = append(identities, id)
 	}
 	return identities, nil
+}
+
+// identitiesFromTranscript takes the speakers at their word, for a format that
+// records who was talking.
+//
+// The owner is recognized by name rather than by audio source: there is no
+// microphone channel in an exported transcript, so the only thing marking the
+// recording's owner is that one of the participants is them.
+func (a *Analyzer) identitiesFromTranscript(speakers []SpeakerStat) []SpeakerIdentity {
+	out := make([]SpeakerIdentity, 0, len(speakers))
+	for _, st := range speakers {
+		name := a.sanitizeName(st.Label)
+		if name == "" {
+			// An unattributed voice in an otherwise named transcript stays
+			// unidentified rather than being guessed at.
+			out = append(out, SpeakerIdentity{Label: st.Label, Method: MethodTranscript})
+			continue
+		}
+		out = append(out, SpeakerIdentity{
+			Label:      st.Label,
+			Name:       name,
+			Confidence: 1.0,
+			Evidence:   "the transcript records this speaker's name",
+			Method:     MethodTranscript,
+		})
+	}
+	return out
 }
 
 // sanitizeName rejects names the model should not have produced: ordinary

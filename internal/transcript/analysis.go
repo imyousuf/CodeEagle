@@ -37,6 +37,9 @@ const (
 	MethodLLM = "llm"
 	// MethodManual means a human assigned the identity.
 	MethodManual = "manual"
+	// MethodTranscript means the transcript itself named the speaker, as an
+	// export from a conferencing platform does.
+	MethodTranscript = "transcript"
 )
 
 // Topic is a subject the meeting covered, with the span of time spent on it.
