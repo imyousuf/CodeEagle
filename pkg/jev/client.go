@@ -50,6 +50,9 @@ type Client struct {
 	model      string
 	maxRetries int
 	httpClient *http.Client
+	// timeout is applied after every option has run, so that supplying a
+	// client and a timeout in either order means the same thing.
+	timeout time.Duration
 }
 
 // Option configures a [Client].
@@ -75,7 +78,11 @@ func WithModel(model string) Option {
 }
 
 // WithHTTPClient supplies the HTTP client, for callers that need their own
-// transport, proxy or instrumentation. A client with no timeout is given one.
+// transport, proxy or instrumentation.
+//
+// A timeout given by [WithTimeout] still applies, whichever order the two are
+// passed in: an option that silently undid another depending on where it sat
+// in the argument list would be a trap.
 func WithHTTPClient(h *http.Client) Option {
 	return func(c *Client) {
 		if h != nil {
@@ -88,7 +95,7 @@ func WithHTTPClient(h *http.Client) Option {
 func WithTimeout(d time.Duration) Option {
 	return func(c *Client) {
 		if d > 0 {
-			c.httpClient.Timeout = d
+			c.timeout = d
 		}
 	}
 }
@@ -113,12 +120,17 @@ func New(apiKey string, opts ...Option) (*Client, error) {
 		baseURL:    DefaultBaseURL,
 		model:      DefaultModel,
 		maxRetries: DefaultMaxRetries,
-		httpClient: &http.Client{Timeout: DefaultTimeout},
+		httpClient: &http.Client{},
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
-	if c.httpClient.Timeout == 0 {
+	// Applied last, so a supplied client and a supplied timeout compose
+	// regardless of the order they were given in.
+	switch {
+	case c.timeout > 0:
+		c.httpClient.Timeout = c.timeout
+	case c.httpClient.Timeout == 0:
 		c.httpClient.Timeout = DefaultTimeout
 	}
 	return c, nil

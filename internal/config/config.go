@@ -126,7 +126,7 @@ type TranscriptsConfig struct {
 	// can live in the system keyring instead of on disk. For example:
 	// "keyring get baseten.co me@example.com".
 	APIKeyCommand string `mapstructure:"api_key_command" yaml:"api_key_command,omitempty"`
-	// BasetenAPIKey, AnthropicAPIKey and OpenAIAPIKey are credentials named
+	// BasetenAPIKey and AnthropicAPIKey are credentials named
 	// after the service they belong to, so several can sit in one config and
 	// changing `provider` does not mean moving a key to a differently-named
 	// setting.
@@ -138,7 +138,6 @@ type TranscriptsConfig struct {
 	// application-default login` — and Ollama needs none at all.
 	BasetenAPIKey   string `mapstructure:"baseten_api_key" yaml:"baseten_api_key,omitempty"`
 	AnthropicAPIKey string `mapstructure:"anthropic_api_key" yaml:"anthropic_api_key,omitempty"`
-	OpenAIAPIKey    string `mapstructure:"openai_api_key" yaml:"openai_api_key,omitempty"`
 	// JevAPIKey enables adjudicating speaker identity with the TypeSafe Jev
 	// decision model instead of the language model.
 	//
@@ -619,7 +618,6 @@ func (c *TranscriptsConfig) ProviderSecret() SecretSource {
 	named := map[string]string{
 		"baseten":   c.BasetenAPIKey,
 		"anthropic": c.AnthropicAPIKey,
-		"openai":    c.OpenAIAPIKey,
 	}
 	if key := strings.TrimSpace(named[c.TranscriptProvider()]); key != "" {
 		return SecretSource{Literal: key}

@@ -353,3 +353,56 @@ func TestNewRequiresKey(t *testing.T) {
 		t.Fatal("New succeeded with no API key")
 	}
 }
+
+// TestOptionsComposeInAnyOrder covers WithHTTPClient and WithTimeout together.
+//
+// An option that silently undid another depending on where it sat in the
+// argument list would be a trap, and a lost timeout is the kind that only
+// shows up as a hung request in production.
+func TestOptionsComposeInAnyOrder(t *testing.T) {
+	const want = 3 * time.Second
+
+	tests := []struct {
+		name string
+		opts []Option
+		want time.Duration
+	}{
+		{
+			name: "timeout before client",
+			opts: []Option{WithTimeout(want), WithHTTPClient(&http.Client{})},
+			want: want,
+		},
+		{
+			name: "client before timeout",
+			opts: []Option{WithHTTPClient(&http.Client{}), WithTimeout(want)},
+			want: want,
+		},
+		{
+			name: "a client's own timeout is kept when none is given",
+			opts: []Option{WithHTTPClient(&http.Client{Timeout: 7 * time.Second})},
+			want: 7 * time.Second,
+		},
+		{
+			name: "an explicit timeout overrides the client's",
+			opts: []Option{WithHTTPClient(&http.Client{Timeout: 7 * time.Second}), WithTimeout(want)},
+			want: want,
+		},
+		{
+			name: "neither given falls back to the default",
+			opts: nil,
+			want: DefaultTimeout,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, err := New("apikey_test", tt.opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := c.httpClient.Timeout; got != tt.want {
+				t.Errorf("timeout = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}

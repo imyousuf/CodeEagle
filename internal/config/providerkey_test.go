@@ -10,7 +10,6 @@ func TestProviderSecretPrefersTheNamedKey(t *testing.T) {
 		Provider:        "baseten",
 		BasetenAPIKey:   "from-baseten",
 		AnthropicAPIKey: "from-anthropic",
-		OpenAIAPIKey:    "from-openai",
 		APIKey:          "from-the-generic-fallback",
 	}
 
@@ -20,7 +19,6 @@ func TestProviderSecretPrefersTheNamedKey(t *testing.T) {
 	}{
 		{"baseten", "from-baseten"},
 		{"anthropic", "from-anthropic"},
-		{"openai", "from-openai"},
 		// Nothing named for it, so the fallback answers.
 		{"ollama", "from-the-generic-fallback"},
 		{"vertex-ai", "from-the-generic-fallback"},

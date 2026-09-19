@@ -389,7 +389,6 @@ transcripts:
   # sit here at once and changing `provider` above does not mean moving a key.
   baseten_api_key: $(keyring get baseten.co you@example.com)
   # anthropic_api_key: ${ANTHROPIC_API_KEY}
-  # openai_api_key: ${OPENAI_API_KEY}
   # Vertex AI takes no key: run `gcloud auth application-default login`.
 
   reasoning_effort: low           # see the note below
@@ -446,7 +445,7 @@ system keyring itself. `$$` is a literal dollar, so a value that merely
 contains one is left alone.
 
 Credentials are named for the service they belong to — `baseten_api_key`,
-`anthropic_api_key`, `openai_api_key`, `jev_api_key` — so several can sit in
+`anthropic_api_key`, `jev_api_key` — so several can sit in
 one file and changing `provider` is a one-line edit rather than moving a key
 between settings. The older `api_key`, `api_key_env` and `api_key_command`
 still work for whichever provider is configured.

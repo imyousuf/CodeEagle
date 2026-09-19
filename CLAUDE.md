@@ -242,7 +242,10 @@ Design constraints that came out of measuring the real corpus:
   repository's name too, as non-git roots always have. A lone repository keeps
   the bare path — nothing can collide with it, and changing it would invalidate
   every ID already indexed. Adding a second repository to an existing
-  configuration does change them, so that first sync should be a `--full` one.
+  configuration does change them, and there is no incremental path across that
+  change: `--full` re-reads every file but never clears the scope, so the old
+  bare-path nodes are orphaned rather than replaced and the same file appears
+  twice. Delete the graph and re-index instead.
   Federation across separate databases needs more than this: repo-scoped types
   must be keyed on (source, id), while Person, Topic and the date hierarchy are
   global by design and key on id alone.
