@@ -78,21 +78,7 @@ meetings costs nothing for the ones already done.`,
 			out := cmd.OutOrStdout()
 
 			if dryRun {
-				cfg, err := config.Load()
-				if err != nil {
-					return fmt.Errorf("load config: %w", err)
-				}
-				scan := dirs
-				if len(scan) == 0 {
-					scan = cfg.TranscriptDirs()
-				}
-				if len(scan) == 0 {
-					return fmt.Errorf("no transcripts directory configured; set transcripts.sessions_dir or pass --dir")
-				}
-				for i, d := range scan {
-					scan[i] = expandPath(d)
-				}
-				return meetingsDryRun(out, scan, limit)
+				return meetingsDryRun(cmd, out, dirs, limit, force)
 			}
 
 			pipeline, err := buildMeetingPipeline(cmd, meetingPipelineOverrides{
@@ -119,6 +105,13 @@ meetings costs nothing for the ones already done.`,
 			if report.Stats.Meetings > 0 {
 				linkMeetingsToCode(cmd.Context(), out, pipeline.store)
 			}
+
+			// Failures are reported per recording so one bad file cannot end a
+			// run, but the command must still fail: a scheduled job whose API
+			// key expired would otherwise enrich nothing and report success.
+			if len(report.Failures) > 0 && report.Stats.Meetings == 0 {
+				return fmt.Errorf("no recordings were indexed: all %d failed", len(report.Failures))
+			}
 			return nil
 		},
 	}
@@ -135,40 +128,75 @@ meetings costs nothing for the ones already done.`,
 }
 
 // meetingsDryRun reports what a run would cover without spending anything.
-func meetingsDryRun(out io.Writer, dirs []string, limit int) error {
-	paths, err := transcript.DiscoverSessionsIn(dirs)
+//
+// It plans through the indexer rather than repeating discovery, so what it
+// reports is what a real run will do: the same directories, the same
+// transcripts found among the indexed documents, and the same skipping of
+// recordings already enriched. An estimate built separately drifts from the
+// thing it is estimating, and this one guards real money.
+func meetingsDryRun(cmd *cobra.Command, out io.Writer, dirs []string, limit int, force bool) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	scan := dirs
+	if len(scan) == 0 {
+		scan = cfg.TranscriptDirs()
+	}
+	for i, d := range scan {
+		scan[i] = expandPath(d)
+	}
+
+	marked, err := transcriptDocuments(cmd.Context(), cfg)
+	if err != nil && verbose {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not read indexed documents: %v\n", err)
+	}
+	if len(scan) == 0 && len(marked) == 0 {
+		return fmt.Errorf(
+			"nothing to index: set transcripts.sessions_dir, pass --dir, " +
+				"or run `codeeagle sync` so transcripts among your documents are found")
+	}
+
+	// Read-only: a preview must not take the write lock, and must not need
+	// credentials for a model it is not going to call.
+	store, err := embedded.OpenMeetingsReadOnly(cfg, dbPath)
 	if err != nil {
 		return err
 	}
-	if limit > 0 && len(paths) > limit {
-		paths = paths[:limit]
+	defer store.Close()
+
+	indexer := transcript.NewIndexer(store, nil, nil, transcript.IndexOptions{
+		SessionsDirs: scan,
+		ExtraPaths:   marked,
+		Force:        force,
+		Limit:        limit,
+		Log:          func(string, ...any) {},
+	})
+	plan, err := indexer.Plan(cmd.Context())
+	if err != nil {
+		return err
 	}
 
 	var speech, chars float64
-	var empty, participants, recordings, other int
+	var participants int
 	byFormat := map[string]int{}
 
-	for _, p := range paths {
-		// Discovery matches on the filename, which is a cheap filter rather
-		// than a verdict. Counting those as recordings would report every
-		// stray JSON file in a downloads folder as a meeting.
+	for _, p := range plan.Todo {
 		s, err := transcript.Load(p)
 		if err != nil {
-			other++
+			// Planning already read this file successfully, so a failure here
+			// is a genuine problem rather than "not a transcript".
+			plan.Failures = append(plan.Failures, transcript.Failure{Path: p, Err: err})
 			continue
 		}
-		recordings++
 		byFormat[s.Format]++
-		if s.IsEmpty() {
-			empty++
-			continue
-		}
 		speech += s.SpeechSeconds()
 		chars += float64(len(s.Transcript()))
 		participants += len(s.SubstantiveSpeakers())
 	}
 
-	fmt.Fprintf(out, "Recordings:       %d (%d with no speech)\n", recordings, empty)
+	fmt.Fprintf(out, "To enrich:        %d recordings\n", len(plan.Todo))
 	if len(byFormat) > 0 {
 		formats := make([]string, 0, len(byFormat))
 		for name, n := range byFormat {
@@ -177,15 +205,36 @@ func meetingsDryRun(out io.Writer, dirs []string, limit int) error {
 		sort.Strings(formats)
 		fmt.Fprintf(out, "Formats:          %s\n", strings.Join(formats, ", "))
 	}
-	if other > 0 {
-		fmt.Fprintf(out, "Not transcripts:  %d files skipped\n", other)
+	if plan.Skipped > 0 || plan.Empty > 0 || plan.Pending > 0 {
+		fmt.Fprintf(out, "Already indexed:  %d unchanged", plan.Skipped)
+		if plan.Empty > 0 {
+			fmt.Fprintf(out, ", %d with no speech", plan.Empty)
+		}
+		if plan.Pending > 0 {
+			fmt.Fprintf(out, ", %d still being written", plan.Pending)
+		}
+		fmt.Fprintln(out)
+	}
+	if plan.NotTranscripts > 0 {
+		fmt.Fprintf(out, "Not transcripts:  %d files skipped\n", plan.NotTranscripts)
 	}
 	fmt.Fprintf(out, "Speech:           %.1f hours\n", speech/3600)
-	fmt.Fprintf(out, "Participants:     %d across all recordings\n", participants)
+	fmt.Fprintf(out, "Participants:     %d across the recordings to enrich\n", participants)
 	// Both enrichment passes send the transcript, so the prompt cost is
 	// roughly twice its token count.
 	promptTokens := chars / 4 * 2
 	fmt.Fprintf(out, "Prompt tokens:    ~%.1fM (two passes per recording)\n", promptTokens/1e6)
+
+	if len(plan.Failures) > 0 {
+		fmt.Fprintf(out, "\nUnreadable:       %d\n", len(plan.Failures))
+		for _, f := range plan.Failures {
+			fmt.Fprintf(out, "  %s: %v\n", filepath.Base(f.Path), f.Err)
+		}
+	}
+	if len(plan.Todo) == 0 {
+		fmt.Fprintf(out, "\nNothing to do.\n")
+		return nil
+	}
 	fmt.Fprintf(out, "\nRun without --dry-run to enrich and index.\n")
 	return nil
 }

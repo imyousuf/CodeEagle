@@ -416,7 +416,11 @@ quality; switching reasoning off entirely does hurt it, so that is used only as
 an automatic fallback when a request exhausts its budget.
 
 `meetings sync --dry-run` reports how many recordings, hours of speech, and
-prompt tokens a run involves before any of it is spent.
+prompt tokens a run involves before any of it is spent. It plans through the
+same code the real run uses, so it counts only what would actually be enriched:
+recordings already indexed and unchanged are excluded, and transcripts found
+among your indexed documents are included. It opens the graph read-only and
+needs no API key.
 
 ### LLM Providers
 

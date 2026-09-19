@@ -230,10 +230,12 @@ Design constraints that came out of measuring the real corpus:
   to share a first name.
 - **A file that is not a transcript is not a failure.** Scanning a folder of
   mixed downloads is normal; unrecognized files are counted and skipped.
-- **A transcript is never indexed as a document.** When transcripts are enabled,
-  `codeeagle sync` skips them so the meeting pipeline can extract speakers,
-  decisions and follow-ups; indexing both would represent one meeting twice and
-  keep only the prose from one of them.
+- **A transcript is a document *and* a meeting.** `codeeagle sync` indexes it
+  like any other file and marks it; `codeeagle meetings sync` reads that mark
+  and additionally extracts the speakers, decisions and follow-ups. Letting
+  either index claim it exclusively loses the other half — it is prose worth
+  searching as well as a record of who said what — so a transcript committed
+  beside the code it concerns needs no directory configured at all.
 
 Enrichment runs as two passes: identity first, then content read with real
 names substituted in. The order matters — "Person 3 will update the schema" is

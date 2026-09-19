@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
@@ -22,6 +23,10 @@ const defaultOllamaBaseURL = "http://localhost:11434"
 // like a plausible answer and is wrong. Asking for a large window explicitly is
 // the only way to avoid that.
 const DefaultOllamaContextWindow = 32768
+
+// ollamaTimeout bounds one request to a local model. Generous, because a large
+// model on modest hardware is slow rather than broken, but finite.
+const ollamaTimeout = 10 * time.Minute
 
 func init() {
 	llm.RegisterProvider("ollama", newOllamaClient)
@@ -56,7 +61,9 @@ func newOllamaClient(cfg llm.Config) (llm.Client, error) {
 		baseURL:       baseURL,
 		model:         cfg.Model,
 		contextWindow: contextWindow,
-		client:        &http.Client{},
+		// A local model is unbilled but not instant, and a stuck server would
+		// otherwise hang a batch of hundreds of recordings indefinitely.
+		client: &http.Client{Timeout: ollamaTimeout},
 	}, nil
 }
 

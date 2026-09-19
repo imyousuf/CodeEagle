@@ -115,6 +115,18 @@ func DiscoverSessions(dir string) ([]string, error) {
 // A file reachable from two of the directories — nested paths, or a symlink —
 // is returned once, so overlapping configuration costs nothing.
 func DiscoverSessionsIn(dirs []string) ([]string, error) {
+	return DiscoverSessionsWith(dirs, nil)
+}
+
+// DiscoverSessionsWith finds the transcripts under several directories and
+// merges in individually named ones, in the order the meetings happened.
+//
+// The named transcripts are the ones document indexing marked, and they are
+// sorted in among the discovered files rather than appended after them.
+// Chronological order is not cosmetic here: a batch feeds the people it has
+// identified into later meetings, so a recording processed out of order loses
+// the names the earlier ones would have taught it.
+func DiscoverSessionsWith(dirs []string, extra []string) ([]string, error) {
 	var found []export
 	seen := make(map[string]bool)
 
@@ -128,6 +140,7 @@ func DiscoverSessionsIn(dirs []string) ([]string, error) {
 		}
 		found = append(found, batch...)
 	}
+	found = append(found, namedExports(extra, seen)...)
 
 	sort.Slice(found, func(i, j int) bool {
 		if !found[i].started.Equal(found[j].started) {
@@ -136,6 +149,34 @@ func DiscoverSessionsIn(dirs []string) ([]string, error) {
 		return found[i].path < found[j].path
 	})
 	return preferOneExportPerMeeting(found), nil
+}
+
+// namedExports turns individually named transcripts into exports, skipping any
+// that discovery already found so a file both configured and marked is indexed
+// once.
+func namedExports(paths []string, seen map[string]bool) []export {
+	var out []export
+	for _, p := range paths {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		key := p
+		if abs, err := filepath.Abs(p); err == nil {
+			key = abs
+		}
+		if seen[key] {
+			continue
+		}
+		started, err := sessionStartTime(p)
+		if err != nil {
+			// Unreadable or not a transcript after all. Planning reports this
+			// per file; dropping it here would hide it.
+			continue
+		}
+		seen[key] = true
+		out = append(out, export{path: p, started: started})
+	}
+	return out
 }
 
 // discoverOne walks a single directory, skipping anything already found.
@@ -208,32 +249,6 @@ func (ix *Indexer) searchedDescription() string {
 	default:
 		return dirs
 	}
-}
-
-// appendUnseenPaths adds named transcripts that discovery did not already
-// find, so a file both configured and marked is still indexed once.
-func appendUnseenPaths(found []string, extra []string) []string {
-	if len(extra) == 0 {
-		return found
-	}
-	seen := make(map[string]bool, len(found))
-	key := func(p string) string {
-		if abs, err := filepath.Abs(p); err == nil {
-			return abs
-		}
-		return p
-	}
-	for _, p := range found {
-		seen[key(p)] = true
-	}
-	for _, p := range extra {
-		if p == "" || seen[key(p)] {
-			continue
-		}
-		seen[key(p)] = true
-		found = append(found, p)
-	}
-	return found
 }
 
 // export is one transcript file and when its meeting began.
@@ -405,43 +420,86 @@ type job struct {
 	err  error
 }
 
-// Run enriches and indexes every recording in the configured directory.
-func (ix *Indexer) Run(ctx context.Context) (*RunReport, error) {
-	start := time.Now()
-	report := &RunReport{}
+// Plan is what a run would do: the recordings that need enriching, and the
+// reasons the rest were left out.
+type Plan struct {
+	// Todo are the recordings that would be enriched, in the order they would
+	// be processed.
+	Todo []string
+	// Skipped were already indexed and unchanged.
+	Skipped int
+	// Empty parsed but contain no speech.
+	Empty int
+	// Pending were still being written and are left for the next sweep.
+	Pending int
+	// NotTranscripts are ordinary files that discovery's filename filter let
+	// through. Being something else is not a failure.
+	NotTranscripts int
+	// Failures are files that claimed to be transcripts and could not be read.
+	Failures []Failure
+}
 
-	paths, err := DiscoverSessionsIn(ix.opts.SessionsDirs)
+// Plan decides what a run would enrich, without spending anything.
+//
+// Run uses this too, so `--dry-run` reports what will actually happen rather
+// than an estimate that can drift away from it.
+func (ix *Indexer) Plan(ctx context.Context) (*Plan, error) {
+	paths, err := DiscoverSessionsWith(ix.opts.SessionsDirs, ix.opts.ExtraPaths)
 	if err != nil {
 		return nil, err
 	}
-	paths = appendUnseenPaths(paths, ix.opts.ExtraPaths)
-	if ix.opts.Limit > 0 && len(paths) > ix.opts.Limit {
-		paths = paths[:ix.opts.Limit]
-	}
 	ix.opts.Log("Found %d recordings in %s", len(paths), ix.searchedDescription())
 
-	// Decide what actually needs work before spending anything on it.
-	var todo []string
+	plan := &Plan{}
 	for _, p := range paths {
 		needed, reason, err := ix.needsIndexing(ctx, p)
 		if err != nil {
-			report.Failures = append(report.Failures, Failure{Path: p, Err: err})
+			plan.Failures = append(plan.Failures, Failure{Path: p, Err: err})
 			continue
 		}
 		switch reason {
 		case skipEmpty:
-			report.Empty++
+			plan.Empty++
 		case skipUnchanged:
-			report.Skipped++
+			plan.Skipped++
 		case skipPending:
-			report.Pending++
+			plan.Pending++
 		case skipNotTranscript:
-			report.NotTranscripts++
+			plan.NotTranscripts++
 		}
 		if needed {
-			todo = append(todo, p)
+			plan.Todo = append(plan.Todo, p)
 		}
 	}
+
+	// Limit what gets enriched, not what was discovered. Truncating the
+	// discovered list pinned every run to the same oldest N recordings, so
+	// working through a backlog with `--limit` never advanced past the first
+	// batch — and with `--force` it paid for those same recordings again on
+	// every invocation.
+	if ix.opts.Limit > 0 && len(plan.Todo) > ix.opts.Limit {
+		plan.Todo = plan.Todo[:ix.opts.Limit]
+	}
+	return plan, nil
+}
+
+// Run enriches and indexes every recording in the configured directory.
+func (ix *Indexer) Run(ctx context.Context) (*RunReport, error) {
+	start := time.Now()
+
+	plan, err := ix.Plan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	report := &RunReport{
+		Skipped:        plan.Skipped,
+		Empty:          plan.Empty,
+		Pending:        plan.Pending,
+		NotTranscripts: plan.NotTranscripts,
+		Failures:       plan.Failures,
+	}
+	todo := plan.Todo
+
 	ix.opts.Log("%d to enrich, %d already indexed, %d empty%s%s", len(todo), report.Skipped, report.Empty,
 		pendingSuffix(report.Pending), notTranscriptSuffix(report.NotTranscripts))
 	if len(todo) == 0 {

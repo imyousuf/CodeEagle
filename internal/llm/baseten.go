@@ -33,6 +33,11 @@ const (
 	// hundreds of requests, so rate limiting is expected rather than
 	// exceptional and must not abort the run.
 	basetenMaxRetries = 5
+
+	// maxRetryAfter caps how long a server-supplied Retry-After can park a
+	// worker. The value is not ours, so it is treated as a request rather
+	// than an instruction.
+	maxRetryAfter = 60 * time.Second
 )
 
 // defaultBasetenTemperature keeps extraction close to the transcript.
@@ -406,12 +411,15 @@ func apiErrorMessage(raw []byte) string {
 }
 
 // parseRetryAfter reads a Retry-After header given as whole seconds.
+//
+// The value is capped: it comes from the server, and an unbounded one would
+// park a worker for as long as the other end cared to name.
 func parseRetryAfter(v string) time.Duration {
 	if v == "" {
 		return 0
 	}
 	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
-		return time.Duration(secs) * time.Second
+		return min(time.Duration(secs)*time.Second, maxRetryAfter)
 	}
 	return 0
 }
