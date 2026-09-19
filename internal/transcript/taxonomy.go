@@ -48,6 +48,15 @@ const (
 	// PropTopicReach is how many leaf subjects sit beneath a topic, which is
 	// what makes a theme's weight comparable to a subject's usage count.
 	PropTopicReach = "topic_reach"
+
+	// PropTopicInduced marks a concept that grouping invented, as opposed to a
+	// subject some meeting actually named that later turned out to have others
+	// beneath it.
+	//
+	// Only the first kind may be deleted when the taxonomy is rebuilt. The
+	// second is a real topic with meetings pointing at it, and deleting it
+	// takes their HasTopic edges with it.
+	PropTopicInduced = "topic_induced"
 )
 
 const (
@@ -635,18 +644,42 @@ func applyLevel(ctx context.Context, store graph.Store, items []TopicUsage, tax 
 			description = ""
 		}
 
+		themeID := graph.NewNodeID(string(graph.NodeTopic), "", name)
+
+		// The model is shown the topic list and asked to name concepts over
+		// it, so nothing stops it proposing a name a meeting already used.
+		// AddNode is a whole-record overwrite, so writing blind would discard
+		// that topic's aliases and usage count -- and the lost aliases are
+		// what stop the next meeting phrasing it differently from minting a
+		// second node, which is the forking the registry exists to prevent.
+		props := map[string]string{}
+		induced := true
+		if prior, err := store.GetNode(ctx, themeID); err == nil && prior != nil {
+			for k, v := range prior.Properties {
+				props[k] = v
+			}
+			// A topic meetings already point at is not an invention of this
+			// pass, whatever it is now used for.
+			induced = false
+			if description == "" {
+				description = prior.DocComment
+			}
+		}
+		props[PropTopicLevel] = LevelTheme
+		props[PropTopicDepth] = strconv.Itoa(depth)
+		props[PropTopicReach] = strconv.Itoa(reach)
+		props["member_count"] = strconv.Itoa(len(members))
+		if induced {
+			props[PropTopicInduced] = "true"
+		}
+
 		themeNode := &graph.Node{
-			ID:            graph.NewNodeID(string(graph.NodeTopic), "", name),
+			ID:            themeID,
 			Type:          graph.NodeTopic,
 			Name:          name,
 			QualifiedName: name,
 			DocComment:    description,
-			Properties: map[string]string{
-				PropTopicLevel: LevelTheme,
-				PropTopicDepth: strconv.Itoa(depth),
-				PropTopicReach: strconv.Itoa(reach),
-				"member_count": strconv.Itoa(len(members)),
-			},
+			Properties:    props,
 		}
 		if description != "" {
 			themeNode.Properties[graph.PropSummary] = description
@@ -654,7 +687,9 @@ func applyLevel(ctx context.Context, store graph.Store, items []TopicUsage, tax 
 		if err := store.AddNode(ctx, themeNode); err != nil {
 			return created, edges, fmt.Errorf("add concept %q: %w", name, err)
 		}
-		created++
+		if induced {
+			created++
+		}
 
 		for _, m := range members {
 			claimed[m.ID] = true
@@ -762,6 +797,18 @@ func ClearTaxonomy(ctx context.Context, store graph.Store) (int, error) {
 		if t.Properties[PropTopicLevel] != LevelTheme {
 			continue
 		}
+		if !inducedConcept(t) {
+			// A subject a meeting named, which grouping later promoted.
+			// Deleting it would take every HasTopic edge pointing at it --
+			// measured at 2,422 edges across 340 of 614 meetings on the
+			// reference corpus, because promoted subjects outnumber real
+			// concepts there roughly four to one. It is demoted instead, so
+			// the next pass can place it afresh.
+			if err := demoteTopic(ctx, store, t); err != nil {
+				return removed, fmt.Errorf("demote topic %q: %w", t.Name, err)
+			}
+			continue
+		}
 		// Deleting the node takes its edges with it, so the subjects beneath
 		// simply become roots again.
 		if err := store.DeleteNode(ctx, t.ID); err != nil {
@@ -770,6 +817,52 @@ func ClearTaxonomy(ctx context.Context, store graph.Store) (int, error) {
 		removed++
 	}
 	return removed, nil
+}
+
+// inducedConcept reports whether grouping invented a topic, rather than
+// promoting one a meeting had named.
+//
+// Newly written concepts say so outright. For those written before that was
+// recorded, the registry's own bookkeeping is the discriminator: it is the
+// only thing that writes a usage count or alternate wordings, and grouping
+// never does, so either property means a meeting resolved this topic by name.
+func inducedConcept(t *graph.Node) bool {
+	if t.Properties[PropTopicInduced] == "true" {
+		return true
+	}
+	if _, ok := t.Properties[propTopicUses]; ok {
+		return false
+	}
+	if _, ok := t.Properties[graph.PropAliases]; ok {
+		return false
+	}
+	return true
+}
+
+// demoteTopic returns a promoted subject to being a leaf, detaching the
+// children grouping gave it without touching what points at it.
+func demoteTopic(ctx context.Context, store graph.Store, t *graph.Node) error {
+	children, err := store.GetNeighbors(ctx, t.ID, graph.EdgeContains, graph.Outgoing)
+	if err == nil {
+		for _, child := range children {
+			if child.Type != graph.NodeTopic {
+				continue
+			}
+			edgeID := graph.NewNodeID("edge", t.ID, child.ID+":"+string(graph.EdgeContains))
+			if err := store.DeleteEdge(ctx, edgeID); err != nil {
+				return fmt.Errorf("detach %q: %w", child.Name, err)
+			}
+		}
+	}
+
+	if t.Properties == nil {
+		return nil
+	}
+	delete(t.Properties, PropTopicReach)
+	delete(t.Properties, "member_count")
+	t.Properties[PropTopicLevel] = LevelSubject
+	t.Properties[PropTopicDepth] = "0"
+	return store.UpdateNode(ctx, t)
 }
 
 // TopicMeetingCount returns how many distinct meetings a topic covers,
