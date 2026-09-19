@@ -56,6 +56,15 @@ type VectorStore struct {
 	dbPath   string // path to vec.db directory
 	meta     *VectorIndexMeta
 	chunk    ChunkConfig
+	// progress, when set, is called as a rebuild advances. A long rebuild
+	// that prints nothing gives no way to tell slow from stuck.
+	progress func(done, total int)
+}
+
+// WithProgress reports how far a rebuild has got.
+func (vs *VectorStore) WithProgress(fn func(done, total int)) *VectorStore {
+	vs.progress = fn
+	return vs
 }
 
 // New creates a new VectorStore. It does not load the index; call Load() separately.
@@ -234,14 +243,102 @@ func (vs *VectorStore) IndexNode(ctx context.Context, node *graph.Node) error {
 	return nil
 }
 
-// IndexNodes indexes multiple nodes in batch.
+// EmbedBatchSize is how many chunks are sent for embedding in one request.
+//
+// One request per node made indexing network-bound to the point of absurdity:
+// a full rebuild spent eighty-four minutes of wall time on ninety seconds of
+// work, because almost all of it was round-trip overhead — a single-word probe
+// takes about as long as a full batch. Grouping chunks turns hours into
+// minutes and leaves the accelerator doing the work instead of waiting.
+const EmbedBatchSize = 64
+
+// IndexNodes indexes many nodes, embedding their chunks in batches.
+//
+// The network call happens outside the lock. Holding it across a round trip
+// would serialize every other reader of the index behind whatever the
+// embedding service is doing.
 func (vs *VectorStore) IndexNodes(ctx context.Context, nodes []*graph.Node) error {
+	return vs.indexNodes(ctx, nodes, nil)
+}
+
+// pendingChunk is one chunk waiting to be embedded, and where it belongs.
+type pendingChunk struct {
+	nodeID string
+	index  int
+	text   string
+}
+
+// indexNodes embeds and stores nodes in batches, reporting progress if asked.
+func (vs *VectorStore) indexNodes(
+	ctx context.Context, nodes []*graph.Node, progress func(done, total int),
+) error {
+	var batch []pendingChunk
+	indexed := 0
+
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		texts := make([]string, len(batch))
+		for i, c := range batch {
+			texts[i] = c.text
+		}
+
+		// Outside the lock: this is the slow part.
+		embeddings, err := vs.embedder.Embed(ctx, texts)
+		if err != nil {
+			return fmt.Errorf("embed batch of %d: %w", len(texts), err)
+		}
+		if len(embeddings) != len(batch) {
+			return fmt.Errorf("embed returned %d vectors for %d chunks",
+				len(embeddings), len(batch))
+		}
+
+		vs.mu.Lock()
+		defer vs.mu.Unlock()
+		for i, c := range batch {
+			key := chunkKey(c.nodeID, c.index)
+			vs.idx.Add(hnsw.MakeNode(key, embeddings[i]))
+			entry := ChunkEntry{NodeID: c.nodeID, ChunkIndex: c.index, ChunkText: c.text}
+			if err := vs.putChunkEntry(key, entry); err != nil {
+				return fmt.Errorf("store chunk %s: %w", key, err)
+			}
+		}
+		batch = batch[:0]
+		return nil
+	}
+
 	for _, node := range nodes {
-		if err := vs.IndexNode(ctx, node); err != nil {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if !IsEmbeddable(node.Type) {
+			continue
+		}
+		text := EmbeddableText(node)
+		if text == "" {
+			continue
+		}
+
+		vs.mu.Lock()
+		vs.removeNodeVectors(node.ID)
+		vs.mu.Unlock()
+
+		for i, chunk := range Chunk(text, vs.chunk) {
+			batch = append(batch, pendingChunk{nodeID: node.ID, index: i, text: chunk})
+			if len(batch) >= EmbedBatchSize {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+		}
+
+		indexed++
+		if progress != nil {
+			progress(indexed, len(nodes))
+		}
 	}
-	return nil
+	return flush()
 }
 
 // RemoveNode removes all vectors for a node.
@@ -267,20 +364,22 @@ func (vs *VectorStore) Rebuild(ctx context.Context) error {
 		return fmt.Errorf("clear chunks: %w", err)
 	}
 
-	// Query all nodes and index embeddable ones.
-	nodeCount := 0
+	// Query every embeddable node first, so the work can be counted before
+	// it starts — a rebuild that prints one line and then nothing for an hour
+	// gives no way to tell slow from stuck.
+	var all []*graph.Node
 	for _, nodeType := range EmbeddableTypes {
 		nodes, err := vs.graphDB.QueryNodes(ctx, graph.NodeFilter{Type: nodeType})
 		if err != nil {
 			return fmt.Errorf("query %s nodes: %w", nodeType, err)
 		}
-		for _, node := range nodes {
-			if err := vs.IndexNode(ctx, node); err != nil {
-				return fmt.Errorf("index node %s: %w", node.ID, err)
-			}
-			nodeCount++
-		}
+		all = append(all, nodes...)
 	}
+
+	if err := vs.indexNodes(ctx, all, vs.progress); err != nil {
+		return err
+	}
+	nodeCount := len(all)
 
 	// Update metadata.
 	now := time.Now()
