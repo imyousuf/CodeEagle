@@ -258,8 +258,6 @@ func newSyncCmd() *cobra.Command {
 	var importGraph bool
 	var branch string
 	var showProgress bool
-	var facesOnly bool
-	var forceRescan bool
 
 	cmd := &cobra.Command{
 		Use:   "sync",
@@ -287,12 +285,6 @@ already-indexed images. Use --force with --faces-only to re-scan all images.`,
 			if exportGraph && importGraph {
 				return fmt.Errorf("cannot use --export and --import together")
 			}
-			if facesOnly && (full || exportGraph || importGraph) {
-				return fmt.Errorf("--faces-only cannot be used with --full, --export, or --import")
-			}
-			if forceRescan && !facesOnly {
-				return fmt.Errorf("--force can only be used with --faces-only")
-			}
 
 			out := cmd.OutOrStdout()
 			errOut := cmd.ErrOrStderr()
@@ -306,11 +298,6 @@ already-indexed images. Use --force with --faces-only to re-scan all images.`,
 			// Handle export/import.
 			if exportGraph || importGraph {
 				return handleExportImport(cfg, exportGraph, branch, out)
-			}
-
-			// Handle faces-only mode.
-			if facesOnly {
-				return runFacesOnlySync(ctx(cmd), cfg, forceRescan, logFn, warnFn)
 			}
 
 			// Normal sync — delegate to RunSync.
@@ -328,8 +315,6 @@ already-indexed images. Use --force with --faces-only to re-scan all images.`,
 	cmd.Flags().BoolVar(&exportGraph, "export", false, "export current branch graph to a file")
 	cmd.Flags().BoolVar(&importGraph, "import", false, "import a graph export file")
 	cmd.Flags().StringVar(&branch, "branch", "", "target branch for import (auto-detected if empty)")
-	cmd.Flags().BoolVar(&facesOnly, "faces-only", false, "run face detection only (skip indexing)")
-	cmd.Flags().BoolVar(&forceRescan, "force", false, "force re-scan of already-scanned images (use with --faces-only)")
 
 	return cmd
 }
@@ -389,11 +374,6 @@ func runQueueEnrichment(
 		switch event {
 		case "sync:progress":
 			completed.Add(1)
-		case "sync:checkpoint":
-			// Auto-resume checkpoints in CLI mode (no UI to review).
-			if pool != nil {
-				pool.Resume()
-			}
 		case "job:failed":
 			if len(data) > 0 {
 				if m, ok := data[0].(map[string]string); ok {
@@ -510,15 +490,6 @@ func populateQueue(
 				FilePaths:   g.filePaths,
 				MaxRetries:  retries,
 			})
-			if facesEnabled {
-				jobs = append(jobs, &queue.Job{
-					Type:        queue.JobFaceDetect,
-					Priority:    30,
-					ContentHash: g.contentHash + ":face",
-					FilePaths:   g.filePaths,
-					MaxRetries:  retries,
-				})
-			}
 		}
 	}
 
@@ -536,218 +507,6 @@ func populateQueue(
 		parts = append(parts, fmt.Sprintf("%d %s", c, jt))
 	}
 	logFn("[queue] Enqueuing %d jobs (%s)", len(jobs), strings.Join(parts, ", "))
-	return qs.EnqueueBatch(jobs)
-}
-
-// runFacesOnlySync skips all indexing and only runs face detection on
-// already-indexed images. If force is true, re-scans all images regardless
-// of whether they were previously scanned.
-func runFacesOnlySync(
-	ctx context.Context,
-	cfg *config.Config,
-	force bool,
-	logFn func(format string, args ...any),
-	warnFn func(format string, args ...any),
-) error {
-	if !facesAvailable {
-		return fmt.Errorf("face detection requires the 'faces' build tag; rebuild with: go build -tags faces")
-	}
-
-	paths := repoPaths(cfg)
-	store, _, err := embedded.OpenReadWrite(cfg, paths, "")
-	if err != nil {
-		return fmt.Errorf("open store: %w", err)
-	}
-	defer store.Close()
-
-	queuePath := cfg.ConfigDir + "/queue.db"
-	qs, err := queue.Open(queuePath)
-	if err != nil {
-		return fmt.Errorf("open queue: %w", err)
-	}
-	defer qs.Close()
-
-	if err := qs.RecoverStalled(); err != nil {
-		warnFn("Warning: queue recover stalled: %v", err)
-	}
-
-	// Drain existing pending face-detect jobs first.
-	pending := qs.PendingCount()
-	if pending > 0 {
-		logFn("[faces] Draining %d pending jobs from previous run...", pending)
-		if err := runFaceWorkerPool(ctx, cfg, store, qs, pending, logFn, warnFn); err != nil {
-			warnFn("Warning: drain existing queue: %v", err)
-		}
-	}
-
-	// For force mode: purge old jobs and clear scan markers.
-	if force {
-		if err := qs.PurgeCompleted(); err != nil {
-			warnFn("Warning: purge completed: %v", err)
-		}
-		if err := qs.PurgeFailed(); err != nil {
-			warnFn("Warning: purge failed: %v", err)
-		}
-
-		if err := store.ClearAllImageScanned(); err != nil {
-			warnFn("Warning: clear scan markers: %v", err)
-		} else {
-			logFn("[faces] Force mode: cleared all scan markers")
-		}
-	}
-
-	retries := cfg.Queue.RetryAttempts
-	if retries <= 0 {
-		retries = 3
-	}
-
-	if err := populateFaceQueue(ctx, store, qs, retries, logFn); err != nil {
-		return fmt.Errorf("populate face queue: %w", err)
-	}
-
-	pending = qs.PendingCount()
-	if pending == 0 {
-		logFn("[faces] No face detection jobs to run")
-		return nil
-	}
-
-	if err := runFaceWorkerPool(ctx, cfg, store, qs, pending, logFn, warnFn); err != nil {
-		return err
-	}
-
-	if err := qs.PurgeCompleted(); err != nil {
-		warnFn("Warning: purge completed: %v", err)
-	}
-	if err := qs.PurgeFailed(); err != nil {
-		warnFn("Warning: purge failed: %v", err)
-	}
-
-	return nil
-}
-
-// runFaceWorkerPool creates and runs a worker pool with only face handlers registered.
-func runFaceWorkerPool(
-	ctx context.Context,
-	cfg *config.Config,
-	graphStore graph.Store,
-	qs *queue.Store,
-	total int,
-	logFn func(format string, args ...any),
-	warnFn func(format string, args ...any),
-) error {
-	throttler := queue.NewThrottler(cfg.Queue.MaxWorkers, float64(cfg.Queue.TargetCPU))
-	defer throttler.Stop()
-
-	var completed atomic.Int32
-	var pool *queue.WorkerPool
-	emitter := func(event string, data ...any) {
-		switch event {
-		case "sync:progress":
-			completed.Add(1)
-		case "sync:checkpoint":
-			// Auto-resume checkpoints in CLI mode (no UI to review).
-			if pool != nil {
-				pool.Resume()
-			}
-		case "job:failed":
-			if len(data) > 0 {
-				if m, ok := data[0].(map[string]string); ok {
-					warnFn("[queue] %s failed for %s: %s", m["type"], m["file"], m["error"])
-				}
-			}
-		}
-	}
-
-	pool = queue.NewWorkerPool(qs, throttler, emitter)
-	cleanupFaces := registerFaceHandlers(pool, cfg, graphStore, warnFn)
-	defer cleanupFaces()
-
-	maxW := cfg.Queue.MaxWorkers
-	if maxW <= 0 {
-		maxW = throttler.TargetWorkers()
-	}
-	logFn("[faces] Processing %d jobs (max %d workers)", total, maxW)
-
-	progressDone := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-progressDone:
-				return
-			case <-ticker.C:
-				done := int(completed.Load())
-				active := pool.ActiveCount()
-				remaining := total - done
-				logFn("[faces] Progress: %d/%d done, %d active, %d remaining", done, total, active, remaining)
-			}
-		}
-	}()
-
-	pool.Run(ctx)
-	close(progressDone)
-
-	stats, _ := qs.Stats()
-	logFn("[faces] Complete: %d done, %d failed, %d skipped", stats.Done, stats.Failed, stats.Skipped)
-
-	return nil
-}
-
-// populateFaceQueue enqueues face-detect jobs for all image nodes in the graph.
-// Unlike populateQueue, this only creates face-detect jobs and is not gated
-// by extraction_status (images may be described but not face-scanned).
-func populateFaceQueue(
-	ctx context.Context,
-	graphStore graph.Store,
-	qs *queue.Store,
-	retries int,
-	logFn func(format string, args ...any),
-) error {
-	nodes, err := graphStore.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeDocument})
-	if err != nil {
-		return fmt.Errorf("query documents: %w", err)
-	}
-
-	type hashGroup struct {
-		contentHash string
-		filePaths   []string
-	}
-	groups := make(map[string]*hashGroup)
-
-	for _, node := range nodes {
-		hash := node.Properties["content_hash"]
-		if hash == "" {
-			continue
-		}
-		if node.Properties["kind"] != "image" {
-			continue
-		}
-		g, ok := groups[hash]
-		if !ok {
-			g = &hashGroup{contentHash: hash}
-			groups[hash] = g
-		}
-		g.filePaths = append(g.filePaths, node.FilePath)
-	}
-
-	var jobs []*queue.Job
-	for _, g := range groups {
-		jobs = append(jobs, &queue.Job{
-			Type:        queue.JobFaceDetect,
-			Priority:    30,
-			ContentHash: g.contentHash + ":face",
-			FilePaths:   g.filePaths,
-			MaxRetries:  retries,
-		})
-	}
-
-	if len(jobs) == 0 {
-		logFn("[faces] No image nodes found in graph")
-		return nil
-	}
-
-	logFn("[faces] Enqueuing %d face-detect jobs", len(jobs))
 	return qs.EnqueueBatch(jobs)
 }
 

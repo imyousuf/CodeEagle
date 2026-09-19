@@ -18,9 +18,15 @@ type JobType string
 const (
 	JobDocExtract    JobType = "doc-extract"
 	JobImageDescribe JobType = "image-describe"
-	JobFaceDetect    JobType = "face-detect"
-	JobFaceCluster   JobType = "face-cluster"
 )
+
+// JobTypes lists every kind of work the queue dispatches.
+//
+// Dequeue scans one index prefix per type, so a type missing from this list is
+// enqueued and then never picked up. Adding a type means adding it here.
+func JobTypes() []JobType {
+	return []JobType{JobDocExtract, JobImageDescribe}
+}
 
 // JobStatus represents the current state of a job.
 type JobStatus string
@@ -234,28 +240,37 @@ func (s *Store) Dequeue(limit int) ([]*Job, error) {
 	}
 	var candidates []candidate
 
+	// Scanned per job type against a prefix that includes the status, rather
+	// than walking every index key and discarding the ones that do not match.
+	//
+	// Status is the second component of the key, so a single scan of
+	// "q:idx:" cannot skip it -- and the entries it cannot skip are the
+	// completed ones, which accumulate until the queue is purged and come to
+	// outnumber the pending work by orders of magnitude. Every dispatch round
+	// was reading and parsing all of them to find a handful of jobs.
 	err := s.db.View(func(txn *badger.Txn) error {
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false
-		opts.Prefix = []byte(prefixIdx)
-		it := txn.NewIterator(opts)
-		defer it.Close()
+		for _, jobType := range JobTypes() {
+			prefix := fmt.Appendf(nil, "%s%s:%s:", prefixIdx, jobType, StatusPending)
 
-		for it.Seek([]byte(prefixIdx)); it.Valid(); it.Next() {
-			key := string(it.Item().Key())
-			// Parse: q:idx:<jobType>:<status>:<priority>:<jobID>
-			parts := strings.SplitN(strings.TrimPrefix(key, prefixIdx), ":", 4)
-			if len(parts) != 4 {
-				continue
+			opts := badger.DefaultIteratorOptions
+			opts.PrefetchValues = false
+			opts.Prefix = prefix
+			it := txn.NewIterator(opts)
+
+			for it.Seek(prefix); it.Valid(); it.Next() {
+				key := string(it.Item().Key())
+				// Parse: q:idx:<jobType>:<status>:<priority>:<jobID>
+				parts := strings.SplitN(strings.TrimPrefix(key, prefixIdx), ":", 4)
+				if len(parts) != 4 {
+					continue
+				}
+				candidates = append(candidates, candidate{
+					jobID:   parts[3],
+					idxKey:  it.Item().KeyCopy(nil),
+					jobType: JobType(parts[0]),
+				})
 			}
-			if JobStatus(parts[1]) != StatusPending {
-				continue
-			}
-			candidates = append(candidates, candidate{
-				jobID:   parts[3],
-				idxKey:  it.Item().KeyCopy(nil),
-				jobType: JobType(parts[0]),
-			})
+			it.Close()
 		}
 		return nil
 	})

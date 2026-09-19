@@ -113,7 +113,7 @@ func TestDequeueOrder(t *testing.T) {
 
 	now := time.Now()
 	jobs := []*Job{
-		{Type: JobFaceDetect, Priority: 30, ContentHash: "c", DateTaken: now.Add(-1 * time.Hour)},
+		{Type: JobDocExtract, Priority: 30, ContentHash: "c", DateTaken: now.Add(-1 * time.Hour)},
 		{Type: JobDocExtract, Priority: 10, ContentHash: "a", DateTaken: now},
 		{Type: JobImageDescribe, Priority: 20, ContentHash: "b", DateTaken: now.Add(-2 * time.Hour)},
 	}

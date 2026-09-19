@@ -17,11 +17,6 @@ type Handler interface {
 // EventEmitter emits named events (same signature as app.EventEmitter).
 type EventEmitter func(event string, data ...any)
 
-// CheckFaceCheckpointFn is set by face_handlers.go init() when faces build tag
-// is active. Called after each face-detect job completes to check if a
-// checkpoint should fire. Nil by default (no-op).
-var CheckFaceCheckpointFn func(wp *WorkerPool)
-
 // WorkerPool dispatches queue jobs to registered handlers with auto-throttle.
 type WorkerPool struct {
 	queue       *Store
@@ -32,11 +27,12 @@ type WorkerPool struct {
 	wg          sync.WaitGroup
 	ctx         context.Context
 	cancel      context.CancelFunc
-
-	// Checkpoint support.
-	resumeCh chan struct{}
-	pauseMu  sync.Mutex
-	paused   bool
+	// mu guards ctx, cancel and running, which Run sets and Stop reads.
+	mu      sync.Mutex
+	running bool
+	// done closes when Run returns, so Stop can wait for the dispatch loop
+	// itself and not merely for the jobs it started.
+	done chan struct{}
 }
 
 // NewWorkerPool creates a new worker pool.
@@ -49,7 +45,7 @@ func NewWorkerPool(queue *Store, throttler *Throttler, emit EventEmitter) *Worke
 		handlers:  make(map[JobType]Handler),
 		emit:      emit,
 		throttler: throttler,
-		resumeCh:  make(chan struct{}, 1),
+		done:      make(chan struct{}),
 	}
 }
 
@@ -61,9 +57,11 @@ func (wp *WorkerPool) Register(jobType JobType, handler Handler) {
 // Run starts the worker dispatch loop. Blocks until ctx is cancelled or all
 // jobs are done (no pending + no running).
 func (wp *WorkerPool) Run(ctx context.Context) {
-	wp.pauseMu.Lock()
+	wp.mu.Lock()
 	wp.ctx, wp.cancel = context.WithCancel(ctx)
-	wp.pauseMu.Unlock()
+	wp.running = true
+	wp.mu.Unlock()
+	defer close(wp.done)
 
 	for {
 		select {
@@ -71,24 +69,6 @@ func (wp *WorkerPool) Run(ctx context.Context) {
 			wp.wg.Wait()
 			return
 		default:
-		}
-
-		// Check if paused for checkpoint.
-		wp.pauseMu.Lock()
-		if wp.paused {
-			wp.pauseMu.Unlock()
-			select {
-			case <-wp.resumeCh:
-				wp.pauseMu.Lock()
-				wp.paused = false
-				wp.pauseMu.Unlock()
-				wp.emit("sync:resumed", nil)
-			case <-wp.ctx.Done():
-				wp.wg.Wait()
-				return
-			}
-		} else {
-			wp.pauseMu.Unlock()
 		}
 
 		// How many workers should be active?
@@ -103,6 +83,14 @@ func (wp *WorkerPool) Run(ctx context.Context) {
 		// Dequeue work.
 		jobs, err := wp.queue.Dequeue(target - active)
 		if err != nil || len(jobs) == 0 {
+			// Shutdown can land between the check at the top of the loop and
+			// here, and whoever stops the pool usually closes the store right
+			// afterwards. Asking a closed store how much work is left panics,
+			// so the context is re-read before touching it again.
+			if wp.ctx.Err() != nil {
+				wp.wg.Wait()
+				return
+			}
 			// Check if we're done: no pending jobs and no active workers.
 			if wp.queue.PendingCount() == 0 && wp.activeCount.Load() == 0 {
 				wp.wg.Wait()
@@ -122,47 +110,25 @@ func (wp *WorkerPool) Run(ctx context.Context) {
 
 // Stop signals the worker pool to stop and waits for active workers to finish.
 func (wp *WorkerPool) Stop() {
-	wp.pauseMu.Lock()
+	wp.mu.Lock()
 	cancel := wp.cancel
-	wp.pauseMu.Unlock()
+	running := wp.running
+	wp.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
-	wp.wg.Wait()
-}
-
-// Resume unblocks a checkpoint pause.
-func (wp *WorkerPool) Resume() {
-	select {
-	case wp.resumeCh <- struct{}{}:
-	default:
+	// Waiting on the jobs alone let Stop return while the dispatch loop was
+	// still polling, so a caller that closed the store immediately afterwards
+	// raced it.
+	if running {
+		<-wp.done
 	}
+	wp.wg.Wait()
 }
 
 // ActiveCount returns the number of currently active workers.
 func (wp *WorkerPool) ActiveCount() int {
 	return int(wp.activeCount.Load())
-}
-
-// IsPaused returns whether the pool is paused for a checkpoint.
-func (wp *WorkerPool) IsPaused() bool {
-	wp.pauseMu.Lock()
-	defer wp.pauseMu.Unlock()
-	return wp.paused
-}
-
-// PauseForCheckpoint saves checkpoint state, emits sync:checkpoint, and blocks
-// until Resume is called.
-func (wp *WorkerPool) PauseForCheckpoint(data map[string]any) {
-	wp.pauseMu.Lock()
-	wp.paused = true
-	wp.pauseMu.Unlock()
-
-	wp.emit("sync:checkpoint", data)
-	wp.emit("notification:show", map[string]string{
-		"title": "CodeEagle",
-		"body":  fmt.Sprintf("%v new face groups found — review to continue sync", data["new_clusters"]),
-	})
 }
 
 // processJob handles a single job in a goroutine.
@@ -225,9 +191,4 @@ func (wp *WorkerPool) processJob(job *Job) {
 		"job_type":  string(job.Type),
 		"completed": job.ID,
 	})
-
-	// Check face checkpoint if applicable.
-	if job.Type == JobFaceDetect && CheckFaceCheckpointFn != nil {
-		CheckFaceCheckpointFn(wp)
-	}
 }
