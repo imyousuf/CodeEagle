@@ -290,6 +290,7 @@ func newTranscriptClient(tc config.TranscriptsConfig) (llm.Client, error) {
 		BaseURL:         tc.BaseURL,
 		MaxTokens:       tc.MaxTokens,
 		ReasoningEffort: tc.ReasoningEffort,
+		ContextWindow:   tc.ContextWindow,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create %s client: %w", provider, err)

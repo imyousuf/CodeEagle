@@ -13,6 +13,16 @@ import (
 
 const defaultOllamaBaseURL = "http://localhost:11434"
 
+// DefaultOllamaContextWindow is the context Ollama is asked for when the caller
+// does not say.
+//
+// Ollama's own default is small — a few thousand tokens — and it does not
+// report truncation: it simply drops what does not fit. A long document or
+// meeting transcript is then summarized from its opening fragment, which looks
+// like a plausible answer and is wrong. Asking for a large window explicitly is
+// the only way to avoid that.
+const DefaultOllamaContextWindow = 32768
+
 func init() {
 	llm.RegisterProvider("ollama", newOllamaClient)
 }
@@ -20,9 +30,10 @@ func init() {
 // ollamaClient implements llm.Client and llm.ToolCapableClient using the
 // Ollama /api/chat endpoint.
 type ollamaClient struct {
-	baseURL string
-	model   string
-	client  *http.Client
+	baseURL       string
+	model         string
+	contextWindow int
+	client        *http.Client
 }
 
 // newOllamaClient creates a new Ollama LLM client.
@@ -36,10 +47,16 @@ func newOllamaClient(cfg llm.Config) (llm.Client, error) {
 		baseURL = defaultOllamaBaseURL
 	}
 
+	contextWindow := cfg.ContextWindow
+	if contextWindow <= 0 {
+		contextWindow = DefaultOllamaContextWindow
+	}
+
 	return &ollamaClient{
-		baseURL: baseURL,
-		model:   cfg.Model,
-		client:  &http.Client{},
+		baseURL:       baseURL,
+		model:         cfg.Model,
+		contextWindow: contextWindow,
+		client:        &http.Client{},
 	}, nil
 }
 
@@ -51,6 +68,10 @@ type ollamaChatRequest struct {
 	Messages []ollamaMessage `json:"messages"`
 	Stream   bool            `json:"stream"`
 	Tools    []ollamaToolDef `json:"tools,omitempty"`
+	// Format is "json" or a JSON Schema object constraining the reply.
+	Format any `json:"format,omitempty"`
+	// Options carries generation settings, notably num_ctx.
+	Options map[string]any `json:"options,omitempty"`
 }
 
 // ollamaMessage represents a message in the Ollama chat format.
@@ -107,6 +128,7 @@ func (c *ollamaClient) Chat(ctx context.Context, systemPrompt string, messages [
 		Model:    c.model,
 		Messages: apiMessages,
 		Stream:   false,
+		Options:  c.options(),
 	}
 
 	return c.doChat(ctx, reqBody)
@@ -122,9 +144,36 @@ func (c *ollamaClient) ChatWithTools(ctx context.Context, systemPrompt string, m
 		Messages: apiMessages,
 		Stream:   false,
 		Tools:    apiTools,
+		Options:  c.options(),
 	}
 
 	return c.doChat(ctx, reqBody)
+}
+
+// options returns the generation settings sent with every request.
+func (c *ollamaClient) options() map[string]any {
+	return map[string]any{"num_ctx": c.contextWindow}
+}
+
+// ChatJSON constrains the reply to a JSON Schema.
+//
+// Ollama enforces a schema passed in "format", which removes the "asked for
+// JSON and got prose" failure mode that otherwise makes small local models
+// awkward to extract from. Older versions that do not understand a schema
+// object still honour the string "json".
+func (c *ollamaClient) ChatJSON(ctx context.Context, systemPrompt string, messages []llm.Message, schema *llm.JSONSchema) (*llm.Response, error) {
+	format := any("json")
+	if schema != nil && schema.Schema != nil {
+		format = schema.Schema
+	}
+
+	return c.doChat(ctx, ollamaChatRequest{
+		Model:    c.model,
+		Messages: convertToOllamaMessages(systemPrompt, messages),
+		Stream:   false,
+		Format:   format,
+		Options:  c.options(),
+	})
 }
 
 // doChat sends a chat request to the Ollama API and parses the response.

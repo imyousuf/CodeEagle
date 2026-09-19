@@ -33,8 +33,12 @@ func TestEnrichSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve credential: %v", err)
 	}
-	if dir == "" || key == "" {
-		t.Skip("set CODEEAGLE_TRANSCRIPT_CORPUS and BASETEN_API_KEY (or BASETEN_API_KEY_COMMAND) to run")
+	if dir == "" {
+		t.Skip("set CODEEAGLE_TRANSCRIPT_CORPUS to run")
+	}
+	// A locally served model needs no credential.
+	if key == "" && os.Getenv("CODEEAGLE_TRANSCRIPT_PROVIDER") != "ollama" {
+		t.Skip("set BASETEN_API_KEY or BASETEN_API_KEY_COMMAND to run against Baseten")
 	}
 
 	session := pickSession(t, dir)
@@ -42,10 +46,10 @@ func TestEnrichSmoke(t *testing.T) {
 		session.ID, session.Title,
 		FormatTimestamp(session.DurationSeconds()), len(session.Segments))
 
-	model := os.Getenv("CODEEAGLE_TRANSCRIPT_MODEL")
+	provider := envOr("CODEEAGLE_TRANSCRIPT_PROVIDER", "baseten")
 	client, err := llm.NewClient(llm.Config{
-		Provider:        "baseten",
-		Model:           model,
+		Provider:        provider,
+		Model:           os.Getenv("CODEEAGLE_TRANSCRIPT_MODEL"),
 		APIKey:          key,
 		ReasoningEffort: envOr("CODEEAGLE_TRANSCRIPT_EFFORT", "low"),
 	})
@@ -54,8 +58,10 @@ func TestEnrichSmoke(t *testing.T) {
 	}
 	defer client.Close()
 
+	// Both supported providers enforce a response schema; losing that would
+	// silently move extraction back onto prose salvage.
 	if !llm.SupportsStructured(client) {
-		t.Error("baseten client should support structured output")
+		t.Errorf("%s client should support structured output", provider)
 	}
 
 	analyzer := NewAnalyzer(client, Options{

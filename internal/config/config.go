@@ -122,6 +122,11 @@ type TranscriptsConfig struct {
 	// models spend this budget on internal deliberation before emitting any
 	// answer, and too small a cap yields an empty reply rather than a short one.
 	MaxTokens int `mapstructure:"max_tokens" yaml:"max_tokens,omitempty"`
+	// ContextWindow is how much context the model is given, in tokens. It
+	// matters for a locally served model: Ollama defaults to a small window and
+	// silently drops whatever does not fit, which summarizes a long meeting
+	// from its opening minutes.
+	ContextWindow int `mapstructure:"context_window" yaml:"context_window,omitempty"`
 	// ReasoningEffort budgets a reasoning model's deliberation ("low",
 	// "medium", "high"). Low measurably reduces cost on meeting transcripts
 	// without hurting identification quality; switching reasoning off entirely

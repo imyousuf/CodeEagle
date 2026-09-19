@@ -59,6 +59,10 @@ type Config struct {
 	// ReasoningEffort budgets a reasoning model's internal deliberation
 	// ("low", "medium", "high"). Providers that do not reason ignore it.
 	ReasoningEffort string
+	// ContextWindow is how much context the model should be given, in tokens.
+	// It matters for locally served models, which default to a small window and
+	// silently discard whatever does not fit. Zero means the provider default.
+	ContextWindow int
 }
 
 // ProviderFactory is a function type for creating LLM clients.
