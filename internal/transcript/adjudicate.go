@@ -2,11 +2,13 @@ package transcript
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/imyousuf/CodeEagle/internal/decide"
+	"github.com/imyousuf/CodeEagle/pkg/jev"
 )
 
 // unresolvedOption is the answer that means "the transcript does not say".
@@ -16,6 +18,23 @@ import (
 // the confidence figure mean less. Here it is more than a modelling detail: an
 // unidentified speaker is a correct outcome, and this is how one is expressed.
 const unresolvedOption = "unresolved"
+
+// judgeTranscriptChars bounds the transcript sent to a decision model.
+//
+// Far smaller than the language model's budget: a decision model holds about
+// 32,000 tokens for the state and the longest question together, and a long
+// meeting runs well past that. The limit is the service's, not ours, and
+// exceeding it is refused outright rather than truncated — so the caller has
+// to do the trimming.
+const judgeTranscriptChars = 80_000
+
+// judgeRetries is how many times the transcript is halved and the judgment
+// retried after the service refuses it as too large.
+//
+// The character estimate is approximate — tokenization varies with the words —
+// so rather than guess a safe size, start generous and halve until it fits. A
+// meeting of any realistic length is inside the limit within two or three.
+const judgeRetries = 3
 
 // maxIdentityOptions caps how many names a speaker is chosen between.
 //
@@ -66,7 +85,7 @@ func (a *Analyzer) adjudicate(
 		}
 	}
 
-	verdicts, err := a.judge.Decide(ctx, a.identityState(s, unresolved, hints), questions)
+	verdicts, err := a.decideWithinLimit(ctx, s, unresolved, hints, questions)
 	if err != nil {
 		return nil, fmt.Errorf("adjudicate speakers: %w", err)
 	}
@@ -102,6 +121,53 @@ func (a *Analyzer) adjudicate(
 	// Ordered by label so a re-run writes the graph the same way.
 	sort.Slice(identities, func(i, j int) bool { return identities[i].Label < identities[j].Label })
 	return resolveCollisions(identities, unresolved), nil
+}
+
+// decideWithinLimit asks the judge, trimming the transcript and asking again
+// if the service says the request was too large.
+//
+// A meeting that cannot be judged at all leaves every one of its speakers
+// unidentified and the whole recording unenriched, which is a poor trade
+// against sending a shorter transcript. The SDK distinguishes this refusal
+// from every other precisely so a caller can respond to it.
+func (a *Analyzer) decideWithinLimit(
+	ctx context.Context,
+	s *Session,
+	unresolved []SpeakerEvidence,
+	hints []Hint,
+	questions map[string]decide.Question,
+) (map[string]decide.Verdict, error) {
+	budget := judgeTranscriptChars
+
+	for attempt := 0; ; attempt++ {
+		state := a.identityState(s, unresolved, hints)
+		state["transcript"] = trimTranscript(s.Transcript(), budget)
+
+		verdicts, err := a.judge.Decide(ctx, state, questions)
+		if err == nil {
+			return verdicts, nil
+		}
+		if !errors.Is(err, jev.ErrTooLarge) || attempt >= judgeRetries {
+			return nil, err
+		}
+		budget /= 2
+	}
+}
+
+// trimTranscript shortens a transcript to fit, keeping the beginning and the
+// end.
+//
+// Who is who is established early — people greet each other and introduce
+// themselves — and again late, when they say goodbye by name. The middle is
+// where the work is discussed, which matters for the content pass and far
+// less for working out which voice belongs to whom.
+func trimTranscript(text string, limit int) string {
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+	head := limit * 2 / 3
+	tail := limit - head
+	return text[:head] + "\n\n[...]\n\n" + text[len(text)-tail:]
 }
 
 // identityOptions gathers the names a speaker might be.

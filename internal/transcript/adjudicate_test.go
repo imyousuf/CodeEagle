@@ -3,9 +3,11 @@ package transcript
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/internal/decide"
+	"github.com/imyousuf/CodeEagle/pkg/jev"
 )
 
 // stubJudge answers with canned verdicts and records what it was asked.
@@ -223,5 +225,92 @@ func TestAdjudicateStateCarriesTheEvidence(t *testing.T) {
 	votes, ok := state["candidate_evidence"].(map[string]string)
 	if !ok || votes["Person 1"] == "" {
 		t.Errorf("no candidate evidence for Person 1: %v", state["candidate_evidence"])
+	}
+}
+
+// tooLargeJudge refuses the first n requests as too large, then answers.
+type tooLargeJudge struct {
+	refuseFirst int
+	calls       int
+	// lastTranscript is what the accepted request carried.
+	lastTranscript string
+}
+
+func (j *tooLargeJudge) Name() string { return "too-large" }
+
+func (j *tooLargeJudge) Decide(
+	_ context.Context, state any, questions map[string]decide.Question,
+) (map[string]decide.Verdict, error) {
+	j.calls++
+	if m, ok := state.(map[string]any); ok {
+		if t, ok := m["transcript"].(string); ok {
+			j.lastTranscript = t
+		}
+	}
+	if j.calls <= j.refuseFirst {
+		return nil, &jev.APIError{StatusCode: 400, Kind: "max_tokens_exceeded"}
+	}
+	out := make(map[string]decide.Verdict, len(questions))
+	for key := range questions {
+		out[key] = decide.Verdict{Choice: unresolvedOption, Confidence: 0.99}
+	}
+	return out, nil
+}
+
+// TestAdjudicateTrimsWhenTooLarge covers a transcript the decision model
+// refuses for its size.
+//
+// A long meeting runs past what the service accepts, and it refuses outright
+// rather than truncating. Giving up would leave every speaker in that meeting
+// unidentified and the recording unenriched — a poor trade against sending a
+// shorter transcript, since who is who is established at the start and the end
+// rather than in the middle.
+func TestAdjudicateTrimsWhenTooLarge(t *testing.T) {
+	judge := &tooLargeJudge{refuseFirst: 2}
+
+	a := NewAnalyzer(nil, Options{Owner: "Imran Yousuf", MinConfidence: 0.7}).WithJudge(judge)
+	if _, err := a.Identify(context.Background(), judgedSession(), &Usage{}); err != nil {
+		t.Fatalf("Identify gave up instead of trimming: %v", err)
+	}
+	if judge.calls != 3 {
+		t.Errorf("made %d attempts, want 3 (two refused, one accepted)", judge.calls)
+	}
+}
+
+// TestAdjudicateGivesUpEventually covers a refusal that trimming cannot fix,
+// which must surface rather than loop.
+func TestAdjudicateGivesUpEventually(t *testing.T) {
+	judge := &tooLargeJudge{refuseFirst: 99}
+
+	a := NewAnalyzer(nil, Options{Owner: "Imran Yousuf", MinConfidence: 0.7}).WithJudge(judge)
+	if _, err := a.Identify(context.Background(), judgedSession(), &Usage{}); err == nil {
+		t.Fatal("Identify succeeded against a service that refused everything")
+	}
+	if judge.calls > judgeRetries+1 {
+		t.Errorf("made %d attempts, want at most %d", judge.calls, judgeRetries+1)
+	}
+}
+
+// TestTrimTranscript covers keeping both ends, where names are said.
+func TestTrimTranscript(t *testing.T) {
+	long := strings.Repeat("a", 1000) + "MIDDLE" + strings.Repeat("z", 1000)
+
+	got := trimTranscript(long, 600)
+	if len(got) > 700 {
+		t.Errorf("trimmed to %d characters, want about 600", len(got))
+	}
+	if !strings.HasPrefix(got, "aaa") {
+		t.Error("the beginning was dropped; introductions happen there")
+	}
+	if !strings.HasSuffix(got, "zzz") {
+		t.Error("the ending was dropped; people say goodbye by name there")
+	}
+	if strings.Contains(got, "MIDDLE") {
+		t.Error("the middle survived a trim that should have removed it")
+	}
+
+	// Short enough already: left exactly alone.
+	if got := trimTranscript("short", 600); got != "short" {
+		t.Errorf("trimTranscript altered a transcript that fits: %q", got)
 	}
 }

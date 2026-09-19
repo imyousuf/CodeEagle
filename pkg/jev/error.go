@@ -67,11 +67,21 @@ func (e *APIError) Error() string {
 }
 
 // Unwrap lets errors.Is match the sentinel for this kind of failure.
-func (e *APIError) Unwrap() error { return e.sentinel }
+//
+// Derived from the status and kind when it was not set, so an APIError built
+// by a caller — in a test, or a fake — behaves like one this package parsed.
+// A public type that only works when this package constructed it is a trap.
+func (e *APIError) Unwrap() error {
+	if e.sentinel != nil {
+		return e.sentinel
+	}
+	return sentinelFor(e.StatusCode, e.Kind)
+}
 
 // Retryable reports whether sending the same request again could succeed.
 func (e *APIError) Retryable() bool {
-	return errors.Is(e.sentinel, ErrRateLimited) || errors.Is(e.sentinel, ErrOverloaded)
+	kind := e.Unwrap()
+	return errors.Is(kind, ErrRateLimited) || errors.Is(kind, ErrOverloaded)
 }
 
 // errorDetail is the reply body of a refusal.
