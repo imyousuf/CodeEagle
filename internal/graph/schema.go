@@ -41,6 +41,21 @@ const (
 	NodeYear         NodeType = "Year"
 	NodeMonth        NodeType = "Month"
 	NodeDate         NodeType = "Date"
+
+	// Meeting transcript entities.
+
+	// NodeMeeting is a single recorded meeting/session.
+	NodeMeeting NodeType = "Meeting"
+	// NodeSpeaker is a per-meeting diarization label (e.g. "Person 3").
+	// It is an *unresolved* identity: it becomes meaningful only once an
+	// IdentifiedAs edge links it to a Person.
+	NodeSpeaker NodeType = "Speaker"
+	// NodeTopicSegment is a contiguous span of a meeting about one topic.
+	NodeTopicSegment NodeType = "TopicSegment"
+	// NodeDecision is a decision reached during a meeting.
+	NodeDecision NodeType = "Decision"
+	// NodeActionItem is a follow-up/TODO arising from a meeting.
+	NodeActionItem NodeType = "ActionItem"
 )
 
 // Well-known property keys used for architectural classification.
@@ -71,6 +86,51 @@ const (
 	PropSymlinkTarget = "symlink_target"
 )
 
+// Well-known property keys used by meeting transcript entities.
+const (
+	// PropSpeakerLabel is the raw diarization label for a speaker ("Person 3", "You").
+	PropSpeakerLabel = "speaker_label"
+	// PropSpeakerSource is the audio source for a speaker ("mic" = recording owner,
+	// "monitor" = remote participant).
+	PropSpeakerSource = "speaker_source"
+	// PropConfidence is a 0..1 confidence score rendered as a decimal string.
+	PropConfidence = "confidence"
+	// PropEvidence is a verbatim transcript quote supporting an inference.
+	PropEvidence = "evidence"
+	// PropResolution records how an identity was resolved: "owner_anchor",
+	// "llm", "alias", or "manual".
+	PropResolution = "resolution_method"
+	// PropStartTime is an offset in seconds from the start of the meeting.
+	PropStartTime = "start_time"
+	// PropEndTime is an offset in seconds from the start of the meeting.
+	PropEndTime = "end_time"
+	// PropMeetingID is the source session ID of the owning meeting.
+	PropMeetingID = "meeting_id"
+	// PropPlatform is the meeting platform ("Zoom", "Unknown", ...).
+	PropPlatform = "platform"
+	// PropDuration is the meeting duration in seconds.
+	PropDuration = "duration_seconds"
+	// PropSummary is a natural-language summary of a node's content.
+	PropSummary = "summary"
+	// PropStatus is the lifecycle state of an action item ("open", "done").
+	PropStatus = "status"
+	// PropDueDate is an ISO-8601 date an action item is due.
+	PropDueDate = "due_date"
+	// PropAssignee is the raw (unresolved) assignee name for an action item.
+	PropAssignee = "assignee"
+	// PropAliases is a comma-separated list of alternate spellings for a person,
+	// including speech-recognition variants (e.g. "Imran,Imron").
+	PropAliases = "aliases"
+	// PropUtteranceCount is how many transcript segments a speaker contributed.
+	PropUtteranceCount = "utterance_count"
+	// PropSpeakingSeconds is the total seconds a speaker was talking.
+	PropSpeakingSeconds = "speaking_seconds"
+	// PropIsOwner marks the Person who owns the recordings (the "mic" speaker).
+	PropIsOwner = "is_owner"
+	// PropQuote is a representative verbatim quote.
+	PropQuote = "quote"
+)
+
 // EdgeType represents a relationship between two nodes.
 type EdgeType string
 
@@ -91,7 +151,36 @@ const (
 	EdgeUpdatedOn   EdgeType = "UpdatedOn"
 	EdgeDuplicateOf EdgeType = "DuplicateOf"
 	EdgeSymLink     EdgeType = "SymLink"
+
+	// Meeting transcript relationships.
+
+	// EdgeAttended links a Person to a Meeting they participated in.
+	EdgeAttended EdgeType = "Attended"
+	// EdgeIdentifiedAs links a Speaker (diarization label) to the Person it
+	// resolves to, carrying confidence, evidence, and resolution method.
+	EdgeIdentifiedAs EdgeType = "IdentifiedAs"
+	// EdgeAssignedTo links an ActionItem to the Person responsible for it.
+	EdgeAssignedTo EdgeType = "AssignedTo"
+	// EdgeRaisedBy links a Decision or ActionItem to the Person who raised it.
+	EdgeRaisedBy EdgeType = "RaisedBy"
+	// EdgeMentions links a meeting entity to something it refers to — a code
+	// entity (Service, File, Function) or another Person.
+	EdgeMentions EdgeType = "Mentions"
+	// EdgeFollowsUp links an ActionItem to the Decision it implements, or a
+	// Meeting to an earlier Meeting in the same series.
+	EdgeFollowsUp EdgeType = "FollowsUp"
 )
+
+// MeetingNodeTypes lists the node types produced by meeting transcript indexing.
+func MeetingNodeTypes() []NodeType {
+	return []NodeType{
+		NodeMeeting,
+		NodeSpeaker,
+		NodeTopicSegment,
+		NodeDecision,
+		NodeActionItem,
+	}
+}
 
 // Node represents a source code or documentation entity in the knowledge graph.
 type Node struct {
