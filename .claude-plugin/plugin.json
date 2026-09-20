@@ -1,14 +1,22 @@
 {
   "name": "codeeagle",
-  "version": "1.3.0",
-  "description": "Codebase knowledge graph and AI-powered code intelligence. Index codebases into a knowledge graph and query symbols, interfaces, dependencies, test coverage, and unused code.",
+  "version": "1.4.0",
+  "description": "Codebase and meeting knowledge graph. Index code into a queryable graph -- symbols, interfaces, dependencies, test coverage, unused code -- and index meeting recordings into the same graph, so what was said and decided is searchable beside what the code does.",
   "author": {
     "name": "imyousuf",
     "url": "https://github.com/imyousuf"
   },
   "repository": "https://github.com/imyousuf/CodeEagle",
   "license": "Apache-2.0",
-  "keywords": ["code-intelligence", "knowledge-graph", "code-analysis", "codebase-indexing"],
+  "keywords": [
+    "code-intelligence",
+    "knowledge-graph",
+    "code-analysis",
+    "codebase-indexing",
+    "meetings",
+    "transcripts",
+    "meeting-search"
+  ],
   "skills": "./skills/",
   "agents": "./agents/"
 }
