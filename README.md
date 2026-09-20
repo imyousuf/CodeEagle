@@ -8,7 +8,7 @@ It supports monorepos, multi-repo setups, and multi-language codebases (Go, Pyth
 
 - **Knowledge graph** of source code entities (functions, classes, interfaces, packages, services) and their relationships (calls, imports, implements, tests, etc.)
 - **15 language parsers**: Go (stdlib AST), Python, TypeScript, JavaScript, Java, Rust, C# (with ASP.NET), Ruby (with Rails), HTML, Markdown, Makefile, Shell, Terraform, YAML, plus a manifest parser (go.mod, package.json, pyproject.toml, requirements.txt)
-- **Document format extraction**: Text extraction from DOCX, PPTX, XLSX, ODT, ODS, ODP (pure Go, stdlib only) and PDF (`dslipak/pdf`). Documents are indexed, topic-extracted via LLM, and semantically searchable
+- **Document format extraction**: Text extraction from DOCX, PPTX, XLSX, ODT, ODS, ODP (pure Go, stdlib only) and PDF (`dslipak/pdf` in pure Go, or poppler when built with `-tags poppler` -- far faster on long documents). Documents are indexed, topic-extracted via LLM, and semantically searchable
 - **Non-code file indexing**: Changelogs, design docs, CSVs, images, config templates — all indexed as Document nodes with optional LLM-based topic extraction and image description
 - **Meeting transcripts**: Diarized recordings are indexed with speaker identification, topic segmentation, per-topic summaries, decisions, and follow-ups. Speakers arrive anonymous ("Person 1", "Person 2") and are resolved to durable people, shared with face recognition
 - **Face detection & recognition** (optional, `-tags faces`): OpenCV DNN-based face detection with 128-dim embeddings, agglomerative clustering, KNN classification, person management, and EXIF metadata extraction

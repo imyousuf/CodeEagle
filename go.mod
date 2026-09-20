@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/coder/hnsw v0.6.1
 	github.com/dgraph-io/badger/v4 v4.5.1
+	github.com/dslipak/pdf v0.0.2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
 	github.com/imyousuf/CodeEagle/pkg/jev v0.1.0

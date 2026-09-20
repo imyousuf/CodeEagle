@@ -23,7 +23,9 @@ Build and maintain a rich knowledge graph that captures:
 - READMEs, tech specs, design docs, ADRs
 - Office documents: DOCX, PPTX, XLSX (text extracted from ZIP/XML, pure Go stdlib)
 - OpenDocument files: ODT, ODS, ODP (text extracted from content.xml)
-- PDF files (text extracted via `github.com/dslipak/pdf`, BSD-3, pure Go)
+- PDF files (pure Go via `github.com/dslipak/pdf`, BSD-3, by default;
+  poppler via `-tags poppler` where the system library is present, which
+  `make build` detects and is ~50x faster on a long document)
 - Images: PNG, JPG, GIF, WebP, BMP, TIFF (LLM-described when provider available)
 - Inline doc comments (godoc, JSDoc, Python docstrings)
 - Architecture diagrams (reference/link tracking)
@@ -515,7 +517,7 @@ codeeagle/
 - **File Watching:** fsnotify
 - **Go AST Parsing:** stdlib `go/ast`, `go/parser`, `go/types`
 - **Tree-sitter:** for Python, TypeScript, JavaScript, Java, Rust, C#, Ruby, Shell, Terraform parsing (via `github.com/smacker/go-tree-sitter` bindings)
-- **Document Extraction:** OOXML/ODF via stdlib `archive/zip` + `encoding/xml`; PDF via `github.com/dslipak/pdf` (pure Go)
+- **Document Extraction:** OOXML/ODF via stdlib `archive/zip` + `encoding/xml`; PDF via `github.com/dslipak/pdf` (pure Go) by default, or poppler-glib via `github.com/wassup05/poppler-go` under `-tags poppler`. The pure Go path is the default so the project builds and cross-compiles without a system library; `make build` adds the tag when pkg-config finds poppler-glib, and releases carry it on every target except linux-arm64, which is cross-compiled
 - **Image Processing:** Downscaling (aspect-ratio preserving, max 1024px), LLM-based image description (Ollama/Vertex AI)
 - **Face Detection:** OpenCV DNN (Caffe SSD detector + ONNX SFace recognizer) via `gocv.io/x/gocv`; 128-dim L2-normalized embeddings; requires `-tags faces` build and `libopencv-dev`
 - **Face Classification:** KNN-based with temporal decay, agglomerative hierarchical clustering, majority voting, auto-assignment at high confidence

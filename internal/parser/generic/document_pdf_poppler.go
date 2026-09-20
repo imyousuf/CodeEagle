@@ -1,3 +1,5 @@
+//go:build poppler
+
 package generic
 
 import (
@@ -13,6 +15,15 @@ import (
 // PDF viewers. It handles complex PDFs (embedded fonts, vector graphics, CJK
 // text) that pure Go libraries struggle with, and is orders of magnitude
 // faster — a 99MB, 714-page PDF extracts in ~2 seconds.
+//
+// This is the better extractor and the one to build with where the library is
+// available, but it is behind a tag because it needs poppler-glib present at
+// build time via pkg-config. Unconditional, it made libpoppler a hard
+// requirement for compiling — or even linting — the whole repository, and made
+// the linux-arm64 release unbuildable, since cross-compiling against a system
+// library needs a matching arm64 copy of it. `make build` adds the tag
+// automatically when pkg-config finds poppler-glib; see document_pdf_purego.go
+// for the fallback, which must keep the same output shape as this.
 //
 // The context is checked between pages for cancellation support.
 func extractPDF(ctx context.Context, content []byte) (string, error) {
