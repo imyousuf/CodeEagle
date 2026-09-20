@@ -15,11 +15,11 @@ Last reviewed: 2026-09-20.
 |---|---|---|---|
 | Agents (plan, design, review, ask) | `claude-cli` | whatever `claude` resolves | `internal/config/config.go` |
 | Agents, direct API | `anthropic` | `claude-sonnet-5` | `internal/llm/anthropic.go` |
-| Agents, on GCP | `vertex-ai` | `gemini-2.5-flash` | `internal/llm/vertexai.go` |
+| Agents, on GCP | `vertex-ai` | `gemini-3.8-flash` | `internal/llm/vertexai.go` |
 | Meeting enrichment | `baseten` | `deepseek-ai/DeepSeek-V4.1-Flash` | `internal/config/config.go` |
 | Speaker adjudication, topic relating, search re-ranking | Jev | `jev-1.13.0` | `pkg/jev/client.go` |
 | Document and image description | `ollama` | `qwen3.5:9b` | `internal/docs/ollama.go` |
-| Document and image description, on GCP | `vertex-ai` | `gemini-2.5-flash` | `internal/docs/vertex.go` |
+| Document and image description, on GCP | `vertex-ai` | `gemini-3.8-flash` | `internal/docs/vertex.go` |
 | Embeddings (semantic search) | `ollama` | `nomic-embed-text-v2-moe` | `internal/embedding/ollama.go` |
 | Embeddings, on GCP | `vertex-ai` | `gemini-embedding-001` | `internal/embedding/vertex.go` |
 
@@ -62,12 +62,16 @@ you already have Claude Code installed.
 Runs Gemini on your own GCP project. Default `gemini-3.8-flash`. Requires
 Application Default Credentials — see `installation.md`.
 
+**Gemini 3.8 Flash is the only Gemini chat model this project uses.** Earlier
+releases are not a supported fallback and should not be configured; if 3.8
+Flash is unavailable to you, that is worth fixing rather than working around.
+
 **Location matters as much as the model.** Newer Gemini releases are served
 from `global` and are absent from regional endpoints, so the default location
 is `global`. `gemini-3.8-flash` returns 404 in `us-central1` while working
-perfectly in `global`; `gemini-2.5-flash` works in both. If a model you can
-see in the catalogue returns "was not found", try `location: global` before
-concluding the identifier is wrong.
+perfectly there. If a model you can see in the catalogue returns "was not
+found", try `location: global` before concluding the identifier is wrong --
+that mistake cost an afternoon here.
 
 **Claude is not reachable here.** Anthropic publishes `claude-opus-5`,
 `claude-sonnet-5` and `claude-haiku-4-5` on Vertex, and they appear in the
@@ -168,7 +172,7 @@ date above, not taken from a vendor page:
 | Checked | Result |
 |---|---|
 | `vertex-ai` / `gemini-3.8-flash` (in `global`) | answered |
-| `vertex-ai` / `gemini-2.5-flash` | answered, in `global` and `us-central1` |
+| `vertex-ai` with only a project set | answered — defaults resolve |
 | `baseten` / `deepseek-ai/DeepSeek-V4.1-Flash` | answered |
 | `ollama` / `qwen3.5:9b` | answered |
 | `ollama` / `nomic-embed-text-v2-moe` | 768-dim vector returned |
@@ -181,9 +185,15 @@ Haiku 4.5 is the current Haiku.
 
 Found wrong by this exercise and corrected: `gemini-2.0-flash`, which had been
 the default, no longer resolves anywhere. `gemini-3.8-flash` does exist and is
-now the default — it was briefly recorded here as non-existent because it was
-only tried in `us-central1`, where it 404s. The fault was the location, not the
-name, and the default location moved to `global` as a result.
+now the only Gemini chat model used — it was briefly recorded here as
+non-existent because it was only tried in `us-central1`, where it 404s. The
+fault was the location, not the name, and the default location moved to
+`global` as a result.
+
+The Anthropic identifiers were checked against the Vertex catalogue, which
+lists eleven: Opus 4.5 through 4.8 and 5, Sonnet 4.5, 4.6 and 5, Haiku 4.5, and
+two Fable builds. The latest of each family is what this document names, and
+there is no Haiku 5.
 
 Also established: Claude models cannot be reached through the `vertex-ai`
 provider at all, in any location, because the client speaks only Gemini's API.

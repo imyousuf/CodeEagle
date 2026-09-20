@@ -24,10 +24,14 @@ func TestNormalizeClaudeModel(t *testing.T) {
 		{"sonnet", "sonnet"},
 		{"opus", "opus"},
 		{"haiku", "haiku"},
+		// Current identifiers.
+		{"claude-sonnet-5", "sonnet"},
+		{"claude-opus-5", "opus"},
+		{"claude-haiku-4-5-20251001", "haiku"},
+		{"Claude-Sonnet-5", "sonnet"},
+		// Superseded ones a configuration written earlier may still carry.
 		{"claude-sonnet-4-5-20250929", "sonnet"},
 		{"claude-opus-4-20250115", "opus"},
-		{"claude-haiku-4-5-20251001", "haiku"},
-		{"Claude-Sonnet-4-5-20250929", "sonnet"},
 		{"OPUS", "opus"},
 		{"claude-sonnet", "sonnet"},
 		{"", ""},
