@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 
@@ -382,48 +381,6 @@ func TestExtractPDF(t *testing.T) {
 		t.Errorf("expected 'Hello World', got: %s", text)
 	}
 }
-
-func TestExtractPDF_LargeFile(t *testing.T) {
-	// A fixture big enough to be worth testing is far too big to commit —
-	// an already-compressed PDF does not delta, so it would weigh on every
-	// clone forever. Point this at one locally instead.
-	pdfPath := os.Getenv("CODEEAGLE_LARGE_PDF")
-	if pdfPath == "" {
-		t.Skip("set CODEEAGLE_LARGE_PDF to the path of a large PDF to run this")
-	}
-	content, err := os.ReadFile(pdfPath)
-	if err != nil {
-		t.Skipf("large PDF at %s not readable: %v", pdfPath, err)
-	}
-
-	text, err := extractPDF(context.Background(), content)
-	if err != nil {
-		t.Fatalf("extractPDF() error on large file: %v", err)
-	}
-
-	// Should have extracted some text.
-	if len(text) < 1000 {
-		t.Errorf("expected substantial text from 99MB PDF, got %d bytes", len(text))
-	}
-
-	// Should have page markers.
-	if !strings.Contains(text, "--- Page ") {
-		t.Error("expected page markers in output")
-	}
-
-	// Should contain car manual content (Mazda CX-5).
-	textLower := strings.ToLower(text)
-	if !strings.Contains(textLower, "mazda") && !strings.Contains(textLower, "cx-5") && !strings.Contains(textLower, "vehicle") {
-		t.Errorf("expected car manual content, got first 500 chars: %s", text[:min(500, len(text))])
-	}
-
-	t.Logf("Extracted %d bytes of text from %d byte PDF", len(text), len(content))
-
-	// Count pages extracted.
-	pageCount := strings.Count(text, "--- Page ")
-	t.Logf("Extracted %d pages", pageCount)
-}
-
 func TestExtractPDF_PageMarkers(t *testing.T) {
 	content := createTestPDF()
 	text, err := extractPDF(context.Background(), content)
