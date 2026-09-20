@@ -24,6 +24,7 @@ func newMeetingsSearchCmd() *cobra.Command {
 		person   string
 		since    string
 		only     string
+		breadth  string
 		limit    int
 		asJSON   bool
 		full     bool
@@ -49,6 +50,15 @@ more of the query, rarer words counting for more, then the most recent.
 Restricting to one kind of evidence with --only turns the search into a
 listing: "--only decision --since 2026-08-01" with no words lists every
 decision made since August.
+
+A topic label matched by the words also reaches the topics judged to be
+about the same thing (see "meetings relate"), so "AGI" finds the meeting
+filed under "Recursive self improvement and model regression" as well as the
+one filed under "AGI feasibility debate". --breadth sets how sure the
+judgment must be and how many such steps to take: narrow follows one edge
+at probability 0.8 or above, default one at 0.6, wide two at 0.5, none
+follows none. A meeting reached this way is marked and ranks below one
+whose own record matched the words.
 
 Word matching cannot tell a meeting that discussed the subject from one that
 mentioned it in passing. When transcripts.jev_api_key is configured, the
@@ -76,10 +86,11 @@ Examples:
 			}
 			return withGraph(cmd, func(ctx context.Context, store graph.Store) error {
 				q := transcript.Query{
-					Text:   strings.Join(args, " "),
-					Person: person,
-					Only:   transcript.MatchKind(only),
-					Limit:  limit,
+					Text:    strings.Join(args, " "),
+					Person:  person,
+					Only:    transcript.MatchKind(only),
+					Breadth: transcript.Breadth(breadth),
+					Limit:   limit,
 				}
 				if since != "" {
 					cutoff, err := time.Parse("2006-01-02", since)
@@ -126,6 +137,8 @@ Examples:
 	cmd.Flags().StringVar(&since, "since", "", "only meetings on or after this date (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&only, "only", "",
 		"only this kind of evidence: title, summary, topic, segment, decision, follow-up, mention, participant")
+	cmd.Flags().StringVar(&breadth, "breadth", string(transcript.BreadthDefault),
+		"how far a matched topic reaches through related topics: none, narrow, default, wide")
 	cmd.Flags().IntVar(&limit, "limit", 10, "maximum meetings to show (0 for all)")
 	cmd.Flags().BoolVar(&full, "full", false, "print matched summaries and quotes in full")
 	cmd.Flags().BoolVar(&noRerank, "no-rerank", false,
@@ -194,6 +207,12 @@ func printSearch(ctx context.Context, store graph.Store, out io.Writer, q transc
 		}
 	}
 	fmt.Fprintln(out, ".")
+	if found.Expanded > 0 {
+		// Say which hits the words never touched, so a reader can weigh
+		// them, and how to see more or fewer.
+		fmt.Fprintf(out, "%d reached only through related topics (--breadth %s; none disables, wide follows further).\n",
+			found.Expanded, q.Breadth)
+	}
 	if ranking != nil && ranking.Judged > 0 {
 		// Say what ordered the list and what it cost, so a reader knows
 		// the probabilities are a model's judgment and not a word count.
@@ -240,6 +259,7 @@ func printSearch(ctx context.Context, store graph.Store, out io.Writer, q transc
 func printMatches(out io.Writer, h *transcript.Hit, full bool) {
 	var where []string
 	var topics []string
+	var related []string
 	for _, mt := range h.Matches {
 		switch mt.Kind {
 		case transcript.MatchTitle, transcript.MatchSummary:
@@ -249,7 +269,11 @@ func printMatches(out io.Writer, h *transcript.Hit, full bool) {
 		case transcript.MatchParticipant:
 			where = append(where, "participant "+mt.Label)
 		case transcript.MatchTopic:
-			topics = append(topics, mt.Label)
+			if mt.Via != "" {
+				related = append(related, fmt.Sprintf("%s (p=%.2f)", mt.Via, mt.Probability))
+			} else {
+				topics = append(topics, mt.Label)
+			}
 		}
 	}
 	if len(where) > 0 {
@@ -257,6 +281,9 @@ func printMatches(out io.Writer, h *transcript.Hit, full bool) {
 	}
 	if len(topics) > 0 {
 		fmt.Fprintf(out, "  topic      %s\n", strings.Join(topics, "; "))
+	}
+	for _, r := range related {
+		fmt.Fprintf(out, "  related    %s\n", r)
 	}
 
 	clip := func(s string, n int) string {
@@ -305,13 +332,17 @@ func printMatches(out io.Writer, h *transcript.Hit, full bool) {
 
 // searchJSON is the machine-readable form of a search.
 type searchJSON struct {
-	Query      string            `json:"query"`
-	Terms      []string          `json:"terms"`
-	Total      int               `json:"total"`
-	Complete   int               `json:"complete"`
-	Considered int               `json:"considered"`
-	Reranked   *searchRerankJSON `json:"reranked,omitempty"`
-	Hits       []searchHitJSON   `json:"hits"`
+	Query      string   `json:"query"`
+	Terms      []string `json:"terms"`
+	Total      int      `json:"total"`
+	Complete   int      `json:"complete"`
+	Considered int      `json:"considered"`
+	// Breadth is how far topic matches reached through related topics, and
+	// Expanded how many hits were reached only that way.
+	Breadth  string            `json:"breadth"`
+	Expanded int               `json:"expanded,omitempty"`
+	Reranked *searchRerankJSON `json:"reranked,omitempty"`
+	Hits     []searchHitJSON   `json:"hits"`
 }
 
 // searchRerankJSON records that a decision model ordered the hits, and what
@@ -342,22 +373,28 @@ type searchHitJSON struct {
 }
 
 type searchMatchJSON struct {
-	Kind          string   `json:"kind"`
-	Label         string   `json:"label"`
-	Terms         []string `json:"terms,omitempty"`
-	Phrase        bool     `json:"phrase,omitempty"`
-	Start         string   `json:"start,omitempty"`
-	End           string   `json:"end,omitempty"`
-	Summary       string   `json:"summary,omitempty"`
-	Quote         string   `json:"quote,omitempty"`
-	QuoteVerified *bool    `json:"quote_verified,omitempty"`
-	Assignee      string   `json:"assignee,omitempty"`
-	Due           string   `json:"due_date,omitempty"`
+	Kind   string   `json:"kind"`
+	Label  string   `json:"label"`
+	Terms  []string `json:"terms,omitempty"`
+	Phrase bool     `json:"phrase,omitempty"`
+	// Via is the path of related topics from the label the words matched
+	// to this one, and Probability the product of the edge probabilities
+	// along it; both are present only for a match reached that way.
+	Via           string  `json:"via,omitempty"`
+	Probability   float64 `json:"probability,omitempty"`
+	Start         string  `json:"start,omitempty"`
+	End           string  `json:"end,omitempty"`
+	Summary       string  `json:"summary,omitempty"`
+	Quote         string  `json:"quote,omitempty"`
+	QuoteVerified *bool   `json:"quote_verified,omitempty"`
+	Assignee      string  `json:"assignee,omitempty"`
+	Due           string  `json:"due_date,omitempty"`
 }
 
 func searchToJSON(ctx context.Context, store graph.Store, q transcript.Query, found *transcript.Found, ranking *transcript.Reranking) searchJSON {
 	out := searchJSON{Query: q.Text, Terms: found.Terms, Total: found.Total, Complete: found.Complete,
-		Considered: found.Considered, Hits: make([]searchHitJSON, 0, len(found.Hits))}
+		Considered: found.Considered, Breadth: string(q.Breadth), Expanded: found.Expanded,
+		Hits: make([]searchHitJSON, 0, len(found.Hits))}
 	if ranking != nil && ranking.Judged > 0 {
 		out.Reranked = &searchRerankJSON{Model: ranking.Model, Judged: ranking.Judged,
 			InputTokens: ranking.InputTokens, LatencyMS: ranking.Latency.Milliseconds()}
@@ -384,7 +421,8 @@ func searchToJSON(ctx context.Context, store graph.Store, q transcript.Query, fo
 			Matches:      make([]searchMatchJSON, 0, len(h.Matches)),
 		}
 		for _, mt := range h.Matches {
-			j := searchMatchJSON{Kind: string(mt.Kind), Label: mt.Label, Terms: mt.Terms, Phrase: mt.Phrase}
+			j := searchMatchJSON{Kind: string(mt.Kind), Label: mt.Label, Terms: mt.Terms, Phrase: mt.Phrase,
+				Via: mt.Via, Probability: mt.Probability}
 			if n := mt.Node; n != nil {
 				switch mt.Kind {
 				case transcript.MatchSegment:

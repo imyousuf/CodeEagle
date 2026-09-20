@@ -152,6 +152,7 @@ codeeagle meetings watch                   # Index new recordings as they appear
 codeeagle meetings search AGI              # What was said about it, by whom, and when
 codeeagle meetings search pricing --person Kevin           # ...in meetings someone attended
 codeeagle meetings search --only decision --since 2026-08-01   # Every decision since a date
+codeeagle meetings search AGI --breadth wide   # Follow related topics two steps out (none|narrow|default|wide)
 codeeagle meetings list                    # List indexed meetings
 codeeagle meetings list --person Kevin     # Meetings a person attended
 codeeagle meetings list --since 2026-03-01 # Meetings after a date
@@ -163,6 +164,9 @@ codeeagle meetings topics agi              # Only the topics containing a word
 codeeagle meetings topics --themes         # The induced topic hierarchy
 codeeagle meetings taxonomy                # Group topics into concepts (re-runnable)
 codeeagle meetings taxonomy --rebuild      # Group from scratch instead of extending
+codeeagle meetings relate --dry-run        # Count the topic pairs still to judge, and the cost
+codeeagle meetings relate                  # Judge which topics are about one thing (needs jev_api_key)
+codeeagle meetings topics agi --related    # Topics judged related to each match, with the probability
 codeeagle meetings migrate --from <branch> # Move a corpus indexed by an older version
 codeeagle meetings actions --person Kevin  # Follow-ups owned by someone
 codeeagle meetings actions --unassigned    # Follow-ups nobody owns

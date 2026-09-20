@@ -20,6 +20,7 @@ type Writer struct {
 	store    graph.Store
 	people   *PersonRegistry
 	topics   *TopicRegistry
+	relater  *TopicRelater
 	opts     WriterOptions
 	ensureOn DateLinker
 }
@@ -55,6 +56,9 @@ type Stats struct {
 	Decisions   int
 	ActionItems int
 	Edges       int
+	// RelatedPairs counts topic pairs judged for relatedness as a result of
+	// this write.
+	RelatedPairs int
 }
 
 // Add accumulates another session's stats.
@@ -70,6 +74,7 @@ func (s *Stats) Add(o Stats) {
 	s.Decisions += o.Decisions
 	s.ActionItems += o.ActionItems
 	s.Edges += o.Edges
+	s.RelatedPairs += o.RelatedPairs
 }
 
 // NewWriter creates a Writer. The registry is shared across sessions so that
@@ -106,6 +111,14 @@ func (w *Writer) topicRegistry(ctx context.Context) (*TopicRegistry, error) {
 // modified file is.
 func (w *Writer) WithDateLinker(fn DateLinker) *Writer {
 	w.ensureOn = fn
+	return w
+}
+
+// WithRelater has each written meeting's topics judged against their
+// neighbours as they are written, so the adjacency graph grows with the
+// corpus rather than only when rebuilt.
+func (w *Writer) WithRelater(r *TopicRelater) *Writer {
+	w.relater = r
 	return w
 }
 
@@ -374,6 +387,11 @@ func (w *Writer) writeAnalysis(ctx context.Context, res *Result, meeting *graph.
 		return st, err
 	}
 
+	// What this meeting was filed under and the segment that said it, for
+	// relating its topics to their neighbours once they are all written.
+	var filedUnder []*graph.Node
+	said := make(map[string]*graph.Node)
+
 	for _, topic := range a.Topics {
 		name := strings.TrimSpace(topic.Name)
 		if name == "" {
@@ -389,6 +407,9 @@ func (w *Writer) writeAnalysis(ctx context.Context, res *Result, meeting *graph.
 			continue
 		}
 		st.Topics++
+		if _, seen := said[topicNode.ID]; !seen {
+			filedUnder = append(filedUnder, topicNode)
+		}
 
 		if err := w.addEdge(ctx, graph.EdgeHasTopic, meeting.ID, topicNode.ID, nil); err != nil {
 			return st, err
@@ -428,6 +449,7 @@ func (w *Writer) writeAnalysis(ctx context.Context, res *Result, meeting *graph.
 			return st, fmt.Errorf("add topic segment %q: %w", name, err)
 		}
 		st.Segments++
+		said[topicNode.ID] = segment
 
 		if err := w.addEdge(ctx, graph.EdgeContains, meeting.ID, segment.ID, nil); err != nil {
 			return st, err
@@ -444,6 +466,18 @@ func (w *Writer) writeAnalysis(ctx context.Context, res *Result, meeting *graph.
 				}
 				st.Edges++
 			}
+		}
+	}
+
+	// The meeting is in the graph by now; failing to relate its topics is
+	// logged rather than returned, or the meeting would be re-enriched on
+	// the next run at the language model's price to repair a decision
+	// model's outage.
+	if w.relater != nil && len(filedUnder) > 0 {
+		rs, err := w.relater.RelateMeeting(ctx, s.ID, filedUnder, said)
+		st.RelatedPairs += rs.Pairs
+		if err != nil {
+			w.relater.opts.Log("warning: relating topics of %s: %v", s.ID, err)
 		}
 	}
 

@@ -185,6 +185,13 @@ const (
 	// EdgeFollowsUp links an ActionItem to the Decision it implements, or a
 	// Meeting to an earlier Meeting in the same series.
 	EdgeFollowsUp EdgeType = "FollowsUp"
+	// EdgeRelatedTo links two Topics whose subjects overlap, carrying the
+	// probability that a meeting filed under either is worth showing to
+	// someone asking about the other. It is undirected: one edge is written
+	// per pair, from the lower node id to the higher, and every judged pair
+	// is recorded, including those found unrelated, so a reader must always
+	// apply a probability threshold.
+	EdgeRelatedTo EdgeType = "RelatedTo"
 )
 
 // MeetingNodeTypes lists the node types produced by meeting transcript indexing.

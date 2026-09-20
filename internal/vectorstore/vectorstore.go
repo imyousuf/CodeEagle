@@ -312,6 +312,22 @@ func (vs *VectorStore) exactSearch(queryVec []float32, k int) ([]hnsw.Node[strin
 	return out, nil
 }
 
+// Vector returns the stored embedding of a node's first chunk, or false
+// when the node is not indexed.
+//
+// Comparing two indexed nodes with each other — rather than with a query —
+// needs the vectors as they were stored: a query is embedded under a
+// different prefix and sits in a different place, so re-embedding a node's
+// text as a query would measure the wrong distance.
+func (vs *VectorStore) Vector(nodeID string) ([]float32, bool) {
+	vs.mu.RLock()
+	defer vs.mu.RUnlock()
+	if vs.idx == nil {
+		return nil, false
+	}
+	return vs.idx.Lookup(chunkKey(nodeID, 0))
+}
+
 // StaleInLastSearch reports how many of the vectors the last search
 // visited belonged to nodes no longer in the graph. A high count means the
 // index has fallen behind and a rebuild is due; a search alone cannot say

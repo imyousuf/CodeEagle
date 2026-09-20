@@ -60,6 +60,8 @@ Build and maintain a rich knowledge graph that captures:
 - `MENTIONS` — meeting/topic segment -> code entity or person
 - `FOLLOWS_UP` — action item -> decision; recurring meeting -> its previous instance
   (inferred from the participant set, which recurs more reliably than a title)
+- `RELATED_TO` — topic <-> topic, undirected, carrying the decision model's
+  probability that the two are about one thing; every judged pair is stored
 
 **Code Quality Metrics** (attached to graph nodes)
 - Cyclomatic complexity per function
@@ -131,6 +133,8 @@ codeeagle meetings show <id-or-prefix-or-title>            # Participants, topic
 codeeagle meetings people               # People, speaking time, follow-up counts
 codeeagle meetings topics [words] [--themes]   # Topics (filtered by words), or the hierarchy
 codeeagle meetings taxonomy [--rebuild] [--depth N]   # Group topics into concepts
+codeeagle meetings relate [--dry-run] [--limit N]     # Judge which topics are about one thing
+codeeagle meetings search <words> [--breadth B]       # What was said about X, by whom, when
 codeeagle meetings migrate --from <branch>            # Move an older corpus into scope
 codeeagle meetings migrate --from-db <path>           # ...or out of another database
 codeeagle meetings actions [--person P] [--unassigned]     # Follow-ups
@@ -228,6 +232,33 @@ Design constraints that came out of measuring the real corpus:
 - **More hierarchy is not better hierarchy.** Two rounds of grouping produced
   concepts worth searching by; a third, chasing a tidy top level, mis-filed them
   while still reading plausibly. Depth is a choice, defaulting to two.
+- **Commonality lives on edges, never in merged nodes.** 85% of topic labels
+  are used by one meeting, and a tree gives each label one parent, so "AGI
+  feasibility debate" cannot be both a facet of AI strategy and adjacent to
+  recursive self-improvement. Every label stays distinct; a `RelatedTo` edge
+  between two carries a decision model's probability that a meeting filed
+  under either is worth showing to someone asking about the other, and search
+  follows those edges as far as `--breadth` allows, discounting each hop so a
+  seed always outranks a neighbour. Measured over 91 hand-labelled pairs:
+  embedding cosine alone cannot decide (AUC 0.77, no cut better than
+  precision 0.83 at recall 0.50); a six-way relation type from the judge
+  named the labelled relation half the time and confused sibling with
+  co-occurring both ways; a yes/no "related" probability from the same judge
+  reached AUC 0.92 and put no unrelated pair above 0.56, so 0.6 admits only
+  related pairs. Edges are therefore weighted, not typed, and direction is not
+  asked. Label embeddings alone miss the AGI cluster entirely — its labels sit
+  at cosine 0.60-0.64 while each one's nearest ten sit above 0.70 — so pairs
+  are proposed by four signals (nearest labels, nearest segment summaries,
+  same meeting, same parent when the family has at most thirty members) and
+  every proposal is judged, with the verdict stored either way so no pair is
+  asked about twice. Over the whole corpus that was 31,700 pairs for about
+  $0.75, and it connected the cluster: feasibility ~ alignment 0.65 (found
+  by what was said), alignment ~ recursive self-improvement 0.81 (same
+  meeting). Two rules keep expansion from dragging in junk, both measured:
+  a search expands only from labels that covered the whole query, and a
+  multi-hop path must keep its cumulative probability above the gate —
+  without them "sticky board" reached 233 meetings through "HITL vs sticky
+  notes" and hub topics; with them, 40 at wide and 2 at default.
 - **Meetings are not branch-scoped.** They live outside the per-branch key scopes
   and are added as a fallback read, so they survive branch switches. A key
   carries its scope but not its type, so `meetings migrate` moves a scope whole

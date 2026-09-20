@@ -41,7 +41,81 @@ type Query struct {
 	Only MatchKind
 	// Limit caps the hits returned; zero means all.
 	Limit int
+	// Breadth is how far a topic match reaches through the topics judged
+	// related to it; BreadthDefault when empty.
+	Breadth Breadth
 }
+
+// Breadth is how far a search follows the adjacency graph out from the
+// topics whose labels matched.
+//
+// The topics meetings produce are specific and rarely shared, so the words
+// of a question match one label and the meetings filed under it, while the
+// same conversation under a differently worded label stays invisible. The
+// adjacency graph records, per pair of labels, a decision model's
+// probability that they are about one thing; breadth is the probability a
+// search insists on before it follows such an edge, and how many it will
+// follow in a row.
+//
+// Measured against 91 hand-labelled pairs: at 0.6 every pair admitted was
+// related; at 0.5 six in seven were; no unrelated pair scored above 0.56.
+// A second hop is what reaches a label that no signal proposed against the
+// seed — the real corpus has one: two labels from different meetings under
+// different parents, related through a third.
+type Breadth string
+
+const (
+	// BreadthNone follows no edges: only the labels the words matched.
+	BreadthNone Breadth = "none"
+	// BreadthNarrow follows one edge, at 0.8 or above.
+	BreadthNarrow Breadth = "narrow"
+	// BreadthDefault follows one edge, at 0.6 or above.
+	BreadthDefault Breadth = "default"
+	// BreadthWide follows two edges, each at 0.5 or above.
+	BreadthWide Breadth = "wide"
+)
+
+// Breadths lists the settings a search accepts.
+var Breadths = []Breadth{BreadthNone, BreadthNarrow, BreadthDefault, BreadthWide}
+
+// The edge probability each breadth insists on. Three bands rather than one
+// tuned cut, because the model's probabilities move by up to a tenth
+// between identical requests.
+const (
+	NarrowRelatedGate  = 0.8
+	DefaultRelatedGate = 0.6
+	WideRelatedGate    = 0.5
+)
+
+// minProbability is the edge probability a breadth insists on.
+func (b Breadth) minProbability() float64 {
+	switch b {
+	case BreadthNarrow:
+		return NarrowRelatedGate
+	case BreadthWide:
+		return WideRelatedGate
+	default:
+		return DefaultRelatedGate
+	}
+}
+
+// hops is how many edges a breadth follows in a row.
+func (b Breadth) hops() int {
+	switch b {
+	case BreadthNone:
+		return 0
+	case BreadthWide:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// relatedHopDecay scales the credit a meeting earns for each edge between
+// its label and the one the words matched, on top of the edge's own
+// probability. The label the words matched earns full credit, so a meeting
+// reached through a neighbour can never outrank one filed under the seed.
+const relatedHopDecay = 0.5
 
 // MatchKind says where inside a meeting a query matched.
 type MatchKind string
@@ -76,6 +150,24 @@ type Match struct {
 	Terms []string
 	// Phrase reports that the whole query appeared verbatim here.
 	Phrase bool
+	// Via is set when the match came through the adjacency graph rather
+	// than the words: the label the words matched, then each label followed
+	// to reach this one, joined with " ~ ".
+	Via string
+	// Probability is the product of the edge probabilities along Via.
+	Probability float64
+	// Weight is the credit this match carries towards the score: 1 for a
+	// match the words made, less for one reached through related topics.
+	// Zero means one, so evidence built elsewhere needs no change.
+	Weight float64
+}
+
+// credit is the match's weight, treating an unset one as full.
+func (m *Match) credit() float64 {
+	if m.Weight == 0 {
+		return 1
+	}
+	return m.Weight
 }
 
 // Hit is a meeting that matched, with what matched inside it.
@@ -111,6 +203,23 @@ type Found struct {
 	Considered int
 	// Terms are the query words that were searched.
 	Terms []string
+	// Expanded is how many hits the words never matched: they were reached
+	// only through topics judged related to one the words did match.
+	Expanded int
+}
+
+// OnlyRelated reports whether every match on a hit came through the
+// adjacency graph.
+func (h *Hit) OnlyRelated() bool {
+	if len(h.Matches) == 0 {
+		return false
+	}
+	for _, m := range h.Matches {
+		if m.Via == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // CoversAll reports whether a hit matched every query word.
@@ -138,6 +247,12 @@ func FindMeetings(ctx context.Context, store graph.Store, q Query) (*Found, erro
 	}
 	if q.Only != "" && !validKind(q.Only) {
 		return nil, fmt.Errorf("unknown evidence kind %q; one of %s", q.Only, joinKinds())
+	}
+	if q.Breadth == "" {
+		q.Breadth = BreadthDefault
+	}
+	if !validBreadth(q.Breadth) {
+		return nil, fmt.Errorf("unknown breadth %q; one of %s", q.Breadth, joinBreadths())
 	}
 	m := newMatcher(q.Text, terms)
 
@@ -240,7 +355,7 @@ func FindMeetings(ctx context.Context, store graph.Store, q Query) (*Found, erro
 		}
 	}
 	if only(MatchTopic) && len(terms) > 0 {
-		if err := matchTopics(ctx, store, m, byID, byRecording); err != nil {
+		if err := matchTopics(ctx, store, m, byID, byRecording, q.Breadth); err != nil {
 			return nil, err
 		}
 	}
@@ -252,6 +367,9 @@ func FindMeetings(ctx context.Context, store graph.Store, q Query) (*Found, erro
 			hits = append(hits, h)
 			if h.Phrase || h.CoversAll(terms) {
 				found.Complete++
+			}
+			if h.OnlyRelated() {
+				found.Expanded++
 			}
 		}
 	}
@@ -275,11 +393,47 @@ func FindMeetings(ctx context.Context, store graph.Store, q Query) (*Found, erro
 // meetings under its descendants too, labelled with the path down, so
 // "AI strategy" reaches a meeting filed under "AGI feasibility debate" and
 // says which leaf it was.
-func matchTopics(ctx context.Context, store graph.Store, m *matcher, byID, byRecording map[string]*Hit) error {
+//
+// Then, within the breadth asked for, the topics judged related to a matched
+// one are credited too, at a discount that compounds with each edge
+// followed. That is how "AGI" reaches the meeting filed under "Recursive
+// self improvement and model regression", whose label contains none of the
+// words.
+func matchTopics(ctx context.Context, store graph.Store, m *matcher, byID, byRecording map[string]*Hit, breadth Breadth) error {
 	topics, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeTopic})
 	if err != nil {
 		return err
 	}
+	// creditTopic gives every meeting filed under a topic the evidence.
+	creditTopic := func(t *graph.Node, ev Match) {
+		edges, err := store.GetEdges(ctx, t.ID, graph.EdgeHasTopic)
+		if err != nil {
+			return
+		}
+		credited := make(map[*Hit]bool)
+		for _, e := range edges {
+			if e.TargetID != t.ID {
+				continue
+			}
+			h := byID[e.SourceID]
+			if h == nil {
+				// The topic may be reached only through a segment of
+				// the meeting, when the meeting-level edge predates
+				// the current labels.
+				src, err := store.GetNode(ctx, e.SourceID)
+				if err != nil || src == nil || src.Type != graph.NodeTopicSegment {
+					continue
+				}
+				h = byRecording[recordingKey(src.FilePath, src.Properties[graph.PropMeetingID])]
+			}
+			if h == nil || credited[h] {
+				continue
+			}
+			credited[h] = true
+			h.add(&ev)
+		}
+	}
+
 	visited := make(map[string]bool)
 	var walk func(t *graph.Node, label string, ev Match, depth int)
 	walk = func(t *graph.Node, label string, ev Match, depth int) {
@@ -287,32 +441,8 @@ func matchTopics(ctx context.Context, store graph.Store, m *matcher, byID, byRec
 			return
 		}
 		visited[t.ID] = true
-		edges, err := store.GetEdges(ctx, t.ID, graph.EdgeHasTopic)
-		if err == nil {
-			credited := make(map[*Hit]bool)
-			for _, e := range edges {
-				if e.TargetID != t.ID {
-					continue
-				}
-				h := byID[e.SourceID]
-				if h == nil {
-					// The topic may be reached only through a segment of
-					// the meeting, when the meeting-level edge predates
-					// the current labels.
-					src, err := store.GetNode(ctx, e.SourceID)
-					if err != nil || src == nil || src.Type != graph.NodeTopicSegment {
-						continue
-					}
-					h = byRecording[recordingKey(src.FilePath, src.Properties[graph.PropMeetingID])]
-				}
-				if h == nil || credited[h] {
-					continue
-				}
-				credited[h] = true
-				ev.Label = label
-				h.add(&ev)
-			}
-		}
+		ev.Label = label
+		creditTopic(t, ev)
 		children, err := TopicChildren(ctx, store, t.ID)
 		if err != nil {
 			return
@@ -321,6 +451,18 @@ func matchTopics(ctx context.Context, store graph.Store, m *matcher, byID, byRec
 			walk(c, label+" › "+c.Name, ev, depth+1)
 		}
 	}
+
+	// The frontier holds the seeds to expand from: only topics whose label
+	// covered the whole query. A label that matched one word of "sticky
+	// board" — "HITL vs sticky notes" — carries evidence for that word
+	// alone, and following its neighbours would spread a half-match over
+	// every meeting about HITL. Measured on the real corpus that one seed
+	// pulled in nineteen meetings.
+	type seed struct {
+		topic *graph.Node
+		ev    Match
+	}
+	var frontier []seed
 	for _, t := range topics {
 		text := t.Name
 		if aliases := t.Properties[graph.PropAliases]; aliases != "" {
@@ -331,6 +473,51 @@ func matchTopics(ctx context.Context, store graph.Store, m *matcher, byID, byRec
 			continue
 		}
 		walk(t, t.Name, *ev, 0)
+		if !m.covers(ev) {
+			continue
+		}
+		ev.Via, ev.Probability, ev.Weight = t.Name, 1, 1
+		frontier = append(frontier, seed{t, *ev})
+	}
+
+	// A path is followed while the product of its edge probabilities stays
+	// above the gate, not merely each edge. Two edges at 0.6 compound to a
+	// relation the judge would have put at 0.36, and a second hop through a
+	// broad topic — "AGI feasibility debate ~ AI strategy ~ AI model
+	// training" — otherwise reaches every meeting under it.
+	minP, hops := breadth.minProbability(), breadth.hops()
+	best := make(map[string]float64)
+	for hop := 1; hop <= hops && len(frontier) > 0; hop++ {
+		var next []seed
+		for _, s := range frontier {
+			neighbours, err := RelatedTopics(ctx, store, s.topic.ID, minP)
+			if err != nil {
+				return err
+			}
+			for _, n := range neighbours {
+				if visited[n.Topic.ID] {
+					// The words matched it, or a theme the words matched
+					// contains it: it has full credit already.
+					continue
+				}
+				ev := s.ev
+				ev.Probability *= n.Probability
+				if ev.Probability < minP {
+					continue
+				}
+				ev.Weight *= n.Probability * relatedHopDecay
+				if ev.Weight <= best[n.Topic.ID] {
+					continue
+				}
+				best[n.Topic.ID] = ev.Weight
+				ev.Label = n.Topic.Name
+				ev.Via = s.ev.Via + " ~ " + n.Topic.Name
+				ev.Phrase = false
+				creditTopic(n.Topic, ev)
+				next = append(next, seed{n.Topic, ev})
+			}
+		}
+		frontier = next
 	}
 	return nil
 }
@@ -358,9 +545,9 @@ func score(hits []*Hit, terms []string, groups [][]int) {
 				if !ok {
 					continue
 				}
-				c := 1.0
+				c := ev.credit()
 				if strings.Contains(t, "*") {
-					c = search.PrefixCredit
+					c *= search.PrefixCredit
 				}
 				if c > credits[k][i] {
 					credits[k][i] = c
@@ -386,11 +573,18 @@ func score(hits []*Hit, terms []string, groups [][]int) {
 }
 
 // add records evidence on a hit, merging the terms it matched.
+//
+// Evidence that arrived through the adjacency graph is kept but does not
+// count towards the words the meeting itself matched: it earns the meeting
+// a place in the results, not a claim to have said what was asked.
 func (h *Hit) add(ev *Match) {
 	if ev == nil {
 		return
 	}
 	h.Matches = append(h.Matches, *ev)
+	if ev.Via != "" {
+		return
+	}
 	if ev.Phrase {
 		h.Phrase = true
 	}
@@ -452,6 +646,32 @@ func (m *matcher) match(kind MatchKind, node *graph.Node, text, label string) *M
 	return ev
 }
 
+// covers reports whether a match accounts for the whole query: the phrase,
+// or a word from every group, an initialism and its expansion being one
+// group.
+func (m *matcher) covers(ev *Match) bool {
+	if ev.Phrase {
+		return true
+	}
+	matched := make(map[string]bool, len(ev.Terms))
+	for _, t := range ev.Terms {
+		matched[strings.TrimSuffix(t, "*")] = true
+	}
+	for _, g := range m.groups {
+		any := false
+		for _, i := range g {
+			if matched[m.terms[i]] {
+				any = true
+				break
+			}
+		}
+		if !any {
+			return false
+		}
+	}
+	return true
+}
+
 // attended reports whether a person is among the names, tolerating the
 // spelling variants transcription produces.
 func attended(names []string, person string) bool {
@@ -472,6 +692,23 @@ func validKind(k MatchKind) bool {
 		}
 	}
 	return false
+}
+
+func validBreadth(b Breadth) bool {
+	for _, known := range Breadths {
+		if known == b {
+			return true
+		}
+	}
+	return false
+}
+
+func joinBreadths() string {
+	names := make([]string, len(Breadths))
+	for i, b := range Breadths {
+		names[i] = string(b)
+	}
+	return strings.Join(names, ", ")
 }
 
 func joinKinds() string {

@@ -53,6 +53,7 @@ was said, by whom, and what it committed anyone to.`,
 		newMeetingsMigrateCmd(),
 		newMeetingsActionsCmd(),
 		newMeetingsSearchCmd(),
+		newMeetingsRelateCmd(),
 	)
 	return cmd
 }
@@ -98,13 +99,20 @@ meetings costs nothing for the ones already done.`,
 			if judge := pipeline.analyzer.JudgeName(); judge != "" {
 				fmt.Fprintf(out, "Speakers:  %s\n", judge)
 			}
+			if pipeline.relater != nil {
+				fmt.Fprintln(out, "Topics:    related to their neighbours as each meeting is written")
+			}
 			fmt.Fprintln(out)
 
+			started := time.Now()
 			report, err := pipeline.indexer.Run(cmd.Context())
 			if err != nil {
 				return err
 			}
 			printRunReport(out, report)
+			if pipeline.relater != nil && report.Stats.RelatedPairs > 0 {
+				printRelateStats(out, pipeline.relater.Stats(), time.Since(started))
+			}
 
 			// Connect what the meetings discussed to the indexed codebase.
 			// This needs the whole graph in view, so it runs once at the end
@@ -405,9 +413,16 @@ type meetingPipeline struct {
 	analyzer *transcript.Analyzer
 	people   *transcript.PersonRegistry
 	topics   *transcript.TopicRegistry
+	// relater is set when a decision model is configured; closeVectors
+	// releases the vector index it reads, if one was opened.
+	relater      *transcript.TopicRelater
+	closeVectors func()
 }
 
 func (p *meetingPipeline) close() {
+	if p.closeVectors != nil {
+		p.closeVectors()
+	}
 	if p.client != nil {
 		_ = p.client.Close()
 	}
@@ -537,6 +552,21 @@ func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*mee
 	}).WithDateLinker(meetingDateLinker).WithTopics(topics)
 
 	out := cmd.OutOrStdout()
+	// With a decision model, each meeting's topics are related to their
+	// neighbours as it is written, so the adjacency graph grows with the
+	// corpus instead of waiting for a bulk pass.
+	relater, closeVectors, err := newTopicRelater(cfg, tc, store, relaterSetup{
+		log: func(format string, args ...any) { fmt.Fprintf(out, format+"\n", args...) },
+	})
+	if err != nil {
+		_ = client.Close()
+		_ = store.Close()
+		return nil, err
+	}
+	if relater != nil {
+		writer = writer.WithRelater(relater)
+	}
+
 	indexer := transcript.NewIndexer(store, analyzer, writer, transcript.IndexOptions{
 		SessionsDirs: dirs,
 		ExtraPaths:   marked,
@@ -549,13 +579,15 @@ func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*mee
 	})
 
 	return &meetingPipeline{
-		client:   client,
-		store:    store,
-		branch:   embedded.MeetingScope,
-		indexer:  indexer,
-		analyzer: analyzer,
-		people:   people,
-		topics:   topics,
+		client:       client,
+		store:        store,
+		branch:       embedded.MeetingScope,
+		indexer:      indexer,
+		analyzer:     analyzer,
+		people:       people,
+		topics:       topics,
+		relater:      relater,
+		closeVectors: closeVectors,
 	}, nil
 }
 
@@ -1141,8 +1173,9 @@ func meetingSuffix(id string) string {
 
 func newMeetingsTopicsCmd() *cobra.Command {
 	var (
-		limit  int
-		themes bool
+		limit   int
+		themes  bool
+		related bool
 	)
 
 	cmd := &cobra.Command{
@@ -1154,7 +1187,11 @@ Words given after the command keep only the topics containing them, matched
 as whole words without regard to case, so "topics agi" finds "AGI feasibility
 debate" and not "messaging". The list is long — thousands of labels in a
 corpus of a few hundred meetings — so it is capped by default and says so
-when it has been.`,
+when it has been.
+
+--related shows, under each topic, the topics the decision model judged to
+be about the same thing and how sure it was (see "meetings relate"). These
+are what a search follows when its words match only one of them.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withGraph(cmd, func(ctx context.Context, store graph.Store) error {
 				if themes {
@@ -1172,6 +1209,7 @@ when it has been.`,
 				type row struct {
 					name  string
 					count int
+					node  *graph.Node
 				}
 				var rows []row
 				for _, t := range topics {
@@ -1193,7 +1231,7 @@ when it has been.`,
 						}
 					}
 					if n > 0 {
-						rows = append(rows, row{t.Name, n})
+						rows = append(rows, row{t.Name, n, t})
 					}
 				}
 				sort.Slice(rows, func(i, j int) bool {
@@ -1220,6 +1258,18 @@ when it has been.`,
 				fmt.Fprintln(tw, "MEETINGS\tTOPIC")
 				for _, r := range rows {
 					fmt.Fprintf(tw, "%d\t%s\n", r.count, r.name)
+					if !related {
+						continue
+					}
+					// The wide gate, so that what a --breadth wide search
+					// would follow is visible here.
+					neighbours, err := transcript.RelatedTopics(ctx, store, r.node.ID, transcript.WideRelatedGate)
+					if err != nil {
+						return err
+					}
+					for _, n := range neighbours {
+						fmt.Fprintf(tw, "\t  ~ %.2f  %s\n", n.Probability, n.Topic.Name)
+					}
 				}
 				if err := tw.Flush(); err != nil {
 					return err
@@ -1231,6 +1281,7 @@ when it has been.`,
 	}
 	cmd.Flags().IntVar(&limit, "limit", 40, "maximum topics to show (0 for all)")
 	cmd.Flags().BoolVar(&themes, "themes", false, "show the induced theme hierarchy instead of flat topics")
+	cmd.Flags().BoolVar(&related, "related", false, "under each topic, list the topics judged related to it with the probability")
 	return cmd
 }
 
