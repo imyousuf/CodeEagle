@@ -121,10 +121,11 @@ codeeagle faces person [...]           # Person CRUD (add, list, edit, delete)
 
 codeeagle meetings sync [--dry-run] [--limit N] [--force]   # Index transcripts
 codeeagle meetings watch [--interval D] [--settle D]       # Index new recordings live
-codeeagle meetings search <words> [--person P] [--since DATE] [--only KIND]
+codeeagle meetings search <words> [--person P] [--since DATE] [--only KIND] [--no-rerank]
                                         # What was said about something, by whom, when:
                                         # per meeting, the matching topics, segments,
-                                        # decisions with quotes, and follow-ups
+                                        # decisions with quotes, and follow-ups; ordered
+                                        # by the decision model when jev_api_key is set
 codeeagle meetings list [--person P] [--since DATE]        # List meetings
 codeeagle meetings show <id-or-prefix-or-title>            # Participants, topics, decisions, follow-ups
 codeeagle meetings people               # People, speaking time, follow-up counts

@@ -184,6 +184,38 @@ func TestKeywordSearchGroupsInitialism(t *testing.T) {
 	}
 }
 
+// TestKeywordSearchAWordNobodyHasChangesNoOrder: on a small corpus rarity
+// weights are noisy, so the two things that must hold are checked directly.
+// A query word that matches nothing lowers every share equally and reorders
+// nothing; and a node matching both a rare and a common word always beats a
+// node matching only the rare one.
+func TestKeywordSearchAWordNobodyHasChangesNoOrder(t *testing.T) {
+	store := keywordStore(t)
+	ctx := context.Background()
+	plain := KeywordSearch(ctx, store, "artificial intelligence")
+	typo := KeywordSearch(ctx, store, "artificial intelligence pakaging")
+	for id, hit := range plain.Hits {
+		other, ok := typo.Hits[id]
+		if !ok {
+			t.Fatalf("%s vanished when a misspelling was added", id)
+		}
+		if other.Share >= hit.Share {
+			t.Errorf("%s share rose from %v to %v with a word nobody has", id, hit.Share, other.Share)
+		}
+	}
+	if len(typo.Hits) != len(plain.Hits) {
+		t.Errorf("a misspelling matched %d nodes", len(typo.Hits)-len(plain.Hits))
+	}
+
+	both := KeywordSearch(ctx, store, "AGI debate")
+	if both.Hits["agi"].Share <= both.Hits["generic"].Share {
+		// "agi" is matched by both; "debate" only by the topic. Two words
+		// beat one, however rare the one.
+		t.Errorf("topic matching both words (%v) did not beat package matching one (%v)",
+			both.Hits["agi"].Share, both.Hits["generic"].Share)
+	}
+}
+
 func TestKeywordSearchEmptyQuery(t *testing.T) {
 	store := keywordStore(t)
 	kw := KeywordSearch(context.Background(), store, "the and for")

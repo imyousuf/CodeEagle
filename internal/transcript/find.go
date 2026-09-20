@@ -91,6 +91,10 @@ type Hit struct {
 	// the query the meeting covers with rare words counting for more, then
 	// most recent first.
 	Score float64
+	// Relevance is a decision model's probability that the meeting answers
+	// the question, set only when a Reranker judged it.
+	Relevance float64
+	Judged    bool
 }
 
 // Found is the outcome of a search.

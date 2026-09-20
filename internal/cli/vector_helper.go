@@ -70,9 +70,10 @@ func syncVectorIndex(vs *vectorstore.VectorStore, cfg *config.Config, full bool,
 		loaded = false
 	}
 
-	// Check if provider/model changed.
+	// A changed provider, model, or embeddable text all mean the existing
+	// vectors cannot be mixed with new ones.
 	if loaded && vs.NeedsReindex() {
-		logFn("[vector] Embedding provider/model changed, rebuilding vector index...")
+		logFn("[vector] Rebuilding vector index: %s", vs.ReindexReason())
 		full = true
 	}
 

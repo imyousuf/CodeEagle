@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
@@ -294,14 +295,29 @@ func TestVectorStoreNeedsReindex(t *testing.T) {
 		t.Error("NeedsReindex should be true when no meta")
 	}
 
-	// Set meta matching current embedder.
+	// Set meta matching current embedder and text.
 	vs.meta = &VectorIndexMeta{
-		Provider: "mock",
-		Model:    "mock-embed",
+		Provider:    "mock",
+		Model:       "mock-embed",
+		TextVersion: EmbeddableTextVersion,
 	}
 	if vs.NeedsReindex() {
 		t.Error("NeedsReindex should be false when provider/model match")
 	}
+
+	// A version other than the current one is a text change; an index that
+	// recorded none cannot say what text it was built from, and is treated
+	// the same way.
+	for _, v := range []int{EmbeddableTextVersion - 1, 0} {
+		vs.meta.TextVersion = v
+		if !vs.NeedsReindex() {
+			t.Errorf("NeedsReindex should be true at text version %d", v)
+		}
+		if r := vs.ReindexReason(); !strings.Contains(r, "text version") {
+			t.Errorf("ReindexReason at %d = %q, want it to name the text version", v, r)
+		}
+	}
+	vs.meta.TextVersion = EmbeddableTextVersion
 
 	// Change provider in meta.
 	vs.meta.Provider = "other"

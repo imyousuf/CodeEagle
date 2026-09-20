@@ -96,7 +96,18 @@ var stopWords = map[string]bool{
 	"about": true, "did": true, "when": true, "who": true, "where": true,
 	"which": true, "our": true, "you": true, "into": true, "have": true,
 	"were": true, "been": true, "per": true, "via": true, "any": true,
+	// Two-letter function words. Two-letter terms are kept otherwise,
+	// because "VT", "IM", "EU" and "PR" are how people name things.
+	"of": true, "to": true, "in": true, "is": true, "we": true, "it": true,
+	"be": true, "do": true, "as": true, "at": true, "by": true, "on": true,
+	"or": true, "an": true, "if": true, "so": true, "no": true, "up": true,
+	"us": true, "my": true, "me": true, "he": true, "am": true, "vs": true,
+	"re": true, "ok": true, "hi": true, "oh": true, "its": true, "can": true,
 }
+
+// minTermLen is the shortest query word that is searched for. Anything
+// shorter is a letter.
+const minTermLen = 2
 
 // prefixMinLen is the shortest keyword allowed to match a longer token by
 // prefix. "auth" should find "authentication"; a three-letter word should
@@ -107,13 +118,13 @@ const prefixMinLen = 4
 // PrefixCredit is what a prefix match is worth relative to a whole-word one.
 const PrefixCredit = 0.7
 
-// QueryTerms extracts the keywords of a query: lower-cased, three or more
+// QueryTerms extracts the keywords of a query: lower-cased, two or more
 // characters, and not a stop word.
 func QueryTerms(query string) []string {
 	var terms []string
 	seen := make(map[string]bool)
 	for _, w := range Tokenize(query) {
-		if len(w) < 3 || stopWords[w] || seen[w] {
+		if len(w) < minTermLen || stopWords[w] || seen[w] {
 			continue
 		}
 		seen[w] = true

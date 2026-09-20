@@ -151,6 +151,9 @@ func showVectorStatus(cfg *config.Config, store graph.Store, branch string, out 
 		if embedder != nil && (meta.Provider != embedder.Name() || meta.Model != embedder.ModelName()) {
 			fmt.Fprintf(out, "    WARNING: index built with %s/%s but current provider is %s/%s\n",
 				meta.Provider, meta.Model, embedder.Name(), embedder.ModelName())
+		} else if !meta.TextCurrent() {
+			fmt.Fprintf(out, "    WARNING: index built from embeddable text version %d, current is %d; "+
+				"run 'codeeagle vectorindex' to rebuild\n", meta.TextVersion, vectorstore.EmbeddableTextVersion)
 		} else if embedder == nil {
 			fmt.Fprintf(out, "    WARNING: %s/%s no longer available, vector search disabled\n",
 				meta.Provider, meta.Model)

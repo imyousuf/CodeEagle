@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -223,18 +225,91 @@ func (vs *VectorStore) Search(ctx context.Context, query string, topK int) ([]Se
 // the remedy is a rebuild, not a wider search.
 const maxStaleWiden = 4
 
-// searchLocked runs the nearest-neighbour walk. The candidate heap is
-// bounded by ef, so asking for more results than that returns the tail in
-// whatever order the walk happened to visit it: a caller who wants 200
-// candidates to rerank has to be given 200 real ones. The wider search costs
-// milliseconds and the setting is restored afterwards.
+// exactSearchLimit is the index size up to which every vector is compared
+// with the query instead of walking the graph.
+//
+// Measured on a 51,000-vector index: the walk returned none of the ten
+// nearest segments for any of five queries — its top-200 sat at cosine
+// 0.28-0.40 while the true nearest were at 0.61-0.68 — and it finished in
+// 1.4ms, which is not the cost of visiting a connected graph of that size.
+// Comparing every vector takes tens of milliseconds at this scale and is
+// exact. The walk is kept for indices where that would no longer be true.
+const exactSearchLimit = 250_000
+
+// searchLocked returns the k nearest chunks to the query.
 func (vs *VectorStore) searchLocked(queryVec []float32, k int) []hnsw.Node[string] {
+	if vs.idx.Len() <= exactSearchLimit {
+		if out, err := vs.exactSearch(queryVec, k); err == nil {
+			return out
+		}
+	}
+	// The candidate heap is bounded by ef, so asking for more results than
+	// that returns the tail in whatever order the walk happened to visit
+	// it: a caller who wants 200 candidates to rerank has to be given 200
+	// real ones. The setting is restored afterwards.
 	if k > vs.idx.EfSearch {
 		prev := vs.idx.EfSearch
 		vs.idx.EfSearch = k
 		defer func() { vs.idx.EfSearch = prev }()
 	}
 	return vs.idx.Search(queryVec, k)
+}
+
+// exactSearch compares the query with every indexed vector. The chunk
+// entries name every key the index holds; the vectors themselves are read
+// from the graph, which keeps them in memory.
+func (vs *VectorStore) exactSearch(queryVec []float32, k int) ([]hnsw.Node[string], error) {
+	type candidate struct {
+		key  string
+		vec  []float32
+		dist float32
+	}
+	var qn float64
+	for _, x := range queryVec {
+		qn += float64(x) * float64(x)
+	}
+	qn = math.Sqrt(qn)
+
+	var cands []candidate
+	err := vs.vecDB.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		opts.Prefix = []byte(prefixChunk)
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		for it.Seek(opts.Prefix); it.Valid(); it.Next() {
+			key := strings.TrimPrefix(string(it.Item().Key()), prefixChunk)
+			vec, ok := vs.idx.Lookup(key)
+			if !ok || len(vec) != len(queryVec) {
+				continue
+			}
+			// One pass for the dot product and the vector's norm; the
+			// query's norm is fixed.
+			var dot, vn float64
+			for i, x := range vec {
+				dot += float64(x) * float64(queryVec[i])
+				vn += float64(x) * float64(x)
+			}
+			dist := float32(1)
+			if vn > 0 && qn > 0 {
+				dist = float32(1 - dot/(math.Sqrt(vn)*qn))
+			}
+			cands = append(cands, candidate{key: key, vec: vec, dist: dist})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(cands, func(i, j int) bool { return cands[i].dist < cands[j].dist })
+	if len(cands) > k {
+		cands = cands[:k]
+	}
+	out := make([]hnsw.Node[string], len(cands))
+	for i, c := range cands {
+		out[i] = hnsw.MakeNode(c.key, c.vec)
+	}
+	return out, nil
 }
 
 // StaleInLastSearch reports how many of the vectors the last search
@@ -495,6 +570,7 @@ func (vs *VectorStore) Rebuild(ctx context.Context) error {
 	vs.meta.Overlap = vs.chunk.Overlap
 	vs.meta.UpdatedAt = now
 	vs.meta.NodeCount = nodeCount
+	vs.meta.TextVersion = EmbeddableTextVersion
 	vs.mu.Unlock()
 
 	return nil
@@ -600,14 +676,37 @@ func (vs *VectorStore) Len() int {
 	return vs.idx.Len()
 }
 
-// NeedsReindex checks if the current index was built with a different provider/model.
+// NeedsReindex reports whether the index must be rebuilt in full: it was
+// built with a different provider or model, or from an earlier version of
+// the embeddable text. Either way its vectors and new ones would not share a
+// space, and an incremental update would mix them without anything failing.
 func (vs *VectorStore) NeedsReindex() bool {
 	vs.mu.RLock()
 	defer vs.mu.RUnlock()
 	if vs.meta == nil {
 		return true
 	}
-	return vs.meta.Provider != vs.embedder.Name() || vs.meta.Model != vs.embedder.ModelName()
+	return vs.meta.Provider != vs.embedder.Name() ||
+		vs.meta.Model != vs.embedder.ModelName() ||
+		!vs.meta.TextCurrent()
+}
+
+// ReindexReason says why NeedsReindex is true, for telling the user what
+// changed rather than only that something did.
+func (vs *VectorStore) ReindexReason() string {
+	vs.mu.RLock()
+	defer vs.mu.RUnlock()
+	switch {
+	case vs.meta == nil:
+		return "no index metadata"
+	case vs.meta.Provider != vs.embedder.Name() || vs.meta.Model != vs.embedder.ModelName():
+		return fmt.Sprintf("index built with %s/%s, current provider is %s/%s",
+			vs.meta.Provider, vs.meta.Model, vs.embedder.Name(), vs.embedder.ModelName())
+	case !vs.meta.TextCurrent():
+		return fmt.Sprintf("index built from embeddable text version %d, current is %d",
+			vs.meta.TextVersion, EmbeddableTextVersion)
+	}
+	return ""
 }
 
 // --- internal helpers ---

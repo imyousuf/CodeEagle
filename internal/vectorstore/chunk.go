@@ -135,6 +135,16 @@ func findOverlapEnd(_, _ string) int {
 	return 0
 }
 
+// EmbeddableTextVersion identifies what EmbeddableText produces. It is
+// recorded in the index and compared on open: vectors computed from an
+// earlier version of the text sit in a different place from ones computed
+// from the current version, and an index holding both ranks them against
+// each other as if they were comparable. Bump it whenever the text changes.
+//
+//	1: doc comment / signature, with package, file and qualified name
+//	2: topics embed from their label and aliases
+const EmbeddableTextVersion = 2
+
 // EmbeddableText returns the text to embed for a graph node.
 // It enriches the raw content (doc comment / signature) with contextual
 // metadata — package name, file path, qualified name, and architectural

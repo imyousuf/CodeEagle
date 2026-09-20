@@ -78,7 +78,7 @@ Use --force to rebuild even if an index already exists.`,
 			}
 
 			if loaded && vs.NeedsReindex() {
-				logFn("Embedding provider/model changed, rebuilding...")
+				logFn("Rebuilding: %s", vs.ReindexReason())
 			}
 
 			logFn("Building vector index from graph (branch: %s)...", currentBranch)

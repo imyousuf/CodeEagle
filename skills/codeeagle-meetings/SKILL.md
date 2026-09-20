@@ -27,9 +27,12 @@ codeeagle meetings search --only follow-up --person Mona --json
 
 Words match whole and case-insensitively ("AGI" does not match "messaging"),
 a word of four or more letters also matches the start of a longer one, and an
-initialism counts as one with its expansion. Nothing here calls a model.
-`codeeagle rag "<words>"` searches by meaning instead, across code and
-documents as well as meetings.
+initialism counts as one with its expansion. When `transcripts.jev_api_key` is
+configured, the matched meetings are ordered by a decision model's probability
+that each one answers the question (printed as `p=0.82` beside the meeting;
+the header says what it cost); `--no-rerank` keeps word-match order. No
+generative model is ever called. `codeeagle rag "<words>"` searches by meaning
+instead, across code and documents as well as meetings.
 
 ## Listing and reading meetings
 
