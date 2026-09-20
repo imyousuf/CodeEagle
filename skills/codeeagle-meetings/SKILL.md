@@ -34,6 +34,19 @@ the header says what it cost); `--no-rerank` keeps word-match order. No
 generative model is ever called. `codeeagle rag "<words>"` searches by meaning
 instead, across code and documents as well as meetings.
 
+A search also reaches past the words themselves. Each meeting names its subject
+in its own words, so "AGI" alone would miss one filed under "AGI feasibility
+debate"; related topics are linked by probability and a search follows those
+links, discounting each hop so a direct match always outranks a neighbour.
+
+```bash
+codeeagle meetings search AGI --breadth wide     # follow further, more recall
+codeeagle meetings search AGI --breadth none     # only what matched the words
+```
+
+`none`, `narrow`, `default` and `wide`. This depends on the links existing --
+see *Linking topics* below. Without them every breadth behaves like `none`.
+
 ## Listing and reading meetings
 
 ```bash
@@ -73,6 +86,33 @@ codeeagle meetings topics agi                  # only the topics containing a wo
 codeeagle meetings sync --dry-run              # scope and token cost, no model call
 codeeagle meetings sync                        # enrich and index; skips unchanged
 codeeagle meetings watch                       # index new recordings as they appear
+```
+
+`watch` runs in the foreground and sweeps on an interval rather than waiting on
+filesystem events, because a recording is written over the course of a meeting
+and an event arrives while the file is still growing. Nothing installs it as a
+service, so recordings made while it is not running wait for the next `sync` or
+the next `watch` — whose first sweep catches up.
+
+### Linking topics
+
+One-off, and only useful with `transcripts.jev_api_key` set. Judging which
+topics are about the same thing is what makes `--breadth` find anything:
+
+```bash
+codeeagle meetings relate --dry-run            # count the pairs, judge none
+codeeagle meetings relate                      # judge them
+```
+
+New meetings are linked as they are indexed, so this is a catch-up for a corpus
+indexed before the links existed. `codeeagle meetings taxonomy` groups the flat
+topic labels into concepts, and `--rebuild` regroups them from scratch.
+
+### Moving a corpus
+
+```bash
+codeeagle meetings migrate --from <branch>     # move an older corpus into scope
+codeeagle meetings migrate --from-db <path>    # ...or out of another database
 ```
 
 ## Reading the output honestly
