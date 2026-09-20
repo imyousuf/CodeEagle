@@ -139,6 +139,14 @@ func showVectorStatus(cfg *config.Config, store graph.Store, branch string, out 
 		fmt.Fprintf(out, "    Indexed nodes:  %d\n", meta.NodeCount)
 		fmt.Fprintf(out, "    Index file:     %s (%.1fKB)\n", idxPath, float64(info.Size())/1024)
 		fmt.Fprintf(out, "    Last updated:   %s\n", meta.UpdatedAt.Format("2006-01-02 15:04:05"))
+		// An interrupted rebuild leaves a full-looking index whose vectors
+		// are mostly gone. The count above is read from the graph on disk
+		// and says nothing is wrong, so it has to be said here.
+		if meta.Rebuilding {
+			fmt.Fprintf(out, "    WARNING: a rebuild was interrupted; the stored vectors are an\n")
+			fmt.Fprintf(out, "             arbitrary fraction of the corpus and searches will be thin.\n")
+			fmt.Fprintf(out, "             run 'codeeagle vectorindex --force' to rebuild\n")
+		}
 		// An index behind the graph returns thin, misleading results and
 		// nothing about a search says so; this is the place to say it.
 		if stale, missing, err := vs.Staleness(context.Background()); err == nil && (stale > 0 || missing > 0) {

@@ -20,6 +20,19 @@ type VectorIndexMeta struct {
 	// TextVersion is the EmbeddableTextVersion the vectors were computed
 	// from. Zero means the index predates the field being recorded.
 	TextVersion int `json:"text_version,omitempty"`
+	// Rebuilding marks an index whose rebuild began and did not finish.
+	//
+	// A rebuild deletes every stored chunk before embedding the first
+	// replacement, and the graph of vectors is only written back at the end.
+	// If the embedder fails in between -- the local server restarts, a quota
+	// is spent, a laptop sleeps -- the two halves disagree: the graph on disk
+	// still describes a full index, while the chunks it names are gone. Both
+	// the count reported by `status` and the health of the file look right,
+	// and searches quietly answer from whatever fraction survived.
+	//
+	// Set before the first deletion and cleared only once the rebuild has
+	// been saved, so an interrupted one is visible rather than silent.
+	Rebuilding bool `json:"rebuilding,omitempty"`
 }
 
 // TextCurrent reports whether the index was built from the current

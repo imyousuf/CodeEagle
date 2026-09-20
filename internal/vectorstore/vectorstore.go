@@ -546,6 +546,15 @@ func (vs *VectorStore) Rebuild(ctx context.Context) error {
 	vs.idx.Distance = hnsw.CosineDistance
 	vs.mu.Unlock()
 
+	// Record that a rebuild started, before the first deletion and durably,
+	// so that a failure between here and the end is visible afterwards. The
+	// chunks are about to go while the graph of vectors on disk still
+	// describes all of them; without this marker the two disagree silently
+	// and every later search answers from whatever survived.
+	if err := vs.markRebuilding(true); err != nil {
+		return fmt.Errorf("mark rebuild started: %w", err)
+	}
+
 	// Clear all chunk entries.
 	if err := vs.clearAllChunks(); err != nil {
 		return fmt.Errorf("clear chunks: %w", err)
@@ -587,9 +596,41 @@ func (vs *VectorStore) Rebuild(ctx context.Context) error {
 	vs.meta.UpdatedAt = now
 	vs.meta.NodeCount = nodeCount
 	vs.meta.TextVersion = EmbeddableTextVersion
+	vs.meta.Rebuilding = false
 	vs.mu.Unlock()
 
+	// Persisted here rather than left to the caller's Save: a caller that
+	// returns early on an error would otherwise leave the marker set, which
+	// is correct, but one that succeeds must clear it even if saving the
+	// graph fails afterwards for an unrelated reason.
+	if err := vs.markRebuilding(false); err != nil {
+		return fmt.Errorf("mark rebuild finished: %w", err)
+	}
+
 	return nil
+}
+
+// markRebuilding persists whether a rebuild is in progress.
+//
+// Written straight through to the store rather than held in memory, because
+// the failure it guards against is the process not reaching its own cleanup.
+func (vs *VectorStore) markRebuilding(active bool) error {
+	vs.mu.Lock()
+	if vs.meta == nil {
+		vs.meta = &VectorIndexMeta{CreatedAt: time.Now(), Version: 1}
+	}
+	vs.meta.Rebuilding = active
+	meta := *vs.meta
+	vs.mu.Unlock()
+	return vs.saveMeta(&meta)
+}
+
+// Rebuilding reports whether a rebuild began and never finished, which makes
+// the stored vectors an arbitrary fraction of the corpus.
+func (vs *VectorStore) Rebuilding() bool {
+	vs.mu.RLock()
+	defer vs.mu.RUnlock()
+	return vs.meta != nil && vs.meta.Rebuilding
 }
 
 // Load loads the HNSW index from disk and metadata from BadgerDB.
