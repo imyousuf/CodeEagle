@@ -27,10 +27,12 @@ terminal or from Claude Code.
 6. [Google Cloud credentials](#6-google-cloud-credentials-only-for-vertex-ai)
 7. [Index your meeting recordings](#7-index-your-meeting-recordings)
 8. [Install Ollama](#8-install-ollama-for-search-and-document-topics)
-9. [Troubleshooting](#troubleshooting)
+9. [Add a decision model](#9-add-a-decision-model-optional-but-worth-it)
+10. [Troubleshooting](#troubleshooting)
 
 Steps 1–3 get you a working setup. Steps 5–7 are only needed if you want
-meeting transcripts. Step 8 is needed for semantic search.
+meeting transcripts. Step 8 is needed for semantic search. Step 9 is optional
+and makes the meeting features noticeably better.
 
 ---
 
@@ -450,6 +452,105 @@ minutes.
 > **A graphics card makes a large difference.** Ollama uses one automatically if
 > you have one. Without one this still works, just slower. `ollama ps` shows
 > whether the model is on the GPU or the CPU.
+
+---
+
+## 9. Add a decision model (optional, but worth it)
+
+Everything so far works without this step. Adding it makes three things
+meaningfully better, for well under a dollar a month of ordinary use.
+
+### Why you would want it
+
+A language model writes text. Ask one how confident it is and you get a
+confident-sounding number, because it is writing a number that looks right. A
+*decision model* answers a yes-or-no question with a probability that actually
+means something.
+
+CodeEagle uses one — TypeSafe Jev — for three jobs where being *sure* matters
+more than being fluent:
+
+**Knowing who spoke.** A recording labels voices "Person 1", "Person 2". Working
+out who they are is guesswork, and a wrong name is worse than no name: it puts
+one person's words in another's mouth, quietly, forever. Measured on a real
+corpus, the decision model correctly refused to name a speaker whose apparent
+name came from a product called "Mark One", and another that was a television
+playing in the room. A language model confidently named both.
+
+**Finding meetings you did not know to ask for.** Every meeting names its
+subject in its own words, so a search for "superintelligence" misses the meeting
+filed under "AGI feasibility debate". The decision model judges which topics are
+about the same thing, and search follows those links. In one real example this
+surfaced a discussion titled *"1:1: performance vs behavior, CMP roadmap"* —
+nothing in that title suggests AI risk, but it contained a topic called
+"Anthropic AI doom beliefs".
+
+**Putting the best answer first.** Word matching finds meetings that *mention*
+your words. It cannot tell a sixteen-minute debate from a passing remark. The
+decision model reads the candidates and orders them by how well each actually
+answers the question. In the AGI example it moved the real debate from third
+place to first.
+
+Without a key, all three degrade gracefully: speakers stay unidentified,
+searches stay word-matched, results stay in date order. Nothing breaks.
+
+### What it costs
+
+Input is billed at about four cents per million tokens; output is free.
+
+| What | Cost |
+|---|---|
+| A search with re-ranking | under $0.001 |
+| Indexing a meeting | a fraction of a cent |
+| Linking every topic in a 614-meeting archive, once | about $0.72 |
+
+### Setting it up
+
+Get a key from [typesafe.ai](https://typesafe.ai). It begins `apikey_`.
+
+Store it in your keyring rather than in the file, exactly as in
+[step 5](#5-store-your-api-keys-safely):
+
+```bash
+keyring set typesafe.ai you@example.com
+```
+
+Then in `~/.CodeEagle/config.yaml`, under `transcripts:`:
+
+```yaml
+transcripts:
+  jev_api_key: $(keyring get typesafe.ai you@example.com)
+```
+
+Check it took:
+
+```bash
+codeeagle meetings search "anything" --breadth default
+```
+
+If the header mentions the model and a judged count, it is working. If not,
+the search still runs — it simply falls back to word order.
+
+### Linking your topics
+
+One-off, and only if you index meetings. First see what it will cost:
+
+```bash
+codeeagle meetings relate --dry-run
+```
+
+That prints the number of pairs and tokens. Then:
+
+```bash
+codeeagle meetings relate
+```
+
+About three minutes for a few hundred meetings. New meetings are linked
+automatically as they are indexed, so this is a one-time catch-up.
+
+> For what a decision model is, where it helps and where it does not, see
+> [jev.md](jev.md). For which model versions are used and how to change them,
+> see [models.md](models.md).
 
 ---
 

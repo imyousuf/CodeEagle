@@ -14,7 +14,7 @@ import (
 
 const (
 	defaultAnthropicBaseURL = "https://api.anthropic.com"
-	defaultAnthropicModel   = "claude-sonnet-4-5-20250929"
+	defaultAnthropicModel   = "claude-sonnet-5"
 	anthropicAPIVersion     = "2023-06-01"
 	defaultMaxTokens        = 4096
 )

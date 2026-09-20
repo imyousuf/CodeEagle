@@ -35,7 +35,7 @@ type ProjectConf struct {
 type DocsConfig struct {
 	// Provider is the docs LLM provider ("ollama", "vertex-ai").
 	Provider string `mapstructure:"provider" yaml:"provider,omitempty"`
-	// Model is the multimodal model name (e.g., "qwen3.5:9b", "gemini-2.0-flash").
+	// Model is the multimodal model name (e.g., "qwen3.5:9b", "gemini-3.8-flash").
 	Model string `mapstructure:"model" yaml:"model,omitempty"`
 	// Project is the GCP project ID (for Vertex AI).
 	Project string `mapstructure:"project" yaml:"project,omitempty"`
@@ -579,7 +579,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("graph.storage", "embedded")
 
 	v.SetDefault("agents.llm_provider", "anthropic")
-	v.SetDefault("agents.model", "claude-sonnet-4-5-20250929")
+	v.SetDefault("agents.model", "claude-sonnet-5")
 	v.SetDefault("agents.auto_summarize", false)
 
 	v.SetDefault("docs.max_image_resolution", 1024)
