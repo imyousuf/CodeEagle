@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	defaultVertexAILocation = "us-central1"
-	defaultVertexAIModel    = "gemini-2.5-flash"
+	defaultVertexAILocation = "global"
+	defaultVertexAIModel    = "gemini-3.8-flash"
 )
 
 func init() {

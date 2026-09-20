@@ -59,8 +59,22 @@ you already have Claude Code installed.
 
 ### Vertex AI (`agents.llm_provider: vertex-ai`)
 
-Runs Claude or Gemini on your own GCP project. Default `gemini-2.5-flash`.
-Requires Application Default Credentials — see `installation.md`.
+Runs Gemini on your own GCP project. Default `gemini-3.8-flash`. Requires
+Application Default Credentials — see `installation.md`.
+
+**Location matters as much as the model.** Newer Gemini releases are served
+from `global` and are absent from regional endpoints, so the default location
+is `global`. `gemini-3.8-flash` returns 404 in `us-central1` while working
+perfectly in `global`; `gemini-2.5-flash` works in both. If a model you can
+see in the catalogue returns "was not found", try `location: global` before
+concluding the identifier is wrong.
+
+**Claude is not reachable here.** Anthropic publishes `claude-opus-5`,
+`claude-sonnet-5` and `claude-haiku-4-5` on Vertex, and they appear in the
+catalogue, but this client is built on Google's `genai` SDK, which addresses
+`publishers/google` and speaks Gemini's API. Claude on Vertex needs the
+Anthropic messages API. Use the `anthropic` provider or the Claude CLI
+instead.
 
 ### Baseten (`transcripts.provider: baseten`)
 
@@ -153,7 +167,8 @@ date above, not taken from a vendor page:
 
 | Checked | Result |
 |---|---|
-| `vertex-ai` / `gemini-2.5-flash` | answered |
+| `vertex-ai` / `gemini-3.8-flash` (in `global`) | answered |
+| `vertex-ai` / `gemini-2.5-flash` | answered, in `global` and `us-central1` |
 | `baseten` / `deepseek-ai/DeepSeek-V4.1-Flash` | answered |
 | `ollama` / `qwen3.5:9b` | answered |
 | `ollama` / `nomic-embed-text-v2-moe` | 768-dim vector returned |
@@ -164,14 +179,20 @@ date above, not taken from a vendor page:
 `claude-haiku-5` was checked and **does not exist** — the catalogue rejects it.
 Haiku 4.5 is the current Haiku.
 
-Two identifiers were found wrong by this exercise and corrected:
-`gemini-2.0-flash`, which had been the default, no longer resolves; and
-`gemini-3.8-flash` does not exist either. `gemini-2.5-flash` is what this
-project can actually reach.
+Found wrong by this exercise and corrected: `gemini-2.0-flash`, which had been
+the default, no longer resolves anywhere. `gemini-3.8-flash` does exist and is
+now the default — it was briefly recorded here as non-existent because it was
+only tried in `us-central1`, where it 404s. The fault was the location, not the
+name, and the default location moved to `global` as a result.
+
+Also established: Claude models cannot be reached through the `vertex-ai`
+provider at all, in any location, because the client speaks only Gemini's API.
+That contradicted what the architecture notes claimed, and they have been
+corrected.
 
 Not verified: the direct `anthropic` provider, for want of an API key on the
-machine used. Its identifiers are the same ones the Claude CLI accepted, so
-they are right; the code path is not exercised.
+machine used. Its identifiers are the ones both the Claude CLI and the Vertex
+catalogue accept, so they are right; the code path is not exercised.
 
 The lesson worth keeping: a default nobody calls goes stale silently, and a
 model identifier is only true on the day it is tested. Re-run this table when

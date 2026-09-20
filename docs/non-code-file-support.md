@@ -150,7 +150,7 @@ No `include` patterns are needed — `repositories` entries define what is index
 docs:
   provider: ollama              # or "vertex-ai"
   model: qwen3.5:9b             # multimodal model (text + images), ~10-14GB VRAM
-  # model: gemini-2.5-flash     # for vertex-ai
+  # model: gemini-3.8-flash     # for vertex-ai
   max_image_resolution: 1024    # downscale longest edge before LLM (pixels)
   context_window: 120000        # Ollama num_ctx — required for large files (default 120K)
   disable_thinking: false       # set true to add /no_think (saves tokens, may reduce quality)
@@ -812,7 +812,7 @@ func init() {
 }
 ```
 
-Uses the Gemini API with `gemini-2.5-flash`. For images, sends the image as an inline content part with MIME type. For text, sends as a text content part. Same prompts as Ollama. JSON output mode is requested via `response_mime_type: "application/json"` in generation config.
+Uses the Gemini API with `gemini-3.8-flash`. For images, sends the image as an inline content part with MIME type. For text, sends as a text content part. Same prompts as Ollama. JSON output mode is requested via `response_mime_type: "application/json"` in generation config.
 
 ### Auto-Detection
 

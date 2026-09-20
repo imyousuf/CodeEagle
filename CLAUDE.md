@@ -507,7 +507,7 @@ codeeagle/
 - **Face Detection:** OpenCV DNN (Caffe SSD detector + ONNX SFace recognizer) via `gocv.io/x/gocv`; 128-dim L2-normalized embeddings; requires `-tags faces` build and `libopencv-dev`
 - **Face Classification:** KNN-based with temporal decay, agglomerative hierarchical clustering, majority voting, auto-assignment at high confidence
 - **Graph Storage:** Embedded (BadgerDB with secondary indexes), branch-aware with fallback reads; separate face.db for face embeddings/clusters
-- **LLM Integration:** Anthropic API (direct), Vertex AI (Claude & Gemini on GCP), Baseten (OpenAI-compatible: GLM, DeepSeek, Kimi), Ollama, Claude CLI — extensible via a provider registry
+- **LLM Integration:** Anthropic API (direct), Vertex AI (Gemini on GCP — Claude is published there but this client speaks only Gemini's API), Baseten (OpenAI-compatible: GLM, DeepSeek, Kimi), Ollama, Claude CLI — extensible via a provider registry
 - **Structured output:** Providers that can enforce a JSON Schema do so (`llm.StructuredClient`); those that cannot are asked for JSON and their reply is salvaged
 - **Meeting transcripts:** Diarized JSON, content-sniffed; deterministic name-hint extraction with Jaro-Winkler variant matching, LLM adjudication, cross-recording identity resolution
 - **Config:** viper (YAML config loading)

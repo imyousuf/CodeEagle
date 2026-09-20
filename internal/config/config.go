@@ -35,7 +35,7 @@ type ProjectConf struct {
 type DocsConfig struct {
 	// Provider is the docs LLM provider ("ollama", "vertex-ai").
 	Provider string `mapstructure:"provider" yaml:"provider,omitempty"`
-	// Model is the multimodal model name (e.g., "qwen3.5:9b", "gemini-2.5-flash").
+	// Model is the multimodal model name (e.g., "qwen3.5:9b", "gemini-3.8-flash").
 	Model string `mapstructure:"model" yaml:"model,omitempty"`
 	// Project is the GCP project ID (for Vertex AI).
 	Project string `mapstructure:"project" yaml:"project,omitempty"`
@@ -587,7 +587,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("graph.storage", "embedded")
 
 	v.SetDefault("agents.llm_provider", "anthropic")
-	v.SetDefault("agents.model", "claude-sonnet-5")
+	// Deliberately unset: each provider supplies its own default, and a
+	// provider-agnostic one is wrong for every provider but the first. A
+	// Claude identifier handed to Gemini's API is a 404 that reads like the
+	// model was withdrawn, which is the wrong thing to go looking for.
+	v.SetDefault("agents.model", "")
 	v.SetDefault("agents.auto_summarize", false)
 
 	v.SetDefault("docs.max_image_resolution", 1024)
