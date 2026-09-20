@@ -12,7 +12,7 @@ import (
 
 const (
 	defaultVertexAILocation = "us-central1"
-	defaultVertexAIModel    = "gemini-3.8-flash"
+	defaultVertexAIModel    = "gemini-2.5-flash"
 )
 
 func init() {

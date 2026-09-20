@@ -15,11 +15,11 @@ Last reviewed: 2026-09-20.
 |---|---|---|---|
 | Agents (plan, design, review, ask) | `claude-cli` | whatever `claude` resolves | `internal/config/config.go` |
 | Agents, direct API | `anthropic` | `claude-sonnet-5` | `internal/llm/anthropic.go` |
-| Agents, on GCP | `vertex-ai` | `gemini-3.8-flash` | `internal/llm/vertexai.go` |
+| Agents, on GCP | `vertex-ai` | `gemini-2.5-flash` | `internal/llm/vertexai.go` |
 | Meeting enrichment | `baseten` | `deepseek-ai/DeepSeek-V4.1-Flash` | `internal/config/config.go` |
 | Speaker adjudication, topic relating, search re-ranking | Jev | `jev-1.13.0` | `pkg/jev/client.go` |
 | Document and image description | `ollama` | `qwen3.5:9b` | `internal/docs/ollama.go` |
-| Document and image description, on GCP | `vertex-ai` | `gemini-3.8-flash` | `internal/docs/vertex.go` |
+| Document and image description, on GCP | `vertex-ai` | `gemini-2.5-flash` | `internal/docs/vertex.go` |
 | Embeddings (semantic search) | `ollama` | `nomic-embed-text-v2-moe` | `internal/embedding/ollama.go` |
 | Embeddings, on GCP | `vertex-ai` | `gemini-embedding-001` | `internal/embedding/vertex.go` |
 
@@ -59,7 +59,7 @@ you already have Claude Code installed.
 
 ### Vertex AI (`agents.llm_provider: vertex-ai`)
 
-Runs Claude or Gemini on your own GCP project. Default `gemini-3.8-flash`.
+Runs Claude or Gemini on your own GCP project. Default `gemini-2.5-flash`.
 Requires Application Default Credentials — see `installation.md`.
 
 ### Baseten (`transcripts.provider: baseten`)
@@ -146,9 +146,33 @@ about eight minutes against a local Ollama, and free.
 
 ---
 
-## A note on verification
+## Verified
 
-The Claude identifiers here are current as of the date above. The Gemini and
-Baseten identifiers follow those vendors' own catalogues, which move
-independently — check them against the vendor before relying on a default in a
-new deployment, rather than trusting this page alone.
+Every default in this document was exercised against the live provider on the
+date above, not taken from a vendor page:
+
+| Checked | Result |
+|---|---|
+| `vertex-ai` / `gemini-2.5-flash` | answered |
+| `baseten` / `deepseek-ai/DeepSeek-V4.1-Flash` | answered |
+| `ollama` / `qwen3.5:9b` | answered |
+| `ollama` / `nomic-embed-text-v2-moe` | 768-dim vector returned |
+| `claude-cli` | answered |
+| `claude-sonnet-5`, `claude-opus-5`, `claude-haiku-4-5-20251001` | all answered |
+| Jev `jev-1.13.0` | all three primitives answered |
+
+`claude-haiku-5` was checked and **does not exist** — the catalogue rejects it.
+Haiku 4.5 is the current Haiku.
+
+Two identifiers were found wrong by this exercise and corrected:
+`gemini-2.0-flash`, which had been the default, no longer resolves; and
+`gemini-3.8-flash` does not exist either. `gemini-2.5-flash` is what this
+project can actually reach.
+
+Not verified: the direct `anthropic` provider, for want of an API key on the
+machine used. Its identifiers are the same ones the Claude CLI accepted, so
+they are right; the code path is not exercised.
+
+The lesson worth keeping: a default nobody calls goes stale silently, and a
+model identifier is only true on the day it is tested. Re-run this table when
+changing one.

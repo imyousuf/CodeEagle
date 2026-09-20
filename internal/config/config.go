@@ -35,7 +35,7 @@ type ProjectConf struct {
 type DocsConfig struct {
 	// Provider is the docs LLM provider ("ollama", "vertex-ai").
 	Provider string `mapstructure:"provider" yaml:"provider,omitempty"`
-	// Model is the multimodal model name (e.g., "qwen3.5:9b", "gemini-3.8-flash").
+	// Model is the multimodal model name (e.g., "qwen3.5:9b", "gemini-2.5-flash").
 	Model string `mapstructure:"model" yaml:"model,omitempty"`
 	// Project is the GCP project ID (for Vertex AI).
 	Project string `mapstructure:"project" yaml:"project,omitempty"`
@@ -311,6 +311,14 @@ type AgentsConfig struct {
 	AutoSummarize bool `mapstructure:"auto_summarize" yaml:"auto_summarize"`
 	// AutoLink enables LLM-assisted cross-service edge detection after static linking.
 	AutoLink bool `mapstructure:"auto_link" yaml:"auto_link"`
+	// APIKey is the credential for whichever provider is configured.
+	//
+	// Expanded like any other value, so it belongs in a keyring rather than
+	// in the file: `api_key: $(keyring get anthropic.com you@example.com)`.
+	// For Anthropic the ANTHROPIC_API_KEY environment variable is still read
+	// when this is empty; for every other provider this is the only way to
+	// supply one.
+	APIKey string `mapstructure:"api_key" yaml:"api_key,omitempty"`
 	// CredentialsFile is the path to a GCP service account credentials JSON file (for Vertex AI).
 	CredentialsFile string `mapstructure:"credentials_file" yaml:"credentials_file,omitempty"`
 	// BaseURL is the base URL for the LLM provider API (e.g. Ollama endpoint).

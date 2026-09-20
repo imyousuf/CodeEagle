@@ -49,6 +49,11 @@ pair twice. It runs as meetings are indexed when transcripts.jev_api_key is
 configured; run it by hand to cover a corpus indexed before that, or after
 building the vector index, which adds the two embedding signals.
 
+The gate errs towards leaving a pair unlinked: measured against
+hand-labelled pairs, everything a search follows by default was related,
+and roughly two related pairs in five were not linked. An absent edge says
+nothing was proven, not that nothing is there.
+
 --dry-run counts the pairs still to judge and what they would cost.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load()

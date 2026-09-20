@@ -444,6 +444,11 @@ type RelatedTopic struct {
 // RelatedTopics returns the topics judged related to one at or above a
 // probability, most probable first. Every judged pair is stored, so the
 // threshold is not optional: at zero it lists the pairs found unrelated too.
+//
+// An absent edge is not evidence of unrelatedness. Measured against
+// hand-labelled pairs, the default gate admits only related pairs but
+// roughly two related pairs in five fall below it, and a pair no signal
+// proposed was never judged at all.
 func RelatedTopics(ctx context.Context, store graph.Store, topicID string, minProbability float64) ([]RelatedTopic, error) {
 	edges, err := store.GetEdges(ctx, topicID, graph.EdgeRelatedTo)
 	if err != nil {

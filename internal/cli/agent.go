@@ -58,7 +58,15 @@ Available agents:
 
 // createLLMClient creates an LLM client from the config and environment.
 func createLLMClient(cfg *config.Config) (llm.Client, error) {
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	// The configured key first: it is what the documentation tells people to
+	// set, and for any provider other than Anthropic it is the only way to
+	// supply one. Reading only the environment variable meant `agents.api_key`
+	// was accepted, expanded, and then silently dropped -- which fails as
+	// "API key is required" while the key sits right there in the file.
+	apiKey := cfg.Agents.APIKey
+	if apiKey == "" {
+		apiKey = os.Getenv("ANTHROPIC_API_KEY")
+	}
 
 	provider := cfg.Agents.LLMProvider
 	if provider == "" {

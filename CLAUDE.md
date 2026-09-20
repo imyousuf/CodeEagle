@@ -254,9 +254,16 @@ Design constraints that came out of measuring the real corpus:
   asked about twice. Over the whole corpus that was 31,700 pairs for about
   $0.75, and it connected the cluster: feasibility ~ alignment 0.65 (found
   by what was said), alignment ~ recursive self-improvement 0.81 (same
-  meeting). Two rules keep expansion from dragging in junk, both measured:
-  a search expands only from labels that covered the whole query, and a
-  multi-hop path must keep its cumulative probability above the gate —
+  meeting). The four have a measured blind spot: 33,328 pairs were
+  reachable only through a third related topic, and a judged sample put a
+  fifth of them at the default gate — about as many related pairs again as
+  the signals found. Search's second hop reaches them at query time; a
+  closure generator that proposes them for judging is a follow-up, not
+  part of this. The gate errs towards leaving a pair unlinked: roughly two
+  related pairs in five fall below it, so an absent edge is not evidence of
+  unrelatedness. Two rules keep expansion from dragging in junk, both
+  measured: a search expands only from labels that covered the whole query,
+  and a multi-hop path must keep its cumulative probability above the gate —
   without them "sticky board" reached 233 meetings through "HITL vs sticky
   notes" and hub topics; with them, 40 at wide and 2 at default.
 - **Meetings are not branch-scoped.** They live outside the per-branch key scopes
@@ -399,10 +406,12 @@ graph:
   storage: embedded  # embedded (BadgerDB)
 
 agents:
-  llm_provider: claude-cli  # claude-cli, anthropic, or vertex-ai
-  model: sonnet
+  llm_provider: claude-cli  # claude-cli, anthropic, vertex-ai, baseten, ollama
+  model: sonnet             # see docs/models.md for every identifier
   auto_link: true           # LLM-assisted cross-service edge detection
-  # api_key: sk-...          # for direct Anthropic API
+  # api_key: $(keyring get anthropic.com you@example.com)
+  #                          # any provider; expanded like any other value.
+  #                          # ANTHROPIC_API_KEY is still read when unset.
   # project: my-gcp-project  # for Vertex AI
   # location: us-central1    # for Vertex AI
 
