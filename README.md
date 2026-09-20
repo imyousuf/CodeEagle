@@ -371,9 +371,10 @@ graph:
   storage: embedded
 
 agents:
-  llm_provider: claude-cli   # claude-cli, anthropic, or vertex-ai
-  model: sonnet
+  llm_provider: claude-cli   # claude-cli, anthropic, vertex-ai, baseten, ollama
+  model: sonnet              # see docs/models.md for every identifier
   auto_link: true            # enable LLM-assisted cross-service edge detection
+  # api_key: $(keyring get anthropic.com you@example.com)   # any provider
 
 docs:
   # provider: ollama          # auto-detected if omitted (ollama -> vertex-ai -> disabled)
@@ -537,8 +538,19 @@ ran in roughly a second.
 | Provider | Config | Auth |
 |----------|--------|------|
 | Claude CLI (default) | `llm_provider: claude-cli` | Claude Code installed and authenticated |
-| Anthropic API | `llm_provider: anthropic` | `ANTHROPIC_API_KEY` env var |
-| Vertex AI | `llm_provider: vertex-ai` | GCP Application Default Credentials + `project`, `location` |
+| Anthropic API | `llm_provider: anthropic` | `agents.api_key`, or the `ANTHROPIC_API_KEY` env var |
+| Vertex AI | `llm_provider: vertex-ai` | GCP Application Default Credentials + `project` |
+| Baseten | `llm_provider: baseten` | `agents.api_key` |
+| Ollama | `llm_provider: ollama` | nothing — a local server |
+
+Vertex AI serves its newer models from the `global` location, which is the
+default; set `location` only to pin an older one. Claude is published on Vertex
+but is not reachable through this provider, which speaks Gemini's API — use the
+Anthropic provider or the Claude CLI.
+
+Which model each provider uses by default, and how to change one, is in
+[docs/models.md](docs/models.md). The decision model is explained in
+[docs/jev.md](docs/jev.md).
 
 ### Multi-Project Registry
 

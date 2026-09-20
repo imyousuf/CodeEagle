@@ -377,6 +377,11 @@ repositories:
   - path: /home/user/projects/shared-lib
     type: single
 
+# Other indices to search alongside this one, for `query` and `rag`. Reads
+# only; nothing is ever written outside the local index.
+federate:
+  - ~/.CodeEagle
+
 watch:
   exclude:
     - "**/node_modules/**"
@@ -494,6 +499,14 @@ codeeagle/
 ├── Makefile
 └── CLAUDE.md               # This file
 ```
+
+## Reference documents
+
+- `docs/installation.md` — step-by-step setup, including keyring and Google ADC
+- `docs/models.md` — every model used, its default, the file it lives in, and
+  what to check when changing a version
+- `docs/jev.md` — what the decision model is for, where it helps, where it does
+  not, and how to use the Go client
 
 ## Tech Stack
 
