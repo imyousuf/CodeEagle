@@ -59,6 +59,9 @@ type VectorStore struct {
 	// progress, when set, is called as a rebuild advances. A long rebuild
 	// that prints nothing gives no way to tell slow from stuck.
 	progress func(done, total int)
+	// stale counts the vectors the last search skipped because their
+	// nodes had left the graph.
+	stale int
 }
 
 // Embedder returns the provider this store embeds with.
@@ -162,45 +165,131 @@ func (vs *VectorStore) Available() bool {
 // Search performs a semantic search and returns the top-K results.
 func (vs *VectorStore) Search(ctx context.Context, query string, topK int) ([]SearchResult, error) {
 	vs.mu.RLock()
-	defer vs.mu.RUnlock()
-
-	if vs.idx.Len() == 0 {
+	empty := vs.idx.Len() == 0
+	vs.mu.RUnlock()
+	if empty {
 		return nil, nil
 	}
 
+	// The network round trip happens outside the lock, so concurrent
+	// searchers wait on the index and not on each other's embedding calls.
 	queryVec, err := vs.embedder.EmbedQuery(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("embed query: %w", err)
 	}
 
-	neighbors := vs.idx.Search(queryVec, topK)
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
 
+	// A vector whose node has since left the graph is skipped, and an index
+	// that has fallen behind the graph can have a third of its neighbours
+	// in that state. Skipping them silently shrank every top-k, so the walk
+	// widens until it has the number asked for or has looked far enough.
 	var results []SearchResult
-	for _, n := range neighbors {
-		nodeID, chunkIdx := parseChunkKey(n.Key)
-		if nodeID == "" {
-			continue
+	for k := topK; ; k *= 2 {
+		results = results[:0]
+		vs.stale = 0
+		for _, n := range vs.searchLocked(queryVec, k) {
+			nodeID, chunkIdx := parseChunkKey(n.Key)
+			if nodeID == "" {
+				continue
+			}
+			node, err := vs.graphDB.GetNode(ctx, nodeID)
+			if err != nil {
+				vs.stale++
+				continue
+			}
+			// CosineDistance returns distance (0 = identical), convert to similarity score.
+			score := 1.0 - float64(hnsw.CosineDistance(queryVec, n.Value))
+			results = append(results, SearchResult{
+				Node:       node,
+				Score:      score,
+				ChunkText:  vs.getChunkText(nodeID, chunkIdx),
+				ChunkIndex: chunkIdx,
+			})
 		}
-
-		node, err := vs.graphDB.GetNode(ctx, nodeID)
-		if err != nil {
-			continue // node may have been deleted
+		if len(results) >= topK || vs.stale == 0 || k >= vs.idx.Len() || k >= maxStaleWiden*topK {
+			break
 		}
+	}
+	if len(results) > topK {
+		results = results[:topK]
+	}
+	return results, nil
+}
 
-		chunkText := vs.getChunkText(nodeID, chunkIdx)
+// maxStaleWiden bounds how far past topK a search reaches to make up for
+// stale vectors. Beyond it the index is not slightly behind but wrong, and
+// the remedy is a rebuild, not a wider search.
+const maxStaleWiden = 4
 
-		// CosineDistance returns distance (0 = identical), convert to similarity score.
-		score := 1.0 - float64(hnsw.CosineDistance(queryVec, n.Value))
+// searchLocked runs the nearest-neighbour walk. The candidate heap is
+// bounded by ef, so asking for more results than that returns the tail in
+// whatever order the walk happened to visit it: a caller who wants 200
+// candidates to rerank has to be given 200 real ones. The wider search costs
+// milliseconds and the setting is restored afterwards.
+func (vs *VectorStore) searchLocked(queryVec []float32, k int) []hnsw.Node[string] {
+	if k > vs.idx.EfSearch {
+		prev := vs.idx.EfSearch
+		vs.idx.EfSearch = k
+		defer func() { vs.idx.EfSearch = prev }()
+	}
+	return vs.idx.Search(queryVec, k)
+}
 
-		results = append(results, SearchResult{
-			Node:       node,
-			Score:      score,
-			ChunkText:  chunkText,
-			ChunkIndex: chunkIdx,
-		})
+// StaleInLastSearch reports how many of the vectors the last search
+// visited belonged to nodes no longer in the graph. A high count means the
+// index has fallen behind and a rebuild is due; a search alone cannot say
+// so, because it cannot tell a deleted node from one that was never there.
+func (vs *VectorStore) StaleInLastSearch() int {
+	vs.mu.RLock()
+	defer vs.mu.RUnlock()
+	return vs.stale
+}
+
+// Staleness counts the indexed nodes the graph no longer has, and the
+// embeddable nodes the graph has that the index does not. Both are why a
+// search comes back thin, and neither is visible from a search.
+func (vs *VectorStore) Staleness(ctx context.Context) (stale, missing int, err error) {
+	vs.mu.RLock()
+	defer vs.mu.RUnlock()
+
+	indexed := make(map[string]bool)
+	err = vs.vecDB.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		opts.Prefix = []byte(prefixChunk)
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		for it.Seek(opts.Prefix); it.Valid(); it.Next() {
+			nodeID, _ := parseChunkKey(strings.TrimPrefix(string(it.Item().Key()), prefixChunk))
+			indexed[nodeID] = true
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, 0, fmt.Errorf("scan chunks: %w", err)
 	}
 
-	return results, nil
+	present := make(map[string]bool)
+	for _, typ := range EmbeddableTypes {
+		nodes, err := vs.graphDB.QueryNodes(ctx, graph.NodeFilter{Type: typ})
+		if err != nil {
+			return 0, 0, err
+		}
+		for _, n := range nodes {
+			present[n.ID] = true
+			if EmbeddableText(n) != "" && !indexed[n.ID] {
+				missing++
+			}
+		}
+	}
+	for id := range indexed {
+		if !present[id] {
+			stale++
+		}
+	}
+	return stale, missing, nil
 }
 
 // IndexNode indexes a single node's embeddable text.

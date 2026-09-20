@@ -108,8 +108,10 @@ Examples:
 				return fmt.Errorf("vector index not built; run 'codeeagle sync' or 'codeeagle vectorindex' first")
 			}
 
-			if limit > 30 {
-				limit = 30
+			const maxLimit = 30
+			if limit > maxLimit {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Note: --limit is capped at %d.\n", maxLimit)
+				limit = maxLimit
 			}
 
 			query := strings.Join(args, " ")
@@ -139,6 +141,14 @@ Examples:
 			results, err := vs.Search(context.Background(), query, fetchK)
 			if err != nil {
 				return fmt.Errorf("search failed: %w", err)
+			}
+			// A thin result set from a stale index looks exactly like a
+			// thin result set from a poor query. Say which it was.
+			if stale := vs.StaleInLastSearch(); stale > 0 && stale*5 >= fetchK {
+				fmt.Fprintf(cmd.ErrOrStderr(),
+					"Note: %d of the %d nearest vectors belong to nodes no longer in the graph; "+
+						"the vector index is behind the graph. Run: codeeagle vectorindex --force\n",
+					stale, stale+len(results))
 			}
 
 			// Deduplicate by node ID (keep highest-scoring chunk per node).
@@ -190,9 +200,9 @@ Examples:
 
 			// Hybrid search: keyword-match nodes from the graph, inject any that
 			// vector search missed, then rerank everything together.
-			keywordNodes, totalKeywords := search.KeywordSearch(context.Background(), store, query)
-			results, keywordCounts := search.InjectKeywordResults(results, keywordNodes, typeFilter, noDocs, pkg, language)
-			results = search.RerankResults(context.Background(), store, results, keywordCounts, totalKeywords)
+			keywords := search.KeywordSearch(context.Background(), store, query)
+			results, shares := search.InjectKeywordResults(results, keywords, typeFilter, noDocs, pkg, language)
+			results = search.RerankResults(context.Background(), store, results, shares)
 
 			// Apply min score filter (after reranking).
 			if minScore > 0 {
@@ -205,7 +215,9 @@ Examples:
 				results = filtered
 			}
 
-			// Limit results.
+			// Limit results, remembering how many there were: a list that
+			// ends is read as complete unless it says otherwise.
+			ranked := len(results)
 			if len(results) > limit {
 				results = results[:limit]
 			}
@@ -299,6 +311,10 @@ Examples:
 			meta := vs.Meta()
 			if meta != nil {
 				fmt.Fprintf(out, "%d results (embedding: %s/%s)\n", len(results), meta.Provider, meta.Model)
+			}
+			if ranked > len(results) {
+				fmt.Fprintf(out, "Showing %d of %d ranked; --limit %d shows more (max %d).\n",
+					len(results), ranked, min(ranked, maxLimit), maxLimit)
 			}
 
 			// Other indices are searched separately and shown under their own

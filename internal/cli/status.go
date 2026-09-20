@@ -64,7 +64,7 @@ func newStatusCmd() *cobra.Command {
 			}
 
 			// Show vector search status.
-			showVectorStatus(cfg, currentBranch, out)
+			showVectorStatus(cfg, store, currentBranch, out)
 
 			// Show git branch info for configured repositories.
 			if len(cfg.Repositories) > 0 {
@@ -101,7 +101,7 @@ func newStatusCmd() *cobra.Command {
 	return cmd
 }
 
-func showVectorStatus(cfg *config.Config, branch string, out io.Writer) {
+func showVectorStatus(cfg *config.Config, store graph.Store, branch string, out io.Writer) {
 	if cfg.ConfigDir == "" {
 		return
 	}
@@ -125,7 +125,7 @@ func showVectorStatus(cfg *config.Config, branch string, out io.Writer) {
 	}
 
 	// Index exists — try to read metadata.
-	vs, vsErr := vectorstore.New(nil, nil, branch, idxPath, dbPath)
+	vs, vsErr := vectorstore.New(store, nil, branch, idxPath, dbPath)
 	if vsErr != nil {
 		fmt.Fprintf(out, "  Vector Search: index exists but cannot open (%v)\n\n", vsErr)
 		return
@@ -139,6 +139,13 @@ func showVectorStatus(cfg *config.Config, branch string, out io.Writer) {
 		fmt.Fprintf(out, "    Indexed nodes:  %d\n", meta.NodeCount)
 		fmt.Fprintf(out, "    Index file:     %s (%.1fKB)\n", idxPath, float64(info.Size())/1024)
 		fmt.Fprintf(out, "    Last updated:   %s\n", meta.UpdatedAt.Format("2006-01-02 15:04:05"))
+		// An index behind the graph returns thin, misleading results and
+		// nothing about a search says so; this is the place to say it.
+		if stale, missing, err := vs.Staleness(context.Background()); err == nil && (stale > 0 || missing > 0) {
+			fmt.Fprintf(out, "    Behind graph:   %d indexed nodes no longer exist, %d embeddable nodes not indexed\n",
+				stale, missing)
+			fmt.Fprintf(out, "                    run 'codeeagle vectorindex --force' to rebuild\n")
+		}
 
 		// Check if current provider matches.
 		if embedder != nil && (meta.Provider != embedder.Name() || meta.Model != embedder.ModelName()) {

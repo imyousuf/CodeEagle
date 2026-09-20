@@ -797,6 +797,9 @@ func matchesFilter(node *graph.Node, filter graph.NodeFilter) bool {
 			return false
 		}
 	}
+	if filter.NameMatch != nil && !filter.NameMatch(node.Name) {
+		return false
+	}
 	if filter.Exported != nil && node.Exported != *filter.Exported {
 		return false
 	}

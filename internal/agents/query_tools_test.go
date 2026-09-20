@@ -309,6 +309,37 @@ func TestQueryNodeEdgesToolEdgeTypeFilter(t *testing.T) {
 	}
 }
 
+// TestQueryNodeEdgesToolRefusesAnAmbiguousName: the tool used to answer
+// with whichever node came first, and an agent cannot tell that the edges it
+// was shown belong to the wrong one.
+func TestQueryNodeEdgesToolRefusesAnAmbiguousName(t *testing.T) {
+	store, cleanup := setupQueryToolTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	twin := &graph.Node{ID: "twin-store", Type: graph.NodeTopic, Name: "Store"}
+	if err := store.AddNode(ctx, twin); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := &queryNodeEdgesTool{store: store}
+	result, ok := tool.Execute(ctx, map[string]any{"node": "Store"})
+	if ok {
+		t.Fatalf("ambiguous name resolved silently: %s", result)
+	}
+	for _, want := range []string{"2 nodes are named", "twin-store", "Topic", "Interface"} {
+		if !strings.Contains(result, want) {
+			t.Errorf("candidate list lacks %q:\n%s", want, result)
+		}
+	}
+
+	// The id resolves directly.
+	result, ok = tool.Execute(ctx, map[string]any{"node": "twin-store"})
+	if !ok || !strings.Contains(result, "Edges for: Store (Topic)") {
+		t.Errorf("by id: ok=%v %s", ok, result)
+	}
+}
+
 func TestQueryNodeEdgesToolNoMatch(t *testing.T) {
 	store, cleanup := setupQueryToolTestStore(t)
 	defer cleanup()

@@ -18,7 +18,11 @@ type NodeFilter struct {
 	Package     string
 	Language    string
 	NamePattern string // glob pattern matched against Name
-	Exported    *bool
+	// NameMatch, when set, must accept a node's Name for the node to match.
+	// A glob answers one pattern per scan; a predicate lets a caller test
+	// every term of a query in a single pass over the graph.
+	NameMatch func(name string) bool
+	Exported  *bool
 	// Properties filters nodes by property key-value pairs.
 	// All specified entries must match (AND logic).
 	Properties map[string]string

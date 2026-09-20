@@ -149,12 +149,17 @@ codeeagle meetings sync --limit 20         # Process a subset
 codeeagle meetings sync --force            # Re-enrich already-indexed recordings
 codeeagle meetings watch                   # Index new recordings as they appear
 
+codeeagle meetings search AGI              # What was said about it, by whom, and when
+codeeagle meetings search pricing --person Kevin           # ...in meetings someone attended
+codeeagle meetings search --only decision --since 2026-08-01   # Every decision since a date
 codeeagle meetings list                    # List indexed meetings
 codeeagle meetings list --person Kevin     # Meetings a person attended
 codeeagle meetings list --since 2026-03-01 # Meetings after a date
 codeeagle meetings show <meeting-id>       # Participants, topics, decisions, follow-ups
+codeeagle meetings show a99b3645           # A prefix of the id, or a fragment of the title, works too
 codeeagle meetings people                  # People, with speaking time and follow-up counts
 codeeagle meetings topics                  # Topics discussed, by meeting count
+codeeagle meetings topics agi              # Only the topics containing a word
 codeeagle meetings topics --themes         # The induced topic hierarchy
 codeeagle meetings taxonomy                # Group topics into concepts (re-runnable)
 codeeagle meetings taxonomy --rebuild      # Group from scratch instead of extending

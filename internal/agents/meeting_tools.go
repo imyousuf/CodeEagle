@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/internal/transcript"
 )
 
 // Meetings hold the part of a project's reasoning that never reaches the
@@ -33,7 +34,7 @@ func (t *queryMeetingsTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"topic": map[string]any{
 				"type":        "string",
-				"description": "Match meetings whose title, summary, or topics mention this text.",
+				"description": "Words to look for in meeting titles, summaries, topic labels, what each topic segment said, decisions and their quotes, follow-ups, mentioned systems, and participant names. Whole-word, case-insensitive; an initialism and its expansion count as one.",
 			},
 			"person": map[string]any{
 				"type":        "string",
@@ -57,127 +58,103 @@ func (t *queryMeetingsTool) Execute(ctx context.Context, args map[string]any) (s
 	since, _ := args["since"].(string)
 	limit := intArg(args, "limit", 10)
 
-	meetings, err := t.store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeMeeting})
-	if err != nil {
-		return fmt.Sprintf("Error querying meetings: %v", err), false
-	}
-	if len(meetings) == 0 {
-		return "No meetings are indexed. Run `codeeagle meetings sync` to index transcripts.", false
-	}
-
-	var cutoff time.Time
+	q := transcript.Query{Text: topic, Person: person, Limit: limit}
 	if since != "" {
-		cutoff, err = time.Parse("2006-01-02", since)
+		cutoff, err := time.Parse("2006-01-02", since)
 		if err != nil {
 			return fmt.Sprintf("Error: since must be YYYY-MM-DD, got %q", since), false
 		}
+		q.Since = cutoff
+	}
+	if topic == "" && person == "" && since == "" {
+		// Everything, most recent first: the same search with no filters.
+		q.Only = transcript.MatchTitle
 	}
 
-	type hit struct {
-		node    *graph.Node
-		people  []string
-		matched string
+	found, err := transcript.FindMeetings(ctx, t.store, q)
+	if err != nil {
+		return fmt.Sprintf("Error querying meetings: %v", err), false
 	}
-	var hits []hit
-
-	for _, m := range meetings {
-		if !cutoff.IsZero() && m.UpdatedAt.Before(cutoff) {
-			continue
-		}
-
-		people := t.attendees(ctx, m.ID)
-		if person != "" && !containsName(people, person) {
-			continue
-		}
-
-		matched := ""
-		if topic != "" {
-			matched = t.topicMatch(ctx, m, topic)
-			if matched == "" {
-				continue
-			}
-		}
-		hits = append(hits, hit{node: m, people: people, matched: matched})
+	if found.Considered == 0 && person == "" && since == "" {
+		return "No meetings are indexed. Run `codeeagle meetings sync` to index transcripts.", false
 	}
-
-	sort.Slice(hits, func(i, j int) bool {
-		return hits[i].node.UpdatedAt.After(hits[j].node.UpdatedAt)
-	})
-	if len(hits) > limit {
-		hits = hits[:limit]
-	}
-	if len(hits) == 0 {
+	if len(found.Hits) == 0 {
 		return "No meetings matched.", false
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "Found %d meeting(s):\n\n", len(hits))
-	for _, h := range hits {
-		fmt.Fprintf(&b, "## %s\n", h.node.Name)
-		fmt.Fprintf(&b, "- Date: %s (%s)\n", h.node.UpdatedAt.Format("2006-01-02 15:04"),
-			formatDuration(h.node.Properties[graph.PropDuration]))
-		fmt.Fprintf(&b, "- Meeting ID: %s\n", h.node.QualifiedName)
-		if len(h.people) > 0 {
-			fmt.Fprintf(&b, "- Participants: %s\n", strings.Join(h.people, ", "))
+	fmt.Fprintf(&b, "Found %d meeting(s)", found.Total)
+	if len(found.Hits) < found.Total {
+		fmt.Fprintf(&b, ", showing %d", len(found.Hits))
+	}
+	b.WriteString(":\n\n")
+	for _, h := range found.Hits {
+		m := h.Meeting
+		fmt.Fprintf(&b, "## %s\n", m.Name)
+		fmt.Fprintf(&b, "- Date: %s (%s)\n", m.UpdatedAt.Format("2006-01-02 15:04"),
+			formatDuration(m.Properties[graph.PropDuration]))
+		fmt.Fprintf(&b, "- Meeting ID: %s\n", m.QualifiedName)
+		if len(h.Participants) > 0 {
+			fmt.Fprintf(&b, "- Participants: %s\n", strings.Join(h.Participants, ", "))
 		}
-		if h.matched != "" {
-			fmt.Fprintf(&b, "- Matched on: %s\n", h.matched)
+		if topic != "" {
+			fmt.Fprintf(&b, "- Matched on: %s\n", describeMatches(h))
 		}
-		if s := h.node.Properties[graph.PropSummary]; s != "" {
+		if s := m.Properties[graph.PropSummary]; s != "" {
 			fmt.Fprintf(&b, "\n%s\n", s)
+		}
+		// The matched passages themselves, so the agent can answer from
+		// them without a second call when they suffice.
+		for _, mt := range h.Matches {
+			if mt.Node == nil {
+				continue
+			}
+			switch mt.Kind {
+			case transcript.MatchSegment:
+				fmt.Fprintf(&b, "\nTopic segment \"%s\": %s\n", mt.Label, mt.Node.Properties[graph.PropSummary])
+			case transcript.MatchDecision:
+				fmt.Fprintf(&b, "\nDecision: %s\n", mt.Node.Properties[graph.PropSummary])
+			case transcript.MatchFollowUp:
+				fmt.Fprintf(&b, "\nFollow-up: %s (owner: %s)\n", mt.Node.Properties[graph.PropSummary],
+					orUnassigned(mt.Node.Properties[graph.PropAssignee]))
+			}
 		}
 		b.WriteString("\n")
 	}
-	b.WriteString("Use query_meeting_detail with a Meeting ID for topics, decisions, and follow-ups.\n")
+	b.WriteString("Use query_meeting_detail with a Meeting ID for the full record: every topic, decision with its quote, and follow-up.\n")
 	return b.String(), true
 }
 
-// topicMatch reports which field matched, so the agent can tell a title hit
-// from a hit buried in one topic of a long meeting.
-func (t *queryMeetingsTool) topicMatch(ctx context.Context, m *graph.Node, topic string) string {
-	needle := strings.ToLower(topic)
-	if strings.Contains(strings.ToLower(m.Name), needle) {
-		return "title"
-	}
-	if strings.Contains(strings.ToLower(m.Properties[graph.PropSummary]), needle) {
-		return "summary"
-	}
-	if strings.Contains(strings.ToLower(m.Properties["mentions"]), needle) {
-		return "mentioned systems"
-	}
-
-	children, err := t.store.GetNeighbors(ctx, m.ID, graph.EdgeContains, graph.Outgoing)
-	if err != nil {
-		return ""
-	}
-	for _, c := range children {
-		switch c.Type {
-		case graph.NodeTopicSegment:
-			if strings.Contains(strings.ToLower(c.Name), needle) ||
-				strings.Contains(strings.ToLower(c.Properties["keywords"]), needle) ||
-				strings.Contains(strings.ToLower(c.Properties[graph.PropSummary]), needle) {
-				return "topic: " + c.Name
-			}
-		case graph.NodeDecision, graph.NodeActionItem:
-			if strings.Contains(strings.ToLower(c.Properties[graph.PropSummary]), needle) {
-				return strings.ToLower(string(c.Type))
-			}
+// describeMatches says where a query matched, so the agent can tell a title
+// hit from one buried in a single topic of a long meeting.
+func describeMatches(h *transcript.Hit) string {
+	var parts []string
+	seen := make(map[string]bool)
+	for _, mt := range h.Matches {
+		var s string
+		switch mt.Kind {
+		case transcript.MatchTitle, transcript.MatchSummary:
+			s = string(mt.Kind)
+		case transcript.MatchMention:
+			s = "mentioned system " + mt.Label
+		case transcript.MatchParticipant:
+			s = "participant " + mt.Label
+		default:
+			s = string(mt.Kind) + ": " + mt.Label
+		}
+		if !seen[s] {
+			seen[s] = true
+			parts = append(parts, s)
 		}
 	}
-	return ""
+	return strings.Join(parts, "; ")
 }
 
-func (t *queryMeetingsTool) attendees(ctx context.Context, meetingID string) []string {
-	people, err := t.store.GetNeighbors(ctx, meetingID, graph.EdgeAttended, graph.Incoming)
-	if err != nil {
-		return nil
+func orUnassigned(s string) string {
+	if s == "" {
+		return "unassigned"
 	}
-	names := make([]string, 0, len(people))
-	for _, p := range people {
-		names = append(names, p.Name)
-	}
-	sort.Strings(names)
-	return names
+	return s
 }
 
 // --- query_meeting_detail ---
@@ -198,7 +175,7 @@ func (t *queryMeetingDetailTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"meeting_id": map[string]any{
 				"type":        "string",
-				"description": "The Meeting ID, as returned by query_meetings.",
+				"description": "The Meeting ID as returned by query_meetings, a unique prefix of it, or a fragment of the title.",
 			},
 		},
 		"required": []string{"meeting_id"},
@@ -211,19 +188,15 @@ func (t *queryMeetingDetailTool) Execute(ctx context.Context, args map[string]an
 		return "Error: meeting_id is required", false
 	}
 
-	meetings, err := t.store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeMeeting})
+	meetings, err := transcript.LoadMeetingIndex(ctx, t.store)
 	if err != nil {
 		return fmt.Sprintf("Error querying meetings: %v", err), false
 	}
-	var m *graph.Node
-	for _, cand := range meetings {
-		if cand.QualifiedName == id || cand.ID == id {
-			m = cand
-			break
-		}
-	}
-	if m == nil {
-		return fmt.Sprintf("No meeting with ID %q. Use query_meetings to find one.", id), false
+	// A prefix of the id or a fragment of the title resolves too; several
+	// candidates come back as an error naming them, never as a guess.
+	m, err := meetings.Resolve(id)
+	if err != nil {
+		return fmt.Sprintf("No single meeting for %q: %v. Use query_meetings to find one.", id, err), false
 	}
 
 	children, err := t.store.GetNeighbors(ctx, m.ID, graph.EdgeContains, graph.Outgoing)
@@ -598,15 +571,6 @@ func intArg(args map[string]any, key string, def int) int {
 		}
 	}
 	return def
-}
-
-func containsName(names []string, want string) bool {
-	for _, n := range names {
-		if strings.EqualFold(n, want) || strings.Contains(strings.ToLower(n), strings.ToLower(want)) {
-			return true
-		}
-	}
-	return false
 }
 
 func floatProp(n *graph.Node, key string) float64 {

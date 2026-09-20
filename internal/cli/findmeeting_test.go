@@ -98,6 +98,28 @@ func TestFindMeetingResolvesAUniqueReference(t *testing.T) {
 	}
 }
 
+// TestFindMeetingResolvesAPrefix: session directories are named by the
+// identifier, so its first characters are what people copy from a listing.
+func TestFindMeetingResolvesAPrefix(t *testing.T) {
+	store := meetingStore(t)
+	ctx := context.Background()
+
+	meetingNode(t, store, "a99b3645-5840-47b2-83cc-05b8bf761e8a", "Alignment debate", "/rec/a99b/session.json")
+	meetingNode(t, store, "7c873305-2422-4fd7-9368-2292f58d2e51", "Pricing and AGI", "/rec/7c87/session.json")
+
+	got, err := findMeeting(ctx, store, "a99b3645")
+	if err != nil {
+		t.Fatalf("prefix: %v", err)
+	}
+	if got.Name != "Alignment debate" {
+		t.Errorf("prefix resolved to %q", got.Name)
+	}
+	// Too short to be an identifier and matching no title.
+	if _, err := findMeeting(ctx, store, "a99"); err == nil {
+		t.Error("a three-character reference resolved")
+	}
+}
+
 // TestFindMeetingByIDRefusesAnAmbiguousReference covers the series threading
 // path. Attaching a series to the wrong meeting is worse than not attaching
 // it, so an ambiguous identifier is reported rather than resolved.

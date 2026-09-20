@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -23,6 +22,7 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/indexer"
 	"github.com/imyousuf/CodeEagle/internal/linker"
 	_ "github.com/imyousuf/CodeEagle/internal/llm" // register LLM providers
+	"github.com/imyousuf/CodeEagle/internal/search"
 	"github.com/imyousuf/CodeEagle/internal/transcript"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
@@ -52,6 +52,7 @@ was said, by whom, and what it committed anyone to.`,
 		newMeetingsTaxonomyCmd(),
 		newMeetingsMigrateCmd(),
 		newMeetingsActionsCmd(),
+		newMeetingsSearchCmd(),
 	)
 	return cmd
 }
@@ -603,6 +604,7 @@ func newMeetingsListCmd() *cobra.Command {
 					}
 					meetings = filtered
 				}
+				total := len(meetings)
 				if limit > 0 && len(meetings) > limit {
 					meetings = meetings[:limit]
 				}
@@ -617,7 +619,7 @@ func newMeetingsListCmd() *cobra.Command {
 				}
 
 				tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-				fmt.Fprintln(tw, "DATE\tDURATION\tPARTICIPANTS\tTITLE")
+				fmt.Fprintln(tw, "DATE\tID\tDURATION\tPARTICIPANTS\tTITLE")
 				for _, m := range meetings {
 					who := "—"
 					if showWith || person != "" {
@@ -634,13 +636,18 @@ func newMeetingsListCmd() *cobra.Command {
 						// decided.
 						title += "  [incomplete]"
 					}
-					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 						m.UpdatedAt.Format("2006-01-02 15:04"),
+						transcript.ShortID(m),
 						formatSeconds(m.Properties[graph.PropDuration]),
 						truncateText(who, 40),
 						title)
 				}
-				return tw.Flush()
+				if err := tw.Flush(); err != nil {
+					return err
+				}
+				noteTruncation(out, len(meetings), total, "meetings", "--limit 0")
+				return nil
 			})
 		},
 	}
@@ -674,10 +681,11 @@ func newMeetingsShowCmd() *cobra.Command {
 				}
 
 				fmt.Fprintf(out, "%s\n", m.Name)
-				fmt.Fprintf(out, "%s · %s · %s\n\n",
+				fmt.Fprintf(out, "%s · %s · %s\n",
 					m.UpdatedAt.Format("Monday, 2 January 2006 15:04"),
 					formatSeconds(m.Properties[graph.PropDuration]),
 					orNone(m.Properties[graph.PropPlatform]))
+				fmt.Fprintf(out, "ID: %s\n\n", m.QualifiedName)
 
 				if s := m.Properties[graph.PropSummary]; s != "" {
 					fmt.Fprintf(out, "%s\n\n", s)
@@ -940,6 +948,10 @@ they can be recognized and assigned with "codeeagle meetings label".`,
 				if err != nil {
 					return err
 				}
+				meetings, err := transcript.LoadMeetingIndex(ctx, store)
+				if err != nil {
+					return err
+				}
 
 				type pending struct {
 					speaker *graph.Node
@@ -954,13 +966,14 @@ they can be recognized and assigned with "codeeagle meetings label".`,
 					}
 					secs, _ := strconv.ParseFloat(sp.Properties[graph.PropSpeakingSeconds], 64)
 					title := sp.Properties[graph.PropMeetingID]
-					if m, err := findMeetingByID(ctx, store, sp.Properties[graph.PropMeetingID]); err == nil && m != nil {
+					if m, err := meetings.BySession(sp.Properties[graph.PropMeetingID]); err == nil && m != nil {
 						title = fmt.Sprintf("%s (%s)", m.Name, m.UpdatedAt.Format("2006-01-02"))
 					}
 					out = append(out, pending{speaker: sp, meeting: title, secs: secs})
 				}
 				// Most talkative first: identifying them recovers the most.
 				sort.Slice(out, func(i, j int) bool { return out[i].secs > out[j].secs })
+				total := len(out)
 				if limit > 0 && len(out) > limit {
 					out = out[:limit]
 				}
@@ -970,7 +983,12 @@ they can be recognized and assigned with "codeeagle meetings label".`,
 					fmt.Fprintln(w, "Every speaker has been identified.")
 					return nil
 				}
-				fmt.Fprintf(w, "%d speakers await identification.\n\n", len(out))
+				fmt.Fprintf(w, "%d speakers await identification", total)
+				if len(out) < total {
+					fmt.Fprintf(w, "; showing the %d who spoke most (--limit 0 for all)", len(out))
+				}
+				fmt.Fprintln(w, ".")
+				fmt.Fprintln(w)
 				for _, p := range out {
 					fmt.Fprintf(w, "%s · %s · spoke %s\n",
 						p.speaker.Name, p.meeting, transcript.FormatTimestamp(p.secs))
@@ -1128,8 +1146,15 @@ func newMeetingsTopicsCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "topics",
+		Use:   "topics [word...]",
 		Short: "List topics discussed across meetings",
+		Long: `List the topics meetings were filed under, most discussed first.
+
+Words given after the command keep only the topics containing them, matched
+as whole words without regard to case, so "topics agi" finds "AGI feasibility
+debate" and not "messaging". The list is long — thousands of labels in a
+corpus of a few hundred meetings — so it is capped by default and says so
+when it has been.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withGraph(cmd, func(ctx context.Context, store graph.Store) error {
 				if themes {
@@ -1139,6 +1164,10 @@ func newMeetingsTopicsCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				terms := search.QueryTerms(strings.Join(args, " "))
+				if len(args) > 0 && len(terms) == 0 {
+					return fmt.Errorf("no searchable words in %q", strings.Join(args, " "))
+				}
 
 				type row struct {
 					name  string
@@ -1146,6 +1175,9 @@ func newMeetingsTopicsCmd() *cobra.Command {
 				}
 				var rows []row
 				for _, t := range topics {
+					if len(terms) > 0 && !topicMatches(t, terms) {
+						continue
+					}
 					edges, err := store.GetEdges(ctx, t.ID, graph.EdgeHasTopic)
 					if err != nil {
 						continue
@@ -1170,12 +1202,17 @@ func newMeetingsTopicsCmd() *cobra.Command {
 					}
 					return rows[i].name < rows[j].name
 				})
+				total := len(rows)
 				if limit > 0 && len(rows) > limit {
 					rows = rows[:limit]
 				}
 
 				out := cmd.OutOrStdout()
 				if len(rows) == 0 {
+					if len(terms) > 0 {
+						fmt.Fprintf(out, "No meeting topic contains %s.\n", quoteAll(terms))
+						return nil
+					}
 					fmt.Fprintln(out, "No meeting topics indexed yet.")
 					return nil
 				}
@@ -1184,7 +1221,11 @@ func newMeetingsTopicsCmd() *cobra.Command {
 				for _, r := range rows {
 					fmt.Fprintf(tw, "%d\t%s\n", r.count, r.name)
 				}
-				return tw.Flush()
+				if err := tw.Flush(); err != nil {
+					return err
+				}
+				noteTruncation(out, len(rows), total, "topics", "--limit 0, or add words to filter")
+				return nil
 			})
 		},
 	}
@@ -1498,6 +1539,10 @@ func newMeetingsActionsCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				meetings, err := transcript.LoadMeetingIndex(ctx, store)
+				if err != nil {
+					return err
+				}
 
 				type row struct {
 					Text     string `json:"text"`
@@ -1521,14 +1566,14 @@ func newMeetingsActionsCmd() *cobra.Command {
 						continue
 					}
 					title, date := "", ""
-					if m, err := findMeetingByID(ctx, store, a.Properties[graph.PropMeetingID]); err == nil && m != nil {
+					if m, err := meetings.BySession(a.Properties[graph.PropMeetingID]); err == nil && m != nil {
 						title = m.Name
 						date = m.UpdatedAt.Format("2006-01-02")
 					}
 					rows = append(rows, row{
 						Text:     a.Properties[graph.PropSummary],
 						Assignee: assignee,
-						Due:      a.Properties[graph.PropDueDate],
+						Due:      dueDate(a.Properties[graph.PropDueDate]),
 						Meeting:  title,
 						Date:     date,
 						Quote:    a.Properties[graph.PropQuote],
@@ -1821,111 +1866,71 @@ func openMeetingStore(cfg *config.Config) (*embedded.BranchStore, error) {
 	return embedded.OpenMeetings(cfg, dbPath)
 }
 
+// findMeeting resolves a reference a person would type — a node id, a session
+// identifier, a unique prefix of either, or a fragment of the title — and
+// refuses to guess between several.
 func findMeeting(ctx context.Context, store graph.Store, ref string) (*graph.Node, error) {
-	meetings, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeMeeting})
+	meetings, err := transcript.LoadMeetingIndex(ctx, store)
 	if err != nil {
 		return nil, err
 	}
-	// A node ID hashes the file path and so is unique; a qualified name is the
-	// recording's own identifier, which for formats that carry none is derived
-	// from the filename alone. Two unrelated exports sharing a name would
-	// therefore answer to the same reference, and picking the first would show
-	// the wrong meeting without saying so.
-	var exact []*graph.Node
-	for _, m := range meetings {
-		if m.ID == ref {
-			return m, nil
-		}
-		if m.QualifiedName == ref {
-			exact = append(exact, m)
-		}
-	}
-	if len(exact) == 1 {
-		return exact[0], nil
-	}
-	if len(exact) > 1 {
-		return nil, ambiguousMeetings(ref, exact)
-	}
-
-	var partial []*graph.Node
-	for _, m := range meetings {
-		if strings.Contains(strings.ToLower(m.Name), strings.ToLower(ref)) {
-			partial = append(partial, m)
-		}
-	}
-	switch len(partial) {
-	case 0:
-		return nil, fmt.Errorf("no meeting matching %q", ref)
-	case 1:
-		return partial[0], nil
-	default:
-		var b strings.Builder
-		fmt.Fprintf(&b, "%d meetings match %q:\n", len(partial), ref)
-		for i, m := range partial {
-			if i >= 10 {
-				break
-			}
-			fmt.Fprintf(&b, "  %s  %s\n", m.QualifiedName, m.Name)
-		}
-		return nil, fmt.Errorf("%s", b.String())
-	}
+	return meetings.Resolve(ref)
 }
 
+// findMeetingByID resolves a session identifier exactly: nil when unknown,
+// an error when several recordings share it.
 func findMeetingByID(ctx context.Context, store graph.Store, sessionID string) (*graph.Node, error) {
 	if sessionID == "" {
 		return nil, nil
 	}
-	meetings, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeMeeting})
+	meetings, err := transcript.LoadMeetingIndex(ctx, store)
 	if err != nil {
 		return nil, err
 	}
-	var exact []*graph.Node
-	for _, m := range meetings {
-		if m.QualifiedName == sessionID {
-			exact = append(exact, m)
-		}
-	}
-	switch len(exact) {
-	case 0:
-		return nil, nil
-	case 1:
-		return exact[0], nil
-	default:
-		// Threading a series onto the wrong meeting is worse than not
-		// threading it, so an ambiguous identifier is reported rather than
-		// resolved arbitrarily.
-		return nil, ambiguousMeetings(sessionID, exact)
-	}
-}
-
-// ambiguousMeetings reports several meetings answering to one identifier,
-// listing enough of each to tell them apart.
-func ambiguousMeetings(ref string, matches []*graph.Node) error {
-	sorted := append([]*graph.Node(nil), matches...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].FilePath < sorted[j].FilePath })
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d meetings answer to %q; use the full id to choose one:", len(sorted), ref)
-	for _, m := range sorted {
-		fmt.Fprintf(&b, "\n  %s  %s", m.ID, m.Name)
-		if m.FilePath != "" {
-			fmt.Fprintf(&b, "  (%s)", m.FilePath)
-		}
-	}
-	return errors.New(b.String())
+	return meetings.BySession(sessionID)
 }
 
 func attendeeNames(ctx context.Context, store graph.Store, meetingID string) ([]string, error) {
-	people, err := store.GetNeighbors(ctx, meetingID, graph.EdgeAttended, graph.Incoming)
-	if err != nil {
-		return nil, err
+	return transcript.Attendees(ctx, store, meetingID)
+}
+
+// noteTruncation says when a listing was cut short, and how to see the rest.
+// A capped list that looks complete leads to confident wrong conclusions —
+// "that topic does not exist" — which is worse than a long list.
+func noteTruncation(out io.Writer, shown, total int, what, remedy string) {
+	if shown < total {
+		fmt.Fprintf(out, "\nShowing %d of %d %s (%s).\n", shown, total, what, remedy)
 	}
-	names := make([]string, 0, len(people))
-	for _, p := range people {
-		names = append(names, p.Name)
+}
+
+// topicMatches reports whether every term appears in a topic's label or one
+// of its recorded wordings, as a whole word or the start of one.
+func topicMatches(t *graph.Node, terms []string) bool {
+	tokens := search.Tokenize(t.Name + " " + t.Properties[graph.PropAliases])
+	for _, term := range terms {
+		if search.TermCredit(term, tokens) == 0 {
+			return false
+		}
 	}
-	sort.Strings(names)
-	return names, nil
+	return true
+}
+
+func quoteAll(words []string) string {
+	quoted := make([]string, len(words))
+	for i, w := range words {
+		quoted[i] = fmt.Sprintf("%q", w)
+	}
+	return strings.Join(quoted, " and ")
+}
+
+// dueDate returns a due date fit to print, or nothing. The model sometimes
+// writes punctuation where a date should be, and "due :" is noise.
+func dueDate(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) < 4 || !strings.ContainsAny(s, "0123456789") {
+		return ""
+	}
+	return s
 }
 
 func meetingsWithPerson(ctx context.Context, store graph.Store, meetings []*graph.Node, person string) ([]*graph.Node, error) {

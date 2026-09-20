@@ -99,7 +99,7 @@ codeeagle agent review --diff <ref>     # Review changes in a git diff/PR
 codeeagle query [--type T] [--name N]   # Query the knowledge graph
 codeeagle query symbols --file <path>   # List symbols in a file
 codeeagle query interface --name <name> # Show interface and implementors
-codeeagle query edges --node <name>     # Show relationships for a node
+codeeagle query edges --node <name-or-id> [--node-type T]  # Show relationships for a node
 codeeagle query unused [--type T]       # Find potentially unused functions/methods
 codeeagle query coverage [--level L]    # Show test coverage by file or function
 codeeagle query duplicates [--json]     # Find duplicate files by content hash
@@ -121,10 +121,14 @@ codeeagle faces person [...]           # Person CRUD (add, list, edit, delete)
 
 codeeagle meetings sync [--dry-run] [--limit N] [--force]   # Index transcripts
 codeeagle meetings watch [--interval D] [--settle D]       # Index new recordings live
+codeeagle meetings search <words> [--person P] [--since DATE] [--only KIND]
+                                        # What was said about something, by whom, when:
+                                        # per meeting, the matching topics, segments,
+                                        # decisions with quotes, and follow-ups
 codeeagle meetings list [--person P] [--since DATE]        # List meetings
-codeeagle meetings show <id>            # Participants, topics, decisions, follow-ups
+codeeagle meetings show <id-or-prefix-or-title>            # Participants, topics, decisions, follow-ups
 codeeagle meetings people               # People, speaking time, follow-up counts
-codeeagle meetings topics [--themes]    # Topics, flat or as the induced hierarchy
+codeeagle meetings topics [words] [--themes]   # Topics (filtered by words), or the hierarchy
 codeeagle meetings taxonomy [--rebuild] [--depth N]   # Group topics into concepts
 codeeagle meetings migrate --from <branch>            # Move an older corpus into scope
 codeeagle meetings migrate --from-db <path>           # ...or out of another database

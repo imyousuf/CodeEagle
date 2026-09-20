@@ -142,8 +142,14 @@ func findOverlapEnd(_, _ string) int {
 // "LLM provider" to functions whose names are generic (e.g. NewClient)
 // but whose package context makes the relationship clear.
 // Returns empty string if the node has no embeddable content.
+//
+// A topic is the exception to needing content: its label is the whole of
+// what it is, and leaving labels out of the index meant the one node named
+// exactly what someone was searching for could never be found by meaning.
+// (Measured on the real corpus, the label alone scores 0.70 against a query
+// for it; the segment discussing it, with its full summary, scores 0.66.)
 func EmbeddableText(n *graph.Node) string {
-	if n.DocComment == "" && n.Signature == "" {
+	if n.DocComment == "" && n.Signature == "" && n.Type != graph.NodeTopic {
 		return ""
 	}
 
@@ -171,6 +177,14 @@ func EmbeddableText(n *graph.Node) string {
 				b.WriteString(prop.prefix)
 				b.WriteString(": ")
 				b.WriteString(val)
+			}
+		}
+		// The other wordings meetings used for a topic are the phrases a
+		// searcher is most likely to reach for.
+		if n.Type == graph.NodeTopic {
+			if aliases := n.Properties[graph.PropAliases]; aliases != "" {
+				b.WriteString("\nAlso worded as: ")
+				b.WriteString(aliases)
 			}
 		}
 	}
