@@ -29,6 +29,12 @@ jobs:
           echo "commit=${{ github.sha }}" >> $GITHUB_OUTPUT
           echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
 
+      # PDF text extraction uses poppler when built with -tags poppler,
+      # and falls back to a pure Go extractor without it. Released binaries
+      # get the faster one.
+      - name: Install poppler
+        run: sudo apt-get update && sudo apt-get install -y libpoppler-glib-dev
+
       - name: Build
         run: |
           mkdir -p dist
@@ -36,7 +42,7 @@ jobs:
             -X github.com/imyousuf/CodeEagle/internal/cli.Version=${{ steps.version.outputs.version }} \
             -X github.com/imyousuf/CodeEagle/internal/cli.Commit=${{ steps.version.outputs.commit }} \
             -X github.com/imyousuf/CodeEagle/internal/cli.BuildDate=${{ steps.version.outputs.date }}"
-          go build -ldflags "$LDFLAGS" -o dist/codeeagle ./cmd/codeeagle
+          go build -tags poppler -ldflags "$LDFLAGS" -o dist/codeeagle ./cmd/codeeagle
           tar -czvf dist/codeeagle-linux-amd64.tar.gz -C dist codeeagle
           rm dist/codeeagle
 
@@ -111,6 +117,13 @@ jobs:
           echo "commit=${{ github.sha }}" >> $GITHUB_OUTPUT
           echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
 
+      # As above. This runner is native macOS, so the library is a brew
+      # install rather than a cross-compilation problem.
+      - name: Install poppler
+        run: |
+          brew list pkg-config >/dev/null 2>&1 || brew install pkg-config
+          brew list poppler >/dev/null 2>&1 || brew install poppler
+
       - name: Build
         env:
           GOOS: darwin
@@ -122,7 +135,7 @@ jobs:
             -X github.com/imyousuf/CodeEagle/internal/cli.Version=${{ steps.version.outputs.version }} \
             -X github.com/imyousuf/CodeEagle/internal/cli.Commit=${{ steps.version.outputs.commit }} \
             -X github.com/imyousuf/CodeEagle/internal/cli.BuildDate=${{ steps.version.outputs.date }}"
-          go build -ldflags "$LDFLAGS" -o dist/codeeagle ./cmd/codeeagle
+          go build -tags poppler -ldflags "$LDFLAGS" -o dist/codeeagle ./cmd/codeeagle
           tar -czvf dist/codeeagle-darwin-amd64.tar.gz -C dist codeeagle
           rm dist/codeeagle
 
@@ -152,6 +165,13 @@ jobs:
           echo "commit=${{ github.sha }}" >> $GITHUB_OUTPUT
           echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
 
+      # As above. This runner is native macOS, so the library is a brew
+      # install rather than a cross-compilation problem.
+      - name: Install poppler
+        run: |
+          brew list pkg-config >/dev/null 2>&1 || brew install pkg-config
+          brew list poppler >/dev/null 2>&1 || brew install poppler
+
       - name: Build
         env:
           GOOS: darwin
@@ -163,7 +183,7 @@ jobs:
             -X github.com/imyousuf/CodeEagle/internal/cli.Version=${{ steps.version.outputs.version }} \
             -X github.com/imyousuf/CodeEagle/internal/cli.Commit=${{ steps.version.outputs.commit }} \
             -X github.com/imyousuf/CodeEagle/internal/cli.BuildDate=${{ steps.version.outputs.date }}"
-          go build -ldflags "$LDFLAGS" -o dist/codeeagle ./cmd/codeeagle
+          go build -tags poppler -ldflags "$LDFLAGS" -o dist/codeeagle ./cmd/codeeagle
           tar -czvf dist/codeeagle-darwin-arm64.tar.gz -C dist codeeagle
           rm dist/codeeagle
 
