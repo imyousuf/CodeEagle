@@ -66,6 +66,17 @@ type TopicProfiles struct {
 	byID map[string]*TopicProfile
 	// cooccur counts, per unordered pair, the meetings filed under both.
 	cooccur map[pairKey]int
+	// counted names the meetings already folded into cooccur.
+	//
+	// A meeting reaches this twice: loading counts every meeting already in
+	// the graph, and indexing one then reports it again. Without a record of
+	// which have been counted, the first meeting of every run is counted
+	// twice, and re-indexing a whole corpus doubles all of them -- while
+	// Meetings, being a set, stays right. The judge is then shown a pair
+	// filed under both of two topics more often than either topic was filed
+	// under at all, which cannot happen, on one of the few pieces of
+	// evidence it is given.
+	counted map[string]bool
 	// adjacent counts, per unordered pair, the times the two were
 	// consecutive segments of one meeting.
 	adjacent map[pairKey]int
@@ -118,6 +129,7 @@ func LoadTopicProfiles(ctx context.Context, store graph.Store) (*TopicProfiles, 
 		byID:     make(map[string]*TopicProfile),
 		cooccur:  make(map[pairKey]int),
 		adjacent: make(map[pairKey]int),
+		counted:  make(map[string]bool),
 	}
 
 	profile := func(id string) (*TopicProfile, error) {
@@ -157,6 +169,7 @@ func LoadTopicProfiles(ctx context.Context, store graph.Store) (*TopicProfiles, 
 			}
 		}
 		sort.Strings(ids)
+		tp.counted[m.QualifiedName] = true
 		for i := range ids {
 			for j := i + 1; j < len(ids); j++ {
 				tp.cooccur[keyOf(ids[i], ids[j])]++
@@ -308,7 +321,17 @@ func (tp *TopicProfiles) ensure(n *graph.Node) *TopicProfile {
 }
 
 // noteMeeting records that one meeting was filed under all of these topics.
-func (tp *TopicProfiles) noteMeeting(members []*TopicProfile) {
+//
+// Ignored for a meeting already counted, which is the common case: loading
+// the profiles counts everything the graph holds, and the meeting just
+// written is part of that by the time this is called.
+func (tp *TopicProfiles) noteMeeting(session string, members []*TopicProfile) {
+	if session != "" {
+		if tp.counted[session] {
+			return
+		}
+		tp.counted[session] = true
+	}
 	for i := range members {
 		for j := i + 1; j < len(members); j++ {
 			if members[i] != members[j] {

@@ -185,7 +185,7 @@ func (r *TopicRelater) RelateMeeting(ctx context.Context, session string, topics
 		}
 		members = append(members, p)
 	}
-	r.profiles.noteMeeting(members)
+	r.profiles.noteMeeting(session, members)
 
 	candidates := make(map[pairKey]*TopicPair)
 	propose := func(a, b *TopicProfile, src CandidateSource, rank int) {

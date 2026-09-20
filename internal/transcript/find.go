@@ -354,8 +354,16 @@ func FindMeetings(ctx context.Context, store graph.Store, q Query) (*Found, erro
 			h.add(m.match(MatchFollowUp, a, text, a.Properties[graph.PropSummary]))
 		}
 	}
-	if only(MatchTopic) && len(terms) > 0 {
-		if err := matchTopics(ctx, store, m, byID, byRecording, q.Breadth); err != nil {
+	if only(MatchTopic) {
+		// With no words to match, this is a listing of what carries a topic
+		// at all, the way `--only decision` lists what carries a decision.
+		// Following related edges then means nothing -- everything is a seed
+		// and every neighbour is reachable -- so expansion is off.
+		breadth := q.Breadth
+		if len(terms) == 0 {
+			breadth = BreadthNone
+		}
+		if err := matchTopics(ctx, store, m, byID, byRecording, breadth); err != nil {
 			return nil, err
 		}
 	}
@@ -434,6 +442,27 @@ func matchTopics(ctx context.Context, store graph.Store, m *matcher, byID, byRec
 		}
 	}
 
+	// Every topic's own match, found before any walking starts.
+	//
+	// A topic under a matched parent is credited with the parent's evidence,
+	// because the walk reaches it from above. Where the child matched too --
+	// and matched more of the query, which is the interesting case -- that
+	// loses the better evidence: the meetings filed under it are the best
+	// answers and would be the ones reported as not covering every word.
+	// Crediting before the visited check instead would credit a topic once
+	// per path that reaches it, so the evidence is swapped rather than the
+	// guard moved.
+	own := make(map[string]*Match, len(topics))
+	for _, t := range topics {
+		text := t.Name
+		if aliases := t.Properties[graph.PropAliases]; aliases != "" {
+			text += "\n" + aliases
+		}
+		if ev := m.match(MatchTopic, nil, text, t.Name); ev != nil {
+			own[t.ID] = ev
+		}
+	}
+
 	visited := make(map[string]bool)
 	var walk func(t *graph.Node, label string, ev Match, depth int)
 	walk = func(t *graph.Node, label string, ev Match, depth int) {
@@ -441,6 +470,9 @@ func matchTopics(ctx context.Context, store graph.Store, m *matcher, byID, byRec
 			return
 		}
 		visited[t.ID] = true
+		if mine, ok := own[t.ID]; ok && depth > 0 {
+			ev, label = *mine, t.Name
+		}
 		ev.Label = label
 		creditTopic(t, ev)
 		children, err := TopicChildren(ctx, store, t.ID)
@@ -464,12 +496,8 @@ func matchTopics(ctx context.Context, store graph.Store, m *matcher, byID, byRec
 	}
 	var frontier []seed
 	for _, t := range topics {
-		text := t.Name
-		if aliases := t.Properties[graph.PropAliases]; aliases != "" {
-			text += "\n" + aliases
-		}
-		ev := m.match(MatchTopic, nil, text, t.Name)
-		if ev == nil {
+		ev, ok := own[t.ID]
+		if !ok {
 			continue
 		}
 		walk(t, t.Name, *ev, 0)
