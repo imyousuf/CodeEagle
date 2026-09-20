@@ -90,6 +90,12 @@ func NewPlanner(client llm.Client, ctxBuilder *ContextBuilder, repoPaths []strin
 	if p.vectorStore != nil && p.vectorStore.Available() {
 		registry.Register(&semanticSearchTool{vs: p.vectorStore, store: ctxBuilder.store})
 	}
+	// Meetings hold the reasoning that never reaches the codebase — why a
+	// design was chosen, what was ruled out, who owns what next — so the
+	// planner gets them when any are indexed.
+	for _, tool := range NewMeetingTools(context.Background(), ctxBuilder.store) {
+		registry.Register(tool)
+	}
 	p.registry = registry
 
 	return p

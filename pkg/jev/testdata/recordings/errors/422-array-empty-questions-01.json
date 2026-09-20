@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "name": "errors/422-array-empty-questions-01",
+  "note": "Schema validation on minProperties.",
+  "recorded_at": "2026-09-19T21:49:31+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": null,
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "command": "git push --force origin main",
+        "working_directory": "/app/service-payments",
+        "session_context": "Refactoring migration files"
+      },
+      "questions": {}
+    }
+  },
+  "response": {
+    "status": 422,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba55c12742b88a62ebc7cd38385",
+      "x-envoy-upstream-service-time": "7"
+    },
+    "body": {
+      "detail": [
+        {
+          "type": "too_short",
+          "loc": [
+            "body",
+            "questions"
+          ],
+          "msg": "Dictionary should have at least 1 item after validation, not 0",
+          "input": {},
+          "ctx": {
+            "field_type": "Dictionary",
+            "min_length": 1,
+            "actual_length": 0
+          }
+        }
+      ]
+    }
+  },
+  "latency_ms": 302,
+  "key": "sha256:1a7acc2d87d94ea94716142b38930ad2d064e2405a63591437b6e503a6a64255"
+}

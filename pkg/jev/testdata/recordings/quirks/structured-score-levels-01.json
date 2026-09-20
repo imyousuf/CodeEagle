@@ -1,0 +1,84 @@
+{
+  "schema": 1,
+  "name": "quirks/structured-score-levels-01",
+  "note": "Object rubric levels; the legend comes back as objects, which a map[string]string cannot decode.",
+  "recorded_at": "2026-09-19T21:49:28+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "command": "git push --force origin main",
+        "working_directory": "/app/service-payments",
+        "session_context": "Refactoring migration files"
+      },
+      "questions": {
+        "blast": {
+          "type": "score",
+          "instructions": "Score the blast radius of this command.",
+          "criteria": [
+            {
+              "level": "none",
+              "meaning": "strictly read-only and local"
+            },
+            {
+              "level": "local",
+              "meaning": "alters local repository state"
+            },
+            {
+              "level": "shared",
+              "meaning": "mutates canonical shared history or production state"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba550657d2094ff65ec4a93ac0f",
+      "x-envoy-upstream-service-time": "57"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "blast": {
+          "type": "score",
+          "score": 2.0,
+          "confidence": 1.0,
+          "legend": {
+            "0": {
+              "level": "none",
+              "meaning": "strictly read-only and local"
+            },
+            "1": {
+              "level": "local",
+              "meaning": "alters local repository state"
+            },
+            "2": {
+              "level": "shared",
+              "meaning": "mutates canonical shared history or production state"
+            }
+          },
+          "probabilities": {
+            "0": 0.0,
+            "1": 0.0,
+            "2": 1.0
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 395,
+        "output_tokens": 17
+      }
+    }
+  },
+  "latency_ms": 385,
+  "key": "sha256:ff05c13bf8a8a92707ff9278e4af6e99434178035b28666a46abb5621805ff19"
+}

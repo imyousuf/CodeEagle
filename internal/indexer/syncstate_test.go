@@ -14,9 +14,6 @@ func TestLoadSyncStateMissingFile(t *testing.T) {
 	if state.LastCommit != "" {
 		t.Errorf("LastCommit = %q, want empty", state.LastCommit)
 	}
-	if state.FileTimes != nil {
-		t.Errorf("FileTimes = %v, want nil", state.FileTimes)
-	}
 }
 
 func TestSyncStateSaveAndLoad(t *testing.T) {
@@ -27,10 +24,6 @@ func TestSyncStateSaveAndLoad(t *testing.T) {
 	original := &SyncState{
 		BranchStates: map[string]*BranchSyncState{
 			"main": {LastCommit: "abc123def456", Timestamp: now},
-		},
-		FileTimes: map[string]time.Time{
-			"/path/to/file.go":  now.Add(-time.Hour),
-			"/path/to/other.py": now.Add(-2 * time.Hour),
 		},
 	}
 
@@ -46,21 +39,6 @@ func TestSyncStateSaveAndLoad(t *testing.T) {
 	bs := loaded.GetBranchState("main")
 	if bs.LastCommit != "abc123def456" {
 		t.Errorf("BranchStates[main].LastCommit = %q, want %q", bs.LastCommit, "abc123def456")
-	}
-
-	if len(loaded.FileTimes) != len(original.FileTimes) {
-		t.Fatalf("len(FileTimes) = %d, want %d", len(loaded.FileTimes), len(original.FileTimes))
-	}
-
-	for k, v := range original.FileTimes {
-		got, ok := loaded.FileTimes[k]
-		if !ok {
-			t.Errorf("missing FileTimes key %q", k)
-			continue
-		}
-		if !got.Equal(v) {
-			t.Errorf("FileTimes[%q] = %v, want %v", k, got, v)
-		}
 	}
 }
 

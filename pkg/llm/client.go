@@ -51,6 +51,18 @@ type Config struct {
 	Location string
 	// CredentialsFile is the path to a GCP service account credentials JSON file (for Vertex AI).
 	CredentialsFile string
+	// MaxTokens caps the response length. Zero means the provider default.
+	MaxTokens int
+	// Temperature overrides the provider's sampling temperature. Nil means the
+	// provider default; extraction workloads usually want a low value.
+	Temperature *float64
+	// ReasoningEffort budgets a reasoning model's internal deliberation
+	// ("low", "medium", "high"). Providers that do not reason ignore it.
+	ReasoningEffort string
+	// ContextWindow is how much context the model should be given, in tokens.
+	// It matters for locally served models, which default to a small window and
+	// silently discard whatever does not fit. Zero means the provider default.
+	ContextWindow int
 }
 
 // ProviderFactory is a function type for creating LLM clients.

@@ -186,17 +186,30 @@ func newWatchCmd() *cobra.Command {
 				return nil
 			}
 
+			// Determine non-git roots for basename-prefixed paths.
+			nonGitRoots := make(map[string]bool)
+			for _, p := range paths {
+				if !indexer.IsGitRepo(p) {
+					nonGitRoots[p] = true
+				}
+			}
+
 			// Create indexer.
 			idx := indexer.NewIndexer(indexer.IndexerConfig{
-				GraphStore:     store,
-				ParserRegistry: registry,
-				WatcherConfig:  wcfg,
-				RepoRoots:      paths,
-				Verbose:        verbose,
-				Logger:         logFn,
-				LLMClient:      llmClient,
-				AutoSummarize:  cfg.Agents.AutoSummarize,
-				PostIndexHook:  postIndexHook,
+				// A document that is also a transcript is marked as one, so meeting
+				// indexing can find it later and additionally extract who spoke
+				// and what was agreed. It stays in the documents index either way.
+				MarkTranscripts: cfg.Transcripts.Enabled,
+				GraphStore:      store,
+				ParserRegistry:  registry,
+				WatcherConfig:   wcfg,
+				RepoRoots:       paths,
+				NonGitRoots:     nonGitRoots,
+				Verbose:         verbose,
+				Logger:          logFn,
+				LLMClient:       llmClient,
+				AutoSummarize:   cfg.Agents.AutoSummarize,
+				PostIndexHook:   postIndexHook,
 			})
 
 			// Set up signal handling.

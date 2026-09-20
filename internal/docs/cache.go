@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/dgraph-io/badger/v4"
+	"github.com/imyousuf/CodeEagle/internal/badgerutil"
 )
 
 const (
@@ -24,8 +25,7 @@ type Cache struct {
 
 // OpenCache opens (or creates) the docs cache at the given directory path.
 func OpenCache(dbPath string) (*Cache, error) {
-	opts := badger.DefaultOptions(dbPath)
-	opts.Logger = nil
+	opts := badgerutil.TunedOptions(dbPath, badgerutil.DBRoleSecondary)
 	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, fmt.Errorf("open docs cache: %w", err)
@@ -115,6 +115,61 @@ func (c *Cache) IsSkipped(contentHash string) bool {
 		return err
 	})
 	return err == nil
+}
+
+// MigratePaths iterates all doc:hash: entries and re-keys those for which
+// remap returns a non-empty new path. The content hash value and any associated
+// doc:result: / doc:skip: entries are unchanged (they're keyed by hash, not path).
+// Returns the number of entries migrated.
+func (c *Cache) MigratePaths(remap func(oldPath string) (newPath string, migrate bool)) (int, error) {
+	// Phase 1: collect entries to migrate.
+	type entry struct {
+		oldPath string
+		newPath string
+		hash    string
+	}
+	var entries []entry
+	err := c.db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		prefix := []byte(prefixHash)
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			oldPath := strings.TrimPrefix(string(item.Key()), prefixHash)
+			newPath, ok := remap(oldPath)
+			if !ok {
+				continue
+			}
+			var hash string
+			if err := item.Value(func(val []byte) error {
+				hash = string(val)
+				return nil
+			}); err != nil {
+				return err
+			}
+			entries = append(entries, entry{oldPath: oldPath, newPath: newPath, hash: hash})
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("scan cache entries: %w", err)
+	}
+
+	// Phase 2: write new keys and delete old ones.
+	migrated := 0
+	for _, e := range entries {
+		err := c.db.Update(func(txn *badger.Txn) error {
+			if err := txn.Set([]byte(prefixHash+e.newPath), []byte(e.hash)); err != nil {
+				return err
+			}
+			return txn.Delete([]byte(prefixHash + e.oldPath))
+		})
+		if err != nil {
+			return migrated, fmt.Errorf("migrate %s -> %s: %w", e.oldPath, e.newPath, err)
+		}
+		migrated++
+	}
+	return migrated, nil
 }
 
 // ListSkipped returns all file paths whose extraction was skipped.

@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "name": "models/list-01",
+  "note": "The only other endpoint. Aliases only; pinned releases are not listed.",
+  "recorded_at": "2026-09-19T21:49:33+00:00",
+  "api_version": "0.2.0",
+  "model_requested": null,
+  "model_answered": null,
+  "request": {
+    "method": "GET",
+    "path": "/v1/models"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba561de7700951d9d68001ee93a",
+      "x-envoy-upstream-service-time": "5"
+    },
+    "body": {
+      "models": [
+        {
+          "name": "jev-latest",
+          "description": "The latest iteration of TypeSafe's System One Model: Jev",
+          "release_date": "2026-09-10T18:38:01.391457+00:00"
+        },
+        {
+          "name": "jev-preview",
+          "description": "A preview version of `jev-latest`: should be better in most ways",
+          "release_date": "2026-09-10T18:39:06.057655+00:00"
+        }
+      ]
+    }
+  },
+  "latency_ms": 289,
+  "key": "sha256:31859108c0d9d31c57940415975dd0e647887ce489ff7a1deb44eee760d3216f"
+}

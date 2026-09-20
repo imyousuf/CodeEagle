@@ -5,14 +5,26 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
+	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
+	"github.com/imyousuf/CodeEagle/internal/parser"
+	"github.com/imyousuf/CodeEagle/internal/watcher"
 )
 
 const syncStateFile = "sync.state"
+
+// hashEntry tracks a canonical node for a given content hash during sync.
+type hashEntry struct {
+	canonicalNodeID string
+	mimeType        string
+}
 
 // SyncFiles performs an incremental (or full) sync of the given paths.
 // For git repositories, it uses commit-based diffing. For non-git directories,
@@ -28,13 +40,41 @@ func SyncFiles(ctx context.Context, idx *Indexer, paths []string, configDir stri
 	// Migrate legacy flat state to branch-aware on first load.
 	state.MigrateLegacy(branch)
 
+	// Auto-backpop UpdatedAt for existing nodes that lack it.
+	if !state.UpdatedAtBackpopDone {
+		count, err := BackpopUpdatedAt(ctx, idx.Store(), paths, idx.log)
+		if err != nil {
+			idx.log("Warning: UpdatedAt backpop: %v", err)
+		} else {
+			if count > 0 {
+				idx.log("Backpopulated UpdatedAt for %d file nodes", count)
+			}
+			state.UpdatedAtBackpopDone = true
+			_ = state.Save(statePath)
+		}
+	}
+
+	// Auto-backpop content_hash for existing nodes that lack it.
+	if !state.ContentHashBackpopDone {
+		count, err := BackpopContentHash(ctx, idx.Store(), paths, idx.log)
+		if err != nil {
+			idx.log("Warning: content_hash backpop: %v", err)
+		} else {
+			if count > 0 {
+				idx.log("Backpopulated content_hash for %d file nodes", count)
+			}
+			state.ContentHashBackpopDone = true
+			_ = state.Save(statePath)
+		}
+	}
+
 	for _, repoPath := range paths {
-		if isGitRepo(repoPath) {
+		if IsGitRepo(repoPath) {
 			if err := syncGitRepo(ctx, idx, repoPath, state, full, branch); err != nil {
 				return fmt.Errorf("sync git repo %s: %w", repoPath, err)
 			}
 		} else {
-			if err := syncDirectory(ctx, idx, repoPath, state, full); err != nil {
+			if err := syncDirectory(ctx, idx, repoPath, full); err != nil {
 				return fmt.Errorf("sync directory %s: %w", repoPath, err)
 			}
 		}
@@ -47,8 +87,8 @@ func SyncFiles(ctx context.Context, idx *Indexer, paths []string, configDir stri
 	return nil
 }
 
-// isGitRepo checks if the given path has a .git directory.
-func isGitRepo(path string) bool {
+// IsGitRepo checks if the given path has a .git directory.
+func IsGitRepo(path string) bool {
 	info, err := os.Stat(filepath.Join(path, ".git"))
 	return err == nil && info.IsDir()
 }
@@ -101,10 +141,11 @@ func syncGitRepo(ctx context.Context, idx *Indexer, repoPath string, state *Sync
 				}
 			}
 
-			// Re-index added and modified files.
+			// Re-index added and modified files with current sync time.
+			syncTime := time.Now()
 			for _, relPath := range append(added, modified...) {
 				absPath := filepath.Join(repoPath, relPath)
-				if err := idx.IndexFile(ctx, absPath); err != nil {
+				if err := idx.IndexFileWithTimestamp(ctx, absPath, syncTime); err != nil {
 					idx.log("Warning: index file %s: %v", absPath, err)
 				}
 			}
@@ -116,75 +157,358 @@ func syncGitRepo(ctx context.Context, idx *Indexer, repoPath string, state *Sync
 	return nil
 }
 
+// underAny reports whether a path lies beneath one of the given prefixes.
+func underAny(path string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// walkResult holds a file discovered during parallel directory walk.
+type walkResult struct {
+	absPath string
+	modTime time.Time
+}
+
+// syncWork represents a file that needs to be indexed during directory sync.
+type syncWork struct {
+	absPath string
+	relPath string
+	modTime time.Time
+}
+
+// parallelWalkDir concurrently walks a directory tree, returning all non-excluded
+// regular files with their modification times. Uses os.ReadDir for directory
+// listing (no stat per entry) and bounded goroutines for subdirectory traversal.
+// This is significantly faster than filepath.Walk on high-latency filesystems
+// (e.g., SSHFS) because stat() calls are parallelized across directories.
+// It also reports the directories it could not read. A caller that treats
+// "not seen on disk" as "deleted from disk" must not apply that to a subtree
+// it was never able to look at.
+func parallelWalkDir(ctx context.Context, root string, matcher *watcher.GitIgnoreMatcher, numWorkers int) ([]walkResult, []string, error) {
+	var (
+		mu         sync.Mutex
+		results    []walkResult
+		unreadable []string
+		wg         sync.WaitGroup
+		sem        = make(chan struct{}, numWorkers)
+		walkErr    error
+		errOnce    sync.Once
+	)
+
+	var walkDir func(dir string)
+	walkDir = func(dir string) {
+		defer wg.Done()
+
+		// Check context cancellation.
+		select {
+		case <-ctx.Done():
+			errOnce.Do(func() { walkErr = ctx.Err() })
+			return
+		default:
+		}
+
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			// Remember it rather than passing over it silently: a mount that
+			// dropped or a directory owned by someone else is indistinguishable
+			// here from one whose files were all deleted.
+			mu.Lock()
+			unreadable = append(unreadable, dir)
+			mu.Unlock()
+			return
+		}
+
+		for _, entry := range entries {
+			path := filepath.Join(dir, entry.Name())
+
+			if entry.IsDir() {
+				if matcher.Match(path) {
+					continue // skip excluded directory
+				}
+				wg.Add(1)
+				select {
+				case sem <- struct{}{}:
+					go func() {
+						defer func() { <-sem }()
+						walkDir(path)
+					}()
+				default:
+					// All workers busy — process inline to prevent deadlock.
+					walkDir(path)
+				}
+				continue
+			}
+
+			// Regular file — skip excluded.
+			if matcher.Match(path) {
+				continue
+			}
+
+			info, err := entry.Info() // stat()
+			if err != nil {
+				continue
+			}
+
+			mu.Lock()
+			results = append(results, walkResult{absPath: path, modTime: info.ModTime()})
+			mu.Unlock()
+		}
+	}
+
+	wg.Add(1)
+	sem <- struct{}{}
+	go func() {
+		defer func() { <-sem }()
+		walkDir(root)
+	}()
+	wg.Wait()
+
+	return results, unreadable, walkErr
+}
+
 // syncDirectory performs mtime-based sync for a non-git directory.
-// State tracking uses relative paths (relative to repo roots) so the state
-// file is portable across machines.
-func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, state *SyncState, full bool) error {
+// Uses the DB as the single source of truth — no sync state file needed.
+// File paths are basename-prefixed (e.g., "Pictures/a.jpg") for unique
+// identity across directories.
+//
+// The sync operates in four phases:
+//  1. Parallel walk — discover all files + mtimes concurrently (fast on SSHFS)
+//  2. Filter — skip unchanged files (DB timestamp match) and non-parseable files
+//  3. Index — process changed files sequentially with content-hash dedup
+//  4. Cleanup — remove DB nodes for files deleted from disk (basename-scoped)
+func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, full bool) error {
 	if full {
 		if idx.verbose {
 			idx.log("Full index of %s (non-git)", dirPath)
 		}
-		// Clear file times for this dir (keys may be relative or absolute from legacy state).
-		if state.FileTimes != nil {
-			for k := range state.FileTimes {
-				if isSubPath(k, dirPath) || !filepath.IsAbs(k) {
-					delete(state.FileTimes, k)
-				}
-			}
-		}
 		return idx.IndexDirectory(ctx, dirPath)
 	}
 
-	if state.FileTimes == nil {
-		state.FileTimes = make(map[string]time.Time)
+	// Batch-load all indexed file state from the DB into memory.
+	// A single scan provides timestamps for skip decisions and content
+	// hashes for duplicate detection — no sync state file needed.
+	dbState := loadIndexedFileState(ctx, idx.Store())
+	indexedTimes := dbState.times
+	if idx.verbose {
+		idx.log("Loaded %d indexed file timestamps from DB", len(indexedTimes))
 	}
 
-	// Track which relative paths still exist.
-	existing := make(map[string]struct{})
-
-	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
+	// Build in-memory hash index from existing DB content hashes for dedup.
+	hashIndex := make(map[string]*hashEntry)
+	for relPath, hash := range dbState.hashes {
+		if _, exists := hashIndex[hash]; !exists {
+			fileName := filepath.Base(relPath)
+			nodeID := graph.NewNodeID(string(graph.NodeDocument), relPath, fileName)
+			hashIndex[hash] = &hashEntry{
+				canonicalNodeID: nodeID,
+				mimeType:        detectMIMEType(relPath),
+			}
 		}
+	}
+
+	// ── Phase 1: Parallel walk ─────────────────────────────────────────
+	numWorkers := runtime.NumCPU()
+	if numWorkers > 8 {
+		numWorkers = 8
+	}
+	if idx.verbose {
+		idx.log("Scanning %s with %d workers...", dirPath, numWorkers)
+	}
+
+	walkResults, unreadableDirs, err := parallelWalkDir(ctx, dirPath, idx.matcher, numWorkers)
+	if err != nil {
+		return err
+	}
+	if len(unreadableDirs) > 0 {
+		idx.log("Warning: %d directories could not be read; their files are left "+
+			"in the graph rather than treated as deleted (first: %s)",
+			len(unreadableDirs), unreadableDirs[0])
+	}
+
+	if idx.verbose {
+		idx.log("Scan complete: %d files found", len(walkResults))
+	}
+
+	// ── Phase 2: Filter ────────────────────────────────────────────────
+	existing := make(map[string]struct{}, len(walkResults))
+	var toIndex []syncWork
+
+	for _, wr := range walkResults {
+		relPath := idx.toRelativePath(wr.absPath)
+		existing[relPath] = struct{}{}
+
+		// Skip if no parser registered for this file type.
+		if _, hasParser := idx.registry.ParserForFile(wr.absPath); !hasParser {
+			continue
+		}
+
+		// Skip if DB has matching or newer timestamp — file hasn't changed.
+		if dbTime, inDB := indexedTimes[relPath]; inDB && !wr.modTime.After(dbTime) {
+			continue
+		}
+
+		toIndex = append(toIndex, syncWork{absPath: wr.absPath, relPath: relPath, modTime: wr.modTime})
+	}
+
+	if idx.verbose || idx.showProgress {
+		idx.log("Sync %s: %d files to index out of %d total", dirPath, len(toIndex), len(walkResults))
+	}
+
+	// ── Phase 3: Index (sequential) ────────────────────────────────────
+	var progress *syncProgress
+	if idx.showProgress && len(toIndex) > 0 {
+		progress = newSyncProgress(len(toIndex), "index", idx.log)
+	}
+
+	duplicatesSkipped := 0
+	const gcInterval = 50
+	filesSinceLastGC := 0
+
+	for _, w := range toIndex {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
-		if info.IsDir() {
-			return nil
+		indexed, hash := syncIndexFile(ctx, idx, w.absPath, w.relPath, w.modTime, hashIndex)
+
+		if !indexed && hash != "" {
+			duplicatesSkipped++
 		}
 
-		relPath := idx.toRelativePath(path)
-		existing[relPath] = struct{}{}
-		modTime := info.ModTime()
+		if progress != nil {
+			progress.tick(indexed)
+		}
 
-		prevTime, hasPrev := state.FileTimes[relPath]
-		if !hasPrev || modTime.After(prevTime) {
-			if err := idx.IndexFile(ctx, path); err != nil {
-				idx.log("Warning: index file %s: %v", path, err)
+		// Periodically force GC to reclaim large image pixel buffers.
+		if indexed {
+			filesSinceLastGC++
+			if filesSinceLastGC >= gcInterval {
+				runtime.GC()
+				debug.FreeOSMemory()
+				filesSinceLastGC = 0
 			}
-			state.FileTimes[relPath] = modTime
 		}
-
-		return nil
-	})
-	if err != nil {
-		return err
 	}
 
-	// Delete nodes for files that no longer exist.
-	for relPath := range state.FileTimes {
-		if _, ok := existing[relPath]; !ok {
-			if err := idx.Store().DeleteByFile(ctx, relPath); err != nil {
-				idx.log("Warning: delete by file %s: %v", relPath, err)
-			}
-			delete(state.FileTimes, relPath)
+	if duplicatesSkipped > 0 && idx.showProgress {
+		idx.log("Sync %s: %d duplicate files detected (skipped full parsing)", dirPath, duplicatesSkipped)
+	}
+
+	// ── Phase 4: Cleanup deleted files ────────────────────────────────
+	// Diff walked files against DB entries scoped to this directory's basename.
+	// Only basename-scoped paths are checked, preventing cross-directory deletion.
+	basename := filepath.Base(dirPath)
+	prefix := basename + "/"
+
+	// A subtree that could not be read contributed no files, so every node
+	// under it looks deleted. Leaving stale nodes behind is recoverable; a
+	// dropped mount erasing the graph for everything below it is not.
+	skipPrefixes := make([]string, 0, len(unreadableDirs))
+	for _, dir := range unreadableDirs {
+		skipPrefixes = append(skipPrefixes, idx.toRelativePath(dir)+"/")
+	}
+
+	deletedCount := 0
+	for dbPath := range indexedTimes {
+		if !strings.HasPrefix(dbPath, prefix) {
+			continue
 		}
+		if underAny(dbPath, skipPrefixes) {
+			continue
+		}
+		if _, stillExists := existing[dbPath]; !stillExists {
+			if idx.verbose {
+				idx.log("Removing deleted file: %s", dbPath)
+			}
+			if err := idx.Store().DeleteByFile(ctx, dbPath); err != nil {
+				idx.log("Warning: delete %s: %v", dbPath, err)
+			}
+			deletedCount++
+		}
+	}
+	if deletedCount > 0 {
+		idx.log("Removed %d deleted file nodes from %s", deletedCount, dirPath)
 	}
 
 	return nil
+}
+
+// syncIndexFile handles indexing a single file during directory sync, with
+// content-hash-based duplicate detection. Returns (didFullIndex, contentHash).
+// If the file is a duplicate of an already-indexed generic file, it creates
+// a minimal node + DuplicateOf edge and returns (false, hash).
+// For code files (non-generic parser), duplicates still get full indexing.
+func syncIndexFile(ctx context.Context, idx *Indexer, absPath, relPath string, modTime time.Time, hashIndex map[string]*hashEntry) (bool, string) {
+	// Check if this file would be handled by the generic parser (images, docs).
+	// Only generic files get duplicate-skip optimization; code files always
+	// get full parsing since their nodes depend on path context.
+	p, hasParser := idx.registry.ParserForFile(absPath)
+	if !hasParser {
+		return false, "" // no parser at all
+	}
+
+	// Pre-read skip: avoid expensive os.ReadFile for files the parser would skip
+	// (e.g., unknown binary formats like .CR3, .NEF in the generic parser).
+	if skipper, ok := p.(parser.FileSkipper); ok && skipper.ShouldSkipFile(absPath) {
+		return false, ""
+	}
+
+	isGeneric := p.Language() == "generic"
+
+	// For generic files, compute hash via streaming (O(1) memory) to check
+	// for duplicates BEFORE reading the full file content into memory.
+	// This prevents OOM when syncing directories with many large files.
+	if isGeneric {
+		hash, err := computeContentHashFromFile(absPath)
+		if err != nil {
+			idx.log("Warning: hash file %s: %v", absPath, err)
+			return false, ""
+		}
+
+		mimeType := detectMIMEType(relPath)
+
+		// Check if we've already seen this content hash.
+		if entry, exists := hashIndex[hash]; exists {
+			// Duplicate! Create minimal node + DuplicateOf edge.
+			// No need to read file content — saves significant memory.
+			if err := idx.IndexDuplicateFile(ctx, absPath, modTime, hash, mimeType, entry.canonicalNodeID); err != nil {
+				idx.log("Warning: index duplicate %s: %v", absPath, err)
+			}
+			return false, hash
+		}
+
+		// First occurrence — read content for full parsing.
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			idx.log("Warning: read file %s: %v", absPath, err)
+			return false, ""
+		}
+
+		if err := idx.IndexFileWithContent(ctx, absPath, content, hash, modTime); err != nil {
+			idx.log("Warning: index file %s: %v", absPath, err)
+		}
+
+		// Register in hash index for future duplicates.
+		fileName := filepath.Base(relPath)
+		nodeID := graph.NewNodeID(string(graph.NodeDocument), relPath, fileName)
+		hashIndex[hash] = &hashEntry{
+			canonicalNodeID: nodeID,
+			mimeType:        mimeType,
+		}
+		return true, hash
+	}
+
+	// Non-generic (code) file — always do full indexing.
+	if err := idx.IndexFileWithTimestamp(ctx, absPath, modTime); err != nil {
+		idx.log("Warning: index file %s: %v", absPath, err)
+	}
+	return true, ""
 }
 
 // AutoImportIfNeeded checks if the export file has been updated since the last import
@@ -263,6 +587,9 @@ func CleanupStaleBranches(ctx context.Context, store *embedded.BranchStore, repo
 	}
 
 	for _, branch := range dbBranches {
+		if embedded.IsReservedScope(branch) {
+			continue // ours, not a branch; git will never list it
+		}
 		if _, ok := existing[branch]; !ok {
 			if logFn != nil {
 				logFn("Cleaning up stale branch data: %s", branch)
@@ -279,13 +606,4 @@ func CleanupStaleBranches(ctx context.Context, store *embedded.BranchStore, repo
 	}
 
 	return nil
-}
-
-// isSubPath checks if child is under parent directory.
-func isSubPath(child, parent string) bool {
-	rel, err := filepath.Rel(parent, child)
-	if err != nil {
-		return false
-	}
-	return len(rel) > 0 && !strings.HasPrefix(rel, "..")
 }

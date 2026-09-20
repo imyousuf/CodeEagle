@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "name": "quirks/structured-instructions-01",
+  "note": "Instructions as a JSON object, which the OpenAPI schema permits.",
+  "recorded_at": "2026-09-19T21:49:28+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "command": "git push --force origin main",
+        "working_directory": "/app/service-payments",
+        "session_context": "Refactoring migration files"
+      },
+      "questions": {
+        "destructive": {
+          "type": "noul",
+          "instructions": {
+            "task": "Decide whether the command is destructive",
+            "definition": "Destructive means it rewrites shared history or deletes data that cannot be recovered"
+          }
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba54ef17e339238bf66f067397d",
+      "x-envoy-upstream-service-time": "46"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "destructive": {
+          "type": "noul",
+          "noul": 0.91
+        }
+      },
+      "usage": {
+        "input_tokens": 340,
+        "output_tokens": 22
+      }
+    }
+  },
+  "latency_ms": 337,
+  "key": "sha256:4a2faa46bed3866099394a8d3ec06ad11430982d19c5ff1385248d19d0b5a5ef"
+}

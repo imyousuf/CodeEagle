@@ -1,0 +1,266 @@
+package transcript
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/imyousuf/CodeEagle/internal/graph"
+)
+
+// PersonRegistry resolves a name spoken in one meeting to a durable person in
+// the graph.
+//
+// This is where identity stops being per-meeting. Each recording yields names
+// as the transcriber heard them that day, so the same colleague arrives as
+// "Imran" from one meeting and "Imron" from another. Without a registry the
+// graph accumulates a person per spelling, and the question "what has Imran
+// committed to?" silently returns a fraction of the answer.
+//
+// Person nodes are global — keyed on name with no file path — which is the
+// same convention face recognition uses. A person identified by voice in a
+// meeting and by face in a photograph therefore converge on one node.
+type PersonRegistry struct {
+	// mu guards the maps. Enrichment workers read the roster concurrently
+	// while the writer goroutine adds people to it.
+	mu    sync.RWMutex
+	store graph.Store
+	// byNormalized indexes people by their normalized name and by every alias
+	// recorded for them.
+	byNormalized map[string]*graph.Node
+	// people is the distinct set, used for fuzzy matching.
+	people []*graph.Node
+	// recent lists people most recently created or confirmed first.
+	//
+	// Identification feeds known people into later meetings and the prompt
+	// keeps only the first sixty, so this order decides who survives that
+	// cut. Alphabetical order would quietly drop the colleague recognized
+	// last week in favour of one whose name begins with A.
+	recent []*graph.Node
+	// created counts people added during this run.
+	created int
+}
+
+// LoadPersonRegistry reads the people already in the graph.
+func LoadPersonRegistry(ctx context.Context, store graph.Store) (*PersonRegistry, error) {
+	nodes, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodePerson})
+	if err != nil {
+		return nil, fmt.Errorf("query people: %w", err)
+	}
+
+	r := &PersonRegistry{
+		store:        store,
+		byNormalized: make(map[string]*graph.Node, len(nodes)*2),
+	}
+	for _, n := range nodes {
+		r.index(n)
+	}
+	return r, nil
+}
+
+// noteUse moves a person to the front of the recency order.
+//
+// Called when they are created or matched, so "recently confirmed" means what
+// it says. The list is short — a corpus of hundreds of meetings yields low
+// hundreds of people — so the linear scan is cheaper than the bookkeeping to
+// avoid it.
+func (r *PersonRegistry) noteUse(n *graph.Node) {
+	for i, p := range r.recent {
+		if p.ID == n.ID {
+			r.recent = append(r.recent[:i], r.recent[i+1:]...)
+			break
+		}
+	}
+	r.recent = append([]*graph.Node{n}, r.recent...)
+}
+
+// index records a person under their name and all known aliases.
+func (r *PersonRegistry) index(n *graph.Node) {
+	if _, seen := r.byNormalized[NormalizeName(n.Name)]; !seen {
+		r.people = append(r.people, n)
+		r.recent = append(r.recent, n)
+	}
+	r.byNormalized[NormalizeName(n.Name)] = n
+	for _, alias := range aliasesOf(n) {
+		r.byNormalized[NormalizeName(alias)] = n
+	}
+}
+
+// aliasesOf returns the alternate spellings recorded for a person.
+func aliasesOf(n *graph.Node) []string {
+	if n.Properties == nil {
+		return nil
+	}
+	raw := n.Properties[graph.PropAliases]
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, a := range strings.Split(raw, ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// Created reports how many new people this registry added.
+func (r *PersonRegistry) Created() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.created
+}
+
+// Names lists everyone currently known, most recently confirmed spelling
+// first.
+//
+// A batch feeds this back into identification as it goes, so a colleague
+// recognized in January's meeting is a known name by the time March's is
+// analysed. That both improves recall on people who are never introduced by
+// name again and settles on one spelling for them.
+func (r *PersonRegistry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.recent))
+	for _, p := range r.recent {
+		out = append(out, p.Name)
+	}
+	return out
+}
+
+// Resolve returns the person a name refers to, creating them if they are new.
+//
+// A spelling that differs from the one on file is recorded as an alias rather
+// than becoming a second person, so later meetings resolve it directly.
+func (r *PersonRegistry) Resolve(ctx context.Context, name string) (*graph.Node, error) {
+	cleaned := CleanName(name)
+	if cleaned == "" {
+		return nil, fmt.Errorf("not a usable person name: %q", name)
+	}
+	norm := NormalizeName(cleaned)
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Exact match on a name or a known alias.
+	if n, ok := r.byNormalized[norm]; ok {
+		r.noteUse(n)
+		return n, nil
+	}
+
+	// A transcription variant of someone already known.
+	existing, ambiguous := r.fuzzyMatch(cleaned)
+	if ambiguous {
+		// Refusing leaves the speaker unidentified, which the caller treats as
+		// an ordinary outcome. Guessing would put one colleague's words in
+		// another's mouth, and nothing downstream would show it was a guess.
+		return nil, fmt.Errorf("several known people answer to %q", cleaned)
+	}
+	if existing != nil {
+		if err := r.addAlias(ctx, existing, cleaned); err != nil {
+			return nil, err
+		}
+		r.noteUse(existing)
+		return existing, nil
+	}
+
+	node := &graph.Node{
+		ID:            graph.NewNodeID(string(graph.NodePerson), "", cleaned),
+		Type:          graph.NodePerson,
+		Name:          cleaned,
+		QualifiedName: cleaned,
+	}
+	if err := r.store.AddNode(ctx, node); err != nil {
+		return nil, fmt.Errorf("add person %q: %w", cleaned, err)
+	}
+	r.index(node)
+	r.noteUse(node)
+	r.created++
+	return node, nil
+}
+
+// fuzzyMatch finds an existing person whose name is the same as this one, up
+// to the edits a transcriber makes.
+//
+// It reports ambiguity rather than resolving it. Names are compared on the
+// surname only when both sides carry one, so a bare first name matches every
+// colleague who shares it — "Imran" is equally Imran Khan and Imran Sharma.
+// Choosing between them would be a coin toss recorded in the graph as a fact,
+// so the caller is told instead and the speaker stays unidentified.
+func (r *PersonRegistry) fuzzyMatch(name string) (match *graph.Node, ambiguous bool) {
+	var matches []*graph.Node
+	seen := make(map[string]bool)
+	add := func(p *graph.Node) {
+		if seen[p.ID] {
+			return
+		}
+		seen[p.ID] = true
+		matches = append(matches, p)
+	}
+
+	for _, p := range r.people {
+		if SameName(p.Name, name) {
+			add(p)
+			continue
+		}
+		for _, alias := range aliasesOf(p) {
+			if SameName(alias, name) {
+				add(p)
+				break
+			}
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return nil, false
+	case 1:
+		return matches[0], false
+	default:
+		return nil, true
+	}
+}
+
+// addAlias records an alternate spelling on a person.
+func (r *PersonRegistry) addAlias(ctx context.Context, n *graph.Node, alias string) error {
+	if NormalizeName(n.Name) == NormalizeName(alias) {
+		return nil
+	}
+	for _, existing := range aliasesOf(n) {
+		if NormalizeName(existing) == NormalizeName(alias) {
+			return nil
+		}
+	}
+
+	aliases := append(aliasesOf(n), alias)
+	sort.Strings(aliases)
+	if n.Properties == nil {
+		n.Properties = make(map[string]string)
+	}
+	n.Properties[graph.PropAliases] = strings.Join(aliases, ",")
+
+	if err := r.store.UpdateNode(ctx, n); err != nil {
+		return fmt.Errorf("record alias %q for %q: %w", alias, n.Name, err)
+	}
+	r.byNormalized[NormalizeName(alias)] = n
+	return nil
+}
+
+// MarkOwner flags a person as the one whose microphone made the recordings.
+func (r *PersonRegistry) MarkOwner(ctx context.Context, n *graph.Node) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if n.Properties != nil && n.Properties[graph.PropIsOwner] == "true" {
+		return nil
+	}
+	if n.Properties == nil {
+		n.Properties = make(map[string]string)
+	}
+	n.Properties[graph.PropIsOwner] = "true"
+	if err := r.store.UpdateNode(ctx, n); err != nil {
+		return fmt.Errorf("mark owner %q: %w", n.Name, err)
+	}
+	return nil
+}

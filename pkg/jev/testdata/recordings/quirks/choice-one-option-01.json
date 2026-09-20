@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "name": "quirks/choice-one-option-01",
+  "note": "Accepted by the server; returns confidence 1.0. Why MinChoiceOptions should exist.",
+  "recorded_at": "2026-09-19T21:49:27+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "command": "git push --force origin main",
+        "working_directory": "/app/service-payments",
+        "session_context": "Refactoring migration files"
+      },
+      "questions": {
+        "route": {
+          "type": "choice",
+          "instructions": "Which queue?",
+          "criteria": {
+            "require_peer_approval": "Commands that alter shared environments"
+          }
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba54a4472c88e0117a45312e689",
+      "x-envoy-upstream-service-time": "88"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "route": {
+          "type": "choice",
+          "choice": "require_peer_approval",
+          "confidence": 1.0,
+          "probabilities": {
+            "require_peer_approval": 1.0
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 337,
+        "output_tokens": 32
+      }
+    }
+  },
+  "latency_ms": 398,
+  "key": "sha256:563e551dc3d860bbf6fc4a1228fc77236173afffba14194e2f73bc9af0bae3c0"
+}

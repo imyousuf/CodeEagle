@@ -3,6 +3,7 @@ package generic
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -371,13 +372,24 @@ func TestExtractODP(t *testing.T) {
 
 func TestExtractPDF(t *testing.T) {
 	content := createTestPDF()
-	text, err := extractPDF(content)
+	text, err := extractPDF(context.Background(), content)
 	if err != nil {
 		t.Fatalf("extractPDF() error: %v", err)
 	}
 
 	if !strings.Contains(text, "Hello World") {
 		t.Errorf("expected 'Hello World', got: %s", text)
+	}
+}
+func TestExtractPDF_PageMarkers(t *testing.T) {
+	content := createTestPDF()
+	text, err := extractPDF(context.Background(), content)
+	if err != nil {
+		t.Fatalf("extractPDF() error: %v", err)
+	}
+
+	if !strings.Contains(text, "--- Page 1 ---") {
+		t.Errorf("expected page marker, got: %s", text)
 	}
 }
 

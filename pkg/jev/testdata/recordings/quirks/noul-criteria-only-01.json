@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "name": "quirks/noul-criteria-only-01",
+  "note": "No instructions at all; criteria carry the question.",
+  "recorded_at": "2026-09-19T21:49:27+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "command": "git push --force origin main",
+        "working_directory": "/app/service-payments",
+        "session_context": "Refactoring migration files"
+      },
+      "questions": {
+        "destructive": {
+          "type": "noul",
+          "criteria": {
+            "true": "Rewrites shared history or deletes data",
+            "false": "Safe local or additive work"
+          }
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba54d567d1ba75cf3d8aba63613",
+      "x-envoy-upstream-service-time": "123"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "destructive": {
+          "type": "noul",
+          "noul": 0.85
+        }
+      },
+      "usage": {
+        "input_tokens": 328,
+        "output_tokens": 22
+      }
+    }
+  },
+  "latency_ms": 418,
+  "key": "sha256:24391a49f5eb2560f95de7b8d636844883a576a7e63564b69f442b50b741d855"
+}

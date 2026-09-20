@@ -49,7 +49,7 @@ Test functions, init(), and main() are always excluded.`,
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			store, _, err := openBranchStore(cfg)
+			store, _, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -236,7 +236,7 @@ Levels:
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			store, _, err := openBranchStore(cfg)
+			store, _, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}

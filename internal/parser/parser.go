@@ -1,6 +1,10 @@
 package parser
 
-import "github.com/imyousuf/CodeEagle/internal/graph"
+import (
+	"context"
+
+	"github.com/imyousuf/CodeEagle/internal/graph"
+)
 
 // Language represents a supported programming language.
 type Language string
@@ -68,4 +72,22 @@ type FilenameParser interface {
 	Parser
 	// Filenames returns the exact filenames this parser can handle.
 	Filenames() []string
+}
+
+// FileSkipper is an optional interface that parsers can implement to indicate
+// that a file should be skipped without reading its content. This is used by
+// the indexer to avoid expensive os.ReadFile calls for files that the parser
+// would immediately skip (e.g., unknown binary formats in the generic parser).
+type FileSkipper interface {
+	// ShouldSkipFile returns true if the file should be skipped without reading.
+	ShouldSkipFile(filePath string) bool
+}
+
+// ContentHashParser is an optional interface that parsers can implement to
+// accept a pre-computed content hash, avoiding redundant SHA-256 computation.
+// This is used by the indexer when content has already been read and hashed
+// (e.g., during sync with duplicate detection).
+type ContentHashParser interface {
+	// ParseFileWithHash parses the file content using a pre-computed content hash.
+	ParseFileWithHash(ctx context.Context, filePath string, content []byte, contentHash string) (*ParseResult, error)
 }

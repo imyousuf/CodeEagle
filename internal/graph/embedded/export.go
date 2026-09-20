@@ -147,7 +147,17 @@ func (s *BranchStore) ImportIntoBranch(ctx context.Context, r io.Reader, targetB
 	if err := s.DeleteByBranch(targetBranch); err != nil {
 		return "", fmt.Errorf("clear target branch %s: %w", targetBranch, err)
 	}
+	return s.MergeIntoBranch(ctx, r, targetBranch)
+}
 
+// MergeIntoBranch imports records into a scope, leaving what is already there.
+//
+// Unlike ImportIntoBranch it does not clear the target first, which is what
+// makes it safe to pour several sources into one scope — a corpus split across
+// two scopes, say, being collected into one. A record whose node already
+// exists replaces it, since node IDs are deterministic and the same entity
+// arriving twice is the same entity.
+func (s *BranchStore) MergeIntoBranch(ctx context.Context, r io.Reader, targetBranch string) (sourceBranch string, err error) {
 	// Temporarily set writeBranch to targetBranch for import.
 	origBranch := s.writeBranch
 	s.writeBranch = targetBranch

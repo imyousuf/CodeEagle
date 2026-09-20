@@ -1,10 +1,14 @@
 package generic
 
 import (
+	"context"
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/internal/parser"
 )
 
 func TestClassify(t *testing.T) {
@@ -15,13 +19,15 @@ func TestClassify(t *testing.T) {
 		filePath string
 		want     FileClass
 	}{
+		// Known text extensions
 		{"text file", "docs/README.txt", FileClassText},
-		{"markdown", "docs/spec.md", FileClassText},
 		{"json", "config.json", FileClassText},
-		{"yaml", "config.yaml", FileClassText},
 		{"csv", "data.csv", FileClassText},
 		{"log", "output.log", FileClassText},
-		{"no extension", "README", FileClassText},
+		{"sql", "schema.sql", FileClassText},
+		{"c source", "main.c", FileClassText},
+		{"ini config", "settings.ini", FileClassText},
+		// Image extensions
 		{"png image", "photo.png", FileClassImage},
 		{"jpg image", "photo.jpg", FileClassImage},
 		{"jpeg image", "photo.jpeg", FileClassImage},
@@ -29,10 +35,25 @@ func TestClassify(t *testing.T) {
 		{"webp image", "hero.webp", FileClassImage},
 		{"bmp image", "scan.bmp", FileClassImage},
 		{"tiff image", "raw.tiff", FileClassImage},
+		{"upper case PNG", "photo.PNG", FileClassImage},
+		// Document extensions
+		{"pdf doc", "report.pdf", FileClassDocument},
+		{"docx doc", "plan.docx", FileClassDocument},
+		// Exclude list
 		{"excluded lock", "package-lock.lock", FileClassSkip},
 		{"excluded min.js", "bundle.min.js", FileClassSkip},
 		{"excluded wasm", "module.wasm", FileClassSkip},
-		{"upper case PNG", "photo.PNG", FileClassImage},
+		// Unknown extensions — whitelist rejects
+		{"no extension", "README", FileClassSkip},
+		{"video mov", "vacation.mov", FileClassSkip},
+		{"video mp4", "clip.mp4", FileClassSkip},
+		{"audio mp3", "song.mp3", FileClassSkip},
+		{"raw cr3", "IMG_001.CR3", FileClassSkip},
+		{"raw cr2", "IMG_002.CR2", FileClassSkip},
+		{"raw nef", "DSC_003.NEF", FileClassSkip},
+		{"binary exe", "app.exe", FileClassSkip},
+		{"archive zip", "backup.zip", FileClassSkip},
+		{"unknown ext", "data.xyz", FileClassSkip},
 	}
 
 	for _, tt := range tests {
@@ -291,5 +312,85 @@ func TestExtractTextPlain(t *testing.T) {
 	result := ExtractText("notes.txt", []byte(text))
 	if result != text {
 		t.Errorf("expected plain passthrough, got %s", result)
+	}
+}
+
+func TestGenericParserImplementsContentHashParser(t *testing.T) {
+	p := NewGenericParser(nil, nil, nil, 0)
+	var _ parser.ContentHashParser = p // compile-time interface check
+}
+
+func TestParseFileWithHash_MatchesParseFile(t *testing.T) {
+	p := NewGenericParser([]string{".lock"}, nil, nil, 0)
+	content := []byte("A simple changelog entry for testing purposes.")
+	filePath := "docs/CHANGELOG.txt"
+
+	// ParseFile computes hash internally.
+	resultA, err := p.ParseFile(filePath, content)
+	if err != nil {
+		t.Fatalf("ParseFile() error: %v", err)
+	}
+
+	// ParseFileWithHash uses a pre-computed hash.
+	hash := fmt.Sprintf("sha256:%x", sha256.Sum256(content))
+	resultB, err := p.ParseFileWithHash(context.Background(), filePath, content, hash)
+	if err != nil {
+		t.Fatalf("ParseFileWithHash() error: %v", err)
+	}
+
+	// Should produce same number of nodes and edges.
+	if len(resultA.Nodes) != len(resultB.Nodes) {
+		t.Errorf("node count mismatch: ParseFile=%d, ParseFileWithHash=%d",
+			len(resultA.Nodes), len(resultB.Nodes))
+	}
+	if len(resultA.Edges) != len(resultB.Edges) {
+		t.Errorf("edge count mismatch: ParseFile=%d, ParseFileWithHash=%d",
+			len(resultA.Edges), len(resultB.Edges))
+	}
+
+	// Both should have the same content_hash.
+	if len(resultA.Nodes) > 0 && len(resultB.Nodes) > 0 {
+		hashA := resultA.Nodes[0].Properties["content_hash"]
+		hashB := resultB.Nodes[0].Properties["content_hash"]
+		if hashA != hashB {
+			t.Errorf("content_hash mismatch: ParseFile=%q, ParseFileWithHash=%q", hashA, hashB)
+		}
+	}
+}
+
+func TestParseFileWithHash_UsesProvidedHash(t *testing.T) {
+	p := NewGenericParser(nil, nil, nil, 0)
+	content := []byte("Some text content for testing.")
+	customHash := "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+	result, err := p.ParseFileWithHash(context.Background(), "test.txt", content, customHash)
+	if err != nil {
+		t.Fatalf("ParseFileWithHash() error: %v", err)
+	}
+
+	if len(result.Nodes) == 0 {
+		t.Fatal("expected at least 1 node")
+	}
+
+	// The first document node should have the custom hash.
+	docNode := result.Nodes[0]
+	if docNode.Properties["content_hash"] != customHash {
+		t.Errorf("expected custom hash %q, got %q",
+			customHash, docNode.Properties["content_hash"])
+	}
+}
+
+func TestParseFileWithHash_SkippedFile(t *testing.T) {
+	p := NewGenericParser([]string{".lock"}, nil, nil, 0)
+	content := []byte("lock content")
+	hash := "sha256:abc123"
+
+	result, err := p.ParseFileWithHash(context.Background(), "yarn.lock", content, hash)
+	if err != nil {
+		t.Fatalf("ParseFileWithHash() error: %v", err)
+	}
+
+	if len(result.Nodes) != 0 {
+		t.Errorf("expected 0 nodes for skipped file, got %d", len(result.Nodes))
 	}
 }

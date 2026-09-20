@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "name": "errors/400-string-noul-without-anything-01",
+  "note": "detail is a bare string naming the question.",
+  "recorded_at": "2026-09-19T21:49:30+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": null,
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "command": "git push --force origin main",
+        "working_directory": "/app/service-payments",
+        "session_context": "Refactoring migration files"
+      },
+      "questions": {
+        "q": {
+          "type": "noul"
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba5588e757d9d7754bcf165a54d",
+      "x-envoy-upstream-service-time": "4"
+    },
+    "body": {
+      "detail": "Noul question must have criteria or instructions: q"
+    }
+  },
+  "latency_ms": 294,
+  "key": "sha256:6a6b70d9d8ef9d05ea3e274d9c0c79be4f674919c1875a783818d21424a84b3b"
+}

@@ -1,48 +1,31 @@
 package cli
 
 import (
-	"fmt"
-
 	"github.com/imyousuf/CodeEagle/internal/config"
-	"github.com/imyousuf/CodeEagle/internal/gitutil"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 )
 
-// openBranchStore opens a BranchStore using the config and CLI flags.
-// It resolves the DB path, detects the current git branch from the first
-// repository, and builds the readBranches list.
-// Returns the store, the current branch name, and any error.
+// openBranchStore opens a read-write BranchStore using the config and CLI flags.
+//
+// Meetings are included as a fallback read scope. They are not branch-scoped —
+// a meeting happened, and it belongs to no branch — so they should be visible
+// whichever branch is checked out: semantic search, the agents, and `query`
+// all benefit from reaching what was said as well as what was written. Writes
+// still go to the current branch, so indexing code cannot disturb them.
 func openBranchStore(cfg *config.Config) (*embedded.BranchStore, string, error) {
-	resolvedDBPath := cfg.ResolveDBPath(dbPath)
-	if resolvedDBPath == "" {
-		return nil, "", fmt.Errorf("no graph database path; run 'codeeagle init' or use --db-path")
-	}
+	return embedded.OpenReadWriteWithScopes(cfg, repoPaths(cfg), dbPath, embedded.MeetingScope)
+}
 
-	// Detect current branch from the first repository.
-	currentBranch := "default"
-	defaultBranch := "main"
-	if len(cfg.Repositories) > 0 {
-		repoPath := cfg.Repositories[0].Path
-		branch, err := gitutil.GetCurrentBranch(repoPath)
-		if err == nil && branch != "" {
-			currentBranch = branch
-		}
-		info, err := gitutil.GetBranchInfo(repoPath)
-		if err == nil {
-			defaultBranch = info.DefaultBranch
-		}
-	}
+// openReadOnlyBranchStore opens a read-only BranchStore for concurrent access.
+func openReadOnlyBranchStore(cfg *config.Config) (*embedded.BranchStore, string, error) {
+	return embedded.OpenReadOnlyWithScopes(cfg, repoPaths(cfg), dbPath, embedded.MeetingScope)
+}
 
-	// Build read branch order: current branch first, then default branch.
-	readBranches := []string{currentBranch}
-	if currentBranch != defaultBranch {
-		readBranches = append(readBranches, defaultBranch)
+// repoPaths extracts repository paths from config.
+func repoPaths(cfg *config.Config) []string {
+	paths := make([]string, len(cfg.Repositories))
+	for i, r := range cfg.Repositories {
+		paths[i] = r.Path
 	}
-
-	store, err := embedded.NewBranchStore(resolvedDBPath, currentBranch, readBranches)
-	if err != nil {
-		return nil, "", fmt.Errorf("open graph store: %w", err)
-	}
-
-	return store, currentBranch, nil
+	return paths
 }

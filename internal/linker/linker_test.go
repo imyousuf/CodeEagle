@@ -1242,14 +1242,30 @@ func TestPhasesCount(t *testing.T) {
 	store := newTestStore(t)
 	linker := NewLinker(store, nil, nil, false)
 
+	// Asserting the names rather than only the count means a change to this
+	// list reports which phase appeared or vanished.
+	want := []string{
+		"services", "endpoints", "api_calls", "dependencies", "imports",
+		"implements", "tests", "calls", "documents", "meetings",
+		"meeting_attendance", "meeting_series", "duplicates", "symlinks",
+	}
 	allPhases := linker.Phases()
-	if len(allPhases) != 9 {
-		t.Errorf("Phases() returned %d, want 9", len(allPhases))
+	if len(allPhases) != len(want) {
+		t.Errorf("Phases() returned %d, want %d", len(allPhases), len(want))
+	}
+	got := make(map[string]bool, len(allPhases))
+	for _, p := range allPhases {
+		got[p.Name] = true
+	}
+	for _, name := range want {
+		if !got[name] {
+			t.Errorf("Phases() missing %q", name)
+		}
 	}
 
 	newPhases := linker.NewPhases()
-	if len(newPhases) != 3 {
-		t.Errorf("NewPhases() returned %d, want 3", len(newPhases))
+	if len(newPhases) != 5 {
+		t.Errorf("NewPhases() returned %d, want 5", len(newPhases))
 	}
 }
 
@@ -1310,6 +1326,210 @@ func TestIsTestFuncName(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("isTestFuncName(%q, %q, %q) = %v, want %v", tt.name, tt.language, tt.filePath, got, tt.want)
 		}
+	}
+}
+
+func TestLinkDuplicates(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	linker := NewLinker(store, nil, nil, false)
+
+	hash := "sha256:abc123"
+	mime := "image/jpeg"
+
+	// Add 3 file nodes with the same content hash.
+	addNodes(t, store,
+		&graph.Node{
+			ID:       graph.NewNodeID(string(graph.NodeDocument), "photos/a/pic.jpg", "pic.jpg"),
+			Type:     graph.NodeDocument,
+			Name:     "pic.jpg",
+			FilePath: "photos/a/pic.jpg",
+			Properties: map[string]string{
+				graph.PropContentHash: hash,
+				graph.PropMimeType:    mime,
+			},
+		},
+		&graph.Node{
+			ID:       graph.NewNodeID(string(graph.NodeDocument), "photos/b/pic.jpg", "pic.jpg"),
+			Type:     graph.NodeDocument,
+			Name:     "pic.jpg",
+			FilePath: "photos/b/pic.jpg",
+			Properties: map[string]string{
+				graph.PropContentHash: hash,
+				graph.PropMimeType:    mime,
+			},
+		},
+		&graph.Node{
+			ID:       graph.NewNodeID(string(graph.NodeDocument), "photos/c/pic.jpg", "pic.jpg"),
+			Type:     graph.NodeDocument,
+			Name:     "pic.jpg",
+			FilePath: "photos/c/pic.jpg",
+			Properties: map[string]string{
+				graph.PropContentHash: hash,
+				graph.PropMimeType:    mime,
+			},
+		},
+	)
+
+	count, err := linker.linkDuplicates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Star topology: b -> a, c -> a = 2 edges.
+	if count != 2 {
+		t.Errorf("linkDuplicates created %d edges, want 2", count)
+	}
+
+	// Verify edges exist.
+	canonicalID := graph.NewNodeID(string(graph.NodeDocument), "photos/a/pic.jpg", "pic.jpg")
+	edges, err := store.GetEdges(ctx, canonicalID, graph.EdgeDuplicateOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 2 {
+		t.Errorf("canonical has %d incoming DuplicateOf edges, want 2", len(edges))
+	}
+}
+
+func TestLinkDuplicatesNoDuplicates(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	linker := NewLinker(store, nil, nil, false)
+
+	// Single file — no duplicates expected.
+	addNodes(t, store,
+		&graph.Node{
+			ID:       graph.NewNodeID(string(graph.NodeDocument), "unique.txt", "unique.txt"),
+			Type:     graph.NodeDocument,
+			Name:     "unique.txt",
+			FilePath: "unique.txt",
+			Properties: map[string]string{
+				graph.PropContentHash: "sha256:unique",
+				graph.PropMimeType:    "text/plain",
+			},
+		},
+	)
+
+	count, err := linker.linkDuplicates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("linkDuplicates created %d edges for unique file, want 0", count)
+	}
+}
+
+func TestLinkDuplicatesDifferentMimeType(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	linker := NewLinker(store, nil, nil, false)
+
+	hash := "sha256:samehash"
+
+	// Two files with same hash but different MIME types — separate groups.
+	addNodes(t, store,
+		&graph.Node{
+			ID:       graph.NewNodeID(string(graph.NodeFile), "src/main.go", "src/main.go"),
+			Type:     graph.NodeFile,
+			Name:     "src/main.go",
+			FilePath: "src/main.go",
+			Properties: map[string]string{
+				graph.PropContentHash: hash,
+				graph.PropMimeType:    "text/x-go",
+			},
+		},
+		&graph.Node{
+			ID:       graph.NewNodeID(string(graph.NodeDocument), "docs/main.txt", "main.txt"),
+			Type:     graph.NodeDocument,
+			Name:     "main.txt",
+			FilePath: "docs/main.txt",
+			Properties: map[string]string{
+				graph.PropContentHash: hash,
+				graph.PropMimeType:    "text/plain",
+			},
+		},
+	)
+
+	count, err := linker.linkDuplicates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("linkDuplicates created %d edges for different mime types, want 0", count)
+	}
+}
+
+func TestLinkSymlinks(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	linker := NewLinker(store, nil, nil, false)
+
+	// Target file node.
+	targetID := graph.NewNodeID(string(graph.NodeDocument), "photos/original/pic.jpg", "pic.jpg")
+	addNodes(t, store,
+		&graph.Node{
+			ID:       targetID,
+			Type:     graph.NodeDocument,
+			Name:     "pic.jpg",
+			FilePath: "photos/original/pic.jpg",
+		},
+	)
+
+	// Symlink file node pointing to target.
+	addNodes(t, store,
+		&graph.Node{
+			ID:       graph.NewNodeID(string(graph.NodeDocument), "photos/links/pic.jpg", "pic.jpg"),
+			Type:     graph.NodeDocument,
+			Name:     "pic.jpg",
+			FilePath: "photos/links/pic.jpg",
+			Properties: map[string]string{
+				graph.PropSymlinkTarget: "photos/original/pic.jpg",
+			},
+		},
+	)
+
+	count, err := linker.linkSymlinks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Errorf("linkSymlinks created %d edges, want 1", count)
+	}
+
+	// Verify the edge.
+	edges, err := store.GetEdges(ctx, targetID, graph.EdgeSymLink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 1 {
+		t.Errorf("target has %d incoming SymLink edges, want 1", len(edges))
+	}
+}
+
+func TestLinkSymlinksMissingTarget(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	linker := NewLinker(store, nil, nil, false)
+
+	// Symlink node with no corresponding target node.
+	addNodes(t, store,
+		&graph.Node{
+			ID:       graph.NewNodeID(string(graph.NodeDocument), "links/broken.jpg", "broken.jpg"),
+			Type:     graph.NodeDocument,
+			Name:     "broken.jpg",
+			FilePath: "links/broken.jpg",
+			Properties: map[string]string{
+				graph.PropSymlinkTarget: "nonexistent/pic.jpg",
+			},
+		},
+	)
+
+	count, err := linker.linkSymlinks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("linkSymlinks created %d edges for missing target, want 0", count)
 	}
 }
 
@@ -1461,4 +1681,31 @@ func containsSubstr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestPhasesByName(t *testing.T) {
+	store := newTestStore(t)
+	linker := NewLinker(store, nil, nil, false)
+
+	phases, unknown := linker.PhasesByName("meetings", "documents")
+	if len(unknown) != 0 {
+		t.Errorf("unknown = %v, want none", unknown)
+	}
+	if len(phases) != 2 {
+		t.Fatalf("got %d phases, want 2", len(phases))
+	}
+	// Selection preserves the canonical order rather than the argument order.
+	if phases[0].Name != "documents" || phases[1].Name != "meetings" {
+		t.Errorf("phases = %s, %s; want documents, meetings", phases[0].Name, phases[1].Name)
+	}
+
+	// An unknown name is reported so the caller can list what is available.
+	phases, unknown = linker.PhasesByName("meetings", "nonsense")
+	if len(phases) != 1 || len(unknown) != 1 || unknown[0] != "nonsense" {
+		t.Errorf("phases=%d unknown=%v", len(phases), unknown)
+	}
+
+	if phases, unknown := linker.PhasesByName(); len(phases) != 0 || len(unknown) != 0 {
+		t.Errorf("empty selection returned phases=%d unknown=%v", len(phases), unknown)
+	}
 }

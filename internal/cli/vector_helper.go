@@ -70,9 +70,10 @@ func syncVectorIndex(vs *vectorstore.VectorStore, cfg *config.Config, full bool,
 		loaded = false
 	}
 
-	// Check if provider/model changed.
+	// A changed provider, model, or embeddable text all mean the existing
+	// vectors cannot be mixed with new ones.
 	if loaded && vs.NeedsReindex() {
-		logFn("[vector] Embedding provider/model changed, rebuilding vector index...")
+		logFn("[vector] Rebuilding vector index: %s", vs.ReindexReason())
 		full = true
 	}
 
@@ -104,18 +105,45 @@ func syncVectorIndex(vs *vectorstore.VectorStore, cfg *config.Config, full bool,
 	return nil
 }
 
+// openReadOnlyVectorStore opens the vector store with a bypassed lock guard,
+// allowing concurrent access from multiple processes. Use for commands that
+// only query the vector index (rag, agent, app).
+func openReadOnlyVectorStore(cfg *config.Config, store *embedded.BranchStore, branch string, logFn func(string, ...any)) (*vectorstore.VectorStore, error) {
+	if cfg.ConfigDir == "" {
+		return nil, nil
+	}
+
+	embedder, err := embedding.DetectProvider(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("detect embedding provider: %w", err)
+	}
+	if embedder == nil {
+		if verbose && logFn != nil {
+			logFn("[vector] No embedding provider detected, skipping vector search")
+		}
+		return nil, nil
+	}
+
+	if logFn != nil {
+		logFn("[vector] Embedding provider: %s/%s (%d-dim)", embedder.Name(), embedder.ModelName(), embedder.Dimensions())
+	}
+
+	vs, err := vectorstore.NewReadOnly(
+		store, embedder, branch,
+		vectorIndexPath(cfg),
+		vectorDBPath(cfg),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("open vector store: %w", err)
+	}
+
+	return vs, nil
+}
+
 // openAgentVectorStore opens the vector store for agent use (read-only).
 // Returns nil silently if vector search is unavailable or the index hasn't been built.
 func openAgentVectorStore(cfg *config.Config, store *embedded.BranchStore, branch string) *vectorstore.VectorStore {
-	vs, err := openVectorStore(cfg, store, branch, func(string, ...any) {})
-	if err != nil || vs == nil {
-		return nil
-	}
-	loaded, err := vs.Load()
-	if err != nil || !loaded {
-		vs.Close()
-		return nil
-	}
+	vs, _ := vectorstore.OpenReadOnlyWithLoad(cfg, store, branch)
 	return vs
 }
 

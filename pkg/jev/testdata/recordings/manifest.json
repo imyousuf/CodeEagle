@@ -1,0 +1,381 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-09-19T21:49:17+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "models_answered": {
+    "jev-1.13.0": 36
+  },
+  "recorder": "record_corpus.py (prototype of jevtest.Recorder)",
+  "fixtures": [
+    {
+      "name": "guardrail/force-push-noul-plain-01",
+      "status": 200,
+      "summary": "destructive=noul 0.75  tok=319",
+      "input_tokens": 319
+    },
+    {
+      "name": "guardrail/force-push-noul-criteria-01",
+      "status": 200,
+      "summary": "destructive=noul 0.87  tok=359",
+      "input_tokens": 359
+    },
+    {
+      "name": "guardrail/force-push-fanout-01",
+      "status": 200,
+      "summary": "is_destructive=noul 0.86; execution_routing=require_peer_approval@1.00 top2=[('require_peer_approval', 1.0), ('auto_execute', 0.0)]; blast_radius=score 1.99@0.98  tok=560",
+      "input_tokens": 560
+    },
+    {
+      "name": "guardrail/git-status-noul-low-01",
+      "status": 200,
+      "summary": "destructive=noul 0.01  tok=342",
+      "input_tokens": 342
+    },
+    {
+      "name": "guardrail/force-push-alias-latest-01",
+      "status": 200,
+      "summary": "destructive=noul 0.73  tok=319",
+      "input_tokens": 319
+    },
+    {
+      "name": "jitter/force-push-fanout-01",
+      "status": 200,
+      "summary": "is_destructive=noul 0.75; execution_routing=require_peer_approval@1.00 top2=[('require_peer_approval', 1.0), ('hard_block', 0.0)]  tok=441",
+      "input_tokens": 441
+    },
+    {
+      "name": "jitter/force-push-fanout-02",
+      "status": 200,
+      "summary": "is_destructive=noul 0.76; execution_routing=require_peer_approval@1.00 top2=[('require_peer_approval', 1.0), ('hard_block', 0.0)]  tok=441",
+      "input_tokens": 441
+    },
+    {
+      "name": "jitter/force-push-fanout-03",
+      "status": 200,
+      "summary": "is_destructive=noul 0.73; execution_routing=require_peer_approval@1.00 top2=[('require_peer_approval', 1.0), ('auto_execute', 0.0)]  tok=441",
+      "input_tokens": 441
+    },
+    {
+      "name": "jitter/force-push-fanout-04",
+      "status": 200,
+      "summary": "is_destructive=noul 0.76; execution_routing=require_peer_approval@1.00 top2=[('require_peer_approval', 1.0), ('unrecognized', 0.0)]  tok=441",
+      "input_tokens": 441
+    },
+    {
+      "name": "jitter/force-push-fanout-05",
+      "status": 200,
+      "summary": "is_destructive=noul 0.76; execution_routing=require_peer_approval@1.00 top2=[('require_peer_approval', 1.0), ('auto_execute', 0.0)]  tok=441",
+      "input_tokens": 441
+    },
+    {
+      "name": "speaker-identity/four-speakers-fanout-01",
+      "status": 200,
+      "summary": "speaker_0=Kevin Mitchell@0.96 top2=[('Kevin Mitchell', 0.97), ('unresolved', 0.03)]; speaker_1=Priya Nair@0.98 top2=[('Priya Nair', 0.98), ('unresolved', 0.02)]; speaker_2=unresolved@0.99 top2=[('unresolved', 1.0), ('Kevin Mitchell', 0.0)]; speaker_3=unresolved@0.46 top2=[('unresolved', 0.51), ('Tom Becker', 0.28)]  tok=2826",
+      "input_tokens": 2826
+    },
+    {
+      "name": "speaker-identity/kevin-alone-with-evidence-01",
+      "status": 200,
+      "summary": "speaker_0=Kevin Mitchell@0.96 top2=[('Kevin Mitchell', 0.97), ('unresolved', 0.03)]  tok=1773",
+      "input_tokens": 1773
+    },
+    {
+      "name": "speaker-identity/four-speakers-no-evidence-01",
+      "status": 200,
+      "summary": "speaker_0=Kevin Mitchell@0.99 top2=[('Kevin Mitchell', 0.99), ('unresolved', 0.01)]; speaker_1=Priya Nair@0.99 top2=[('Priya Nair', 0.99), ('unresolved', 0.01)]; speaker_2=unresolved@0.99 top2=[('unresolved', 1.0), ('Tom Becker', 0.0)]; speaker_3=Omar Haddad@0.77 top2=[('Omar Haddad', 0.79), ('unresolved', 0.11)]  tok=2529",
+      "input_tokens": 2529
+    },
+    {
+      "name": "speaker-identity/mmhmm-only-declined-01",
+      "status": 200,
+      "summary": "speaker_2=unresolved@0.99 top2=[('unresolved', 1.0), ('Diego Alvarez', 0.0)]  tok=1773",
+      "input_tokens": 1773
+    },
+    {
+      "name": "speaker-identity/meeting-ended-on-time-uncertain-01",
+      "status": 200,
+      "summary": "on_time=noul 0.35  tok=1438",
+      "input_tokens": 1438
+    },
+    {
+      "name": "code-review/sql-injection-fanout-01",
+      "status": 200,
+      "summary": "introduces_vulnerability=noul 0.97; subsystem=api_handlers@0.99 top2=[('api_handlers', 1.0), ('frontend', 0.0)]; review_complexity=score 3.91@0.92; breaks_existing_clients=noul 0.07  tok=1191",
+      "input_tokens": 1191
+    },
+    {
+      "name": "code-review/sql-injection-single-01",
+      "status": 200,
+      "summary": "introduces_vulnerability=noul 0.96  tok=710",
+      "input_tokens": 710
+    },
+    {
+      "name": "code-review/rename-fanout-01",
+      "status": 200,
+      "summary": "introduces_vulnerability=noul 0.03; subsystem=api_handlers@0.98 top2=[('api_handlers', 0.99), ('unclassified', 0.01)]; review_complexity=score 0.00@1.00  tok=931",
+      "input_tokens": 931
+    },
+    {
+      "name": "build-triage/syntax-error-fanout-01",
+      "status": 200,
+      "summary": "is_transient=noul 0.02; category=compiler_syntax@1.00 top2=[('compiler_syntax', 1.0), ('type_error', 0.0)]; urgency=score 1.84@0.83  tok=797",
+      "input_tokens": 797
+    },
+    {
+      "name": "build-triage/ambiguous-log-flat-01",
+      "status": 200,
+      "summary": "category=unknown@0.86 top2=[('unknown', 0.87), ('test_assertion', 0.13)]  tok=602",
+      "input_tokens": 602
+    },
+    {
+      "name": "support/double-charge-fanout-01",
+      "status": 200,
+      "summary": "billing=noul 0.99; tone=calm@0.98 top2=[('calm', 0.99), ('confused', 0.01)]; urgency=score 1.21@0.75; enterprise_plan=noul 0.07  tok=538",
+      "input_tokens": 538
+    },
+    {
+      "name": "support/vague-ticket-flat-01",
+      "status": 200,
+      "summary": "category=bug@0.99 top2=[('bug', 0.99), ('unknown', 0.01)]  tok=417",
+      "input_tokens": 417
+    },
+    {
+      "name": "quirks/score-one-level-01",
+      "status": 200,
+      "summary": "blast=score 0.00@1.00  tok=326",
+      "input_tokens": 326
+    },
+    {
+      "name": "quirks/choice-one-option-01",
+      "status": 200,
+      "summary": "route=require_peer_approval@1.00 top2=[('require_peer_approval', 1.0)]  tok=337",
+      "input_tokens": 337
+    },
+    {
+      "name": "quirks/choice-names-only-01",
+      "status": 200,
+      "summary": "route=require_peer_approval@0.75 top2=[('require_peer_approval', 0.81), ('hard_block', 0.17)]  tok=349",
+      "input_tokens": 349
+    },
+    {
+      "name": "quirks/noul-criteria-only-01",
+      "status": 200,
+      "summary": "destructive=noul 0.85  tok=328",
+      "input_tokens": 328
+    },
+    {
+      "name": "quirks/structured-instructions-01",
+      "status": 200,
+      "summary": "destructive=noul 0.91  tok=340",
+      "input_tokens": 340
+    },
+    {
+      "name": "quirks/structured-score-levels-01",
+      "status": 200,
+      "summary": "blast=score 2.00@1.00  tok=395",
+      "input_tokens": 395
+    },
+    {
+      "name": "quirks/unicode-question-name-01",
+      "status": 200,
+      "summary": "är det säkert?=noul 0.08  tok=314",
+      "input_tokens": 314
+    },
+    {
+      "name": "errors/400-object-unknown-type-01",
+      "status": 400,
+      "summary": "detail=object: {\"error_type\": \"api_usage_error\", \"message\": \"Invalid request.\"}",
+      "input_tokens": 0
+    },
+    {
+      "name": "errors/400-object-unknown-model-01",
+      "status": 400,
+      "summary": "detail=object: {\"error_type\": \"api_usage_error\", \"message\": \"Unknown model: jev-9.99.9\"}",
+      "input_tokens": 0
+    },
+    {
+      "name": "errors/400-string-empty-question-name-01",
+      "status": 400,
+      "summary": "detail=string: \"Question key cannot be empty.\"",
+      "input_tokens": 0
+    },
+    {
+      "name": "errors/400-string-too-many-levels-01",
+      "status": 400,
+      "summary": "detail=string: \"Too many score levels. Must have at most 10 levels.\"",
+      "input_tokens": 0
+    },
+    {
+      "name": "errors/400-string-noul-without-anything-01",
+      "status": 400,
+      "summary": "detail=string: \"Noul question must have criteria or instructions: q\"",
+      "input_tokens": 0
+    },
+    {
+      "name": "errors/422-array-missing-state-01",
+      "status": 422,
+      "summary": "detail=array: [{\"type\": \"missing\", \"loc\": [\"body\", \"state\"], \"msg\": \"Field required\", \"input\": {\"model\":",
+      "input_tokens": 0
+    },
+    {
+      "name": "errors/422-array-state-number-01",
+      "status": 422,
+      "summary": "detail=array: [{\"type\": \"string_type\", \"loc\": [\"body\", \"state\", \"str\"], \"msg\": \"Input should be a valid ",
+      "input_tokens": 0
+    },
+    {
+      "name": "errors/422-array-empty-questions-01",
+      "status": 422,
+      "summary": "detail=array: [{\"type\": \"too_short\", \"loc\": [\"body\", \"questions\"], \"msg\": \"Dictionary should have at lea",
+      "input_tokens": 0
+    },
+    {
+      "name": "errors/401-invalid-key-01",
+      "status": 401,
+      "summary": "detail=object: {\"error_type\": \"authentication_error\", \"message\": \"Cannot authenticate with the server. Pl",
+      "input_tokens": 0
+    },
+    {
+      "name": "errors/401-missing-key-01",
+      "status": 403,
+      "summary": "detail=object: {\"error_type\": \"authentication_error\", \"message\": \"Must supply an API key! Check your requ",
+      "input_tokens": 0
+    },
+    {
+      "name": "errors/404-unknown-path-01",
+      "status": 404,
+      "summary": "detail=string: \"Not Found\"",
+      "input_tokens": 0
+    },
+    {
+      "name": "errors/405-get-systemone-01",
+      "status": 405,
+      "summary": "detail=string: \"Method Not Allowed\"",
+      "input_tokens": 0
+    },
+    {
+      "name": "models/list-01",
+      "status": 200,
+      "summary": "models=jev-latest,jev-preview",
+      "input_tokens": 0
+    },
+    {
+      "name": "ceiling/near-limit-accepted-01",
+      "status": 200,
+      "summary": "speaker_0=Kevin Mitchell@0.98 top2=[('Kevin Mitchell', 0.99), ('unresolved', 0.01)]  tok=32882",
+      "input_tokens": 32882
+    },
+    {
+      "name": "ceiling/just-over-refused-01",
+      "status": 400,
+      "summary": "detail=object: {\"error_type\": \"max_tokens_exceeded\"}",
+      "input_tokens": 0
+    },
+    {
+      "name": "speaker-identity/undecidable-nouls-fanout-01",
+      "status": 200,
+      "summary": "ships_thursday=noul 0.56; events_larger=noul 0.54; priya_last_week=noul 0.45; remote_meeting=noul 0.64; migration_lands_wednesday=noul 0.56; health_check_fixed=noul 0.06  tok=1519",
+      "input_tokens": 1519
+    },
+    {
+      "name": "speaker-identity/uncertain-events-larger-01",
+      "status": 200,
+      "summary": "events_larger=noul 0.54  tok=1441",
+      "input_tokens": 1441
+    },
+    {
+      "name": "speaker-identity/uncertain-priya-last-week-01",
+      "status": 200,
+      "summary": "priya_last_week=noul 0.44  tok=1438",
+      "input_tokens": 1438
+    },
+    {
+      "name": "support/vague-ticket-weekday-flat-01",
+      "status": 200,
+      "summary": "weekday=Monday@0.15 top2=[('Monday', 0.27), ('Tuesday', 0.2)]  tok=446",
+      "input_tokens": 446
+    },
+    {
+      "name": "build-triage/ambiguous-log-language-flat-01",
+      "status": 200,
+      "summary": "language=JavaScript@0.38 top2=[('JavaScript', 0.42), ('Go', 0.21)]  tok=582",
+      "input_tokens": 582
+    },
+    {
+      "name": "code-review/which-file-255-options-01",
+      "status": 200,
+      "summary": "file=internal/api/users.go@1.00 top2=[('internal/api/users.go', 1.0), ('pkg/client/logging.go', 0.0)]  tok=7090",
+      "input_tokens": 7090
+    },
+    {
+      "name": "errors/256-options-01",
+      "status": 400,
+      "summary": "detail=string: \"Too many choices. Must have at most 255 choices.\"",
+      "input_tokens": 0
+    },
+    {
+      "name": "errors/models-401-invalid-key-01",
+      "status": 401,
+      "summary": "detail=object: {\"error_type\": \"authentication_error\", \"message\": \"Cannot authenticate with the server. Pl",
+      "input_tokens": 0
+    },
+    {
+      "name": "errors/models-403-missing-key-01",
+      "status": 403,
+      "summary": "detail=object: {\"error_type\": \"authentication_error\", \"message\": \"Must supply an API key! Check your requ",
+      "input_tokens": 0
+    }
+  ],
+  "requests": 59,
+  "input_tokens": 132717,
+  "output_tokens": 6547,
+  "ceiling_search": [
+    {
+      "chars": 125000,
+      "status": 400,
+      "input_tokens": null,
+      "detail": {
+        "error_type": "max_tokens_exceeded"
+      }
+    },
+    {
+      "chars": 112500,
+      "status": 400,
+      "input_tokens": null,
+      "detail": {
+        "error_type": "max_tokens_exceeded"
+      }
+    },
+    {
+      "chars": 106250,
+      "status": 200,
+      "input_tokens": 32419,
+      "detail": null
+    },
+    {
+      "chars": 109375,
+      "status": 400,
+      "input_tokens": null,
+      "detail": {
+        "error_type": "max_tokens_exceeded"
+      }
+    },
+    {
+      "chars": 107812,
+      "status": 200,
+      "input_tokens": 32882,
+      "detail": null
+    },
+    {
+      "chars": 108593,
+      "status": 400,
+      "input_tokens": null,
+      "detail": {
+        "error_type": "max_tokens_exceeded"
+      }
+    }
+  ],
+  "ceiling_tokens_accepted": 32882,
+  "cost_usd": 0.0056
+}

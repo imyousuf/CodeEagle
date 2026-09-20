@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -77,10 +78,27 @@ Use --force to rebuild even if an index already exists.`,
 			}
 
 			if loaded && vs.NeedsReindex() {
-				logFn("Embedding provider/model changed, rebuilding...")
+				logFn("Rebuilding: %s", vs.ReindexReason())
 			}
 
 			logFn("Building vector index from graph (branch: %s)...", currentBranch)
+
+			// Report as it goes. A rebuild is minutes of work, and one that
+			// prints nothing until it finishes gives no way to tell slow from
+			// stuck — which is exactly how an hour gets wasted.
+			started := time.Now()
+			vs.WithProgress(func(done, total int) {
+				if done != total && (done%200 != 0 || done == 0) {
+					return
+				}
+				elapsed := time.Since(started)
+				msg := fmt.Sprintf("  %d/%d nodes embedded in %s", done, total, elapsed.Round(time.Second))
+				if done > 0 && done < total {
+					remaining := time.Duration(float64(elapsed) / float64(done) * float64(total-done))
+					msg += fmt.Sprintf(", about %s left", remaining.Round(time.Second))
+				}
+				logFn("%s", msg)
+			})
 
 			if err := vs.Rebuild(context.Background()); err != nil {
 				return fmt.Errorf("rebuild vector index: %w", err)

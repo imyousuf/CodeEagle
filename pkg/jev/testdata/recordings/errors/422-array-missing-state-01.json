@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "name": "errors/422-array-missing-state-01",
+  "note": "Schema validation: detail is an array of {loc, msg, type, input}.",
+  "recorded_at": "2026-09-19T21:49:30+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": null,
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "questions": {
+        "q": {
+          "type": "noul",
+          "instructions": "Is it destructive?"
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 422,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba559b9710fb4ee9effc0c8d5a7",
+      "x-envoy-upstream-service-time": "9"
+    },
+    "body": {
+      "detail": [
+        {
+          "type": "missing",
+          "loc": [
+            "body",
+            "state"
+          ],
+          "msg": "Field required",
+          "input": {
+            "model": "jev-1.13.0",
+            "questions": {
+              "q": {
+                "type": "noul",
+                "instructions": "Is it destructive?",
+                "criteria": null
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "latency_ms": 293,
+  "key": "sha256:a5b345998d39032674c37253d1437da8bcd6821339d1f7daf9dfe412cb7a70d8"
+}

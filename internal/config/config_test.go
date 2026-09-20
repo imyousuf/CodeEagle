@@ -37,7 +37,7 @@ graph:
 
 agents:
   llm_provider: anthropic
-  model: claude-sonnet-4-5-20250929
+  model: claude-sonnet-5
 `
 	configPath := filepath.Join(projectDir, ProjectConfigFile)
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
@@ -95,8 +95,8 @@ agents:
 	if cfg.Agents.LLMProvider != "anthropic" {
 		t.Errorf("Agents.LLMProvider = %q, want %q", cfg.Agents.LLMProvider, "anthropic")
 	}
-	if cfg.Agents.Model != "claude-sonnet-4-5-20250929" {
-		t.Errorf("Agents.Model = %q, want %q", cfg.Agents.Model, "claude-sonnet-4-5-20250929")
+	if cfg.Agents.Model != "claude-sonnet-5" {
+		t.Errorf("Agents.Model = %q, want %q", cfg.Agents.Model, "claude-sonnet-5")
 	}
 	if cfg.ConfigDir != projectDir {
 		t.Errorf("ConfigDir = %q, want %q", cfg.ConfigDir, projectDir)
@@ -435,4 +435,32 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestTranscriptDirs(t *testing.T) {
+	cfg := &Config{
+		Transcripts: TranscriptsConfig{
+			SessionsDir: []string{"/recordings", "/downloads", "/recordings", "  "},
+		},
+	}
+
+	// Blanks and duplicates are dropped; order is kept so the first configured
+	// directory is searched first.
+	got := cfg.TranscriptDirs()
+	want := []string{"/recordings", "/downloads"}
+	if len(got) != len(want) {
+		t.Fatalf("TranscriptDirs() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("TranscriptDirs()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestTranscriptDirsEmpty(t *testing.T) {
+	cfg := &Config{}
+	if got := cfg.TranscriptDirs(); len(got) != 0 {
+		t.Errorf("TranscriptDirs() = %v, want none", got)
+	}
 }

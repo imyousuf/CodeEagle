@@ -6,6 +6,7 @@ package linker
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
@@ -51,16 +52,43 @@ func (l *Linker) Phases() []Phase {
 		{Name: "tests", Fn: l.linkTests},
 		{Name: "calls", Fn: l.linkCalls},
 		{Name: "documents", Fn: l.linkDocuments},
+		{Name: "meetings", Fn: l.linkMeetingMentions},
+		{Name: "meeting_attendance", Fn: l.linkMeetingAttendance},
+		{Name: "meeting_series", Fn: l.linkMeetingSeries},
+		{Name: "duplicates", Fn: l.linkDuplicates},
+		{Name: "symlinks", Fn: l.linkSymlinks},
 	}
 }
 
-// NewPhases returns only the newly added phases (implements + tests + calls).
+// NewPhases returns only the newly added phases (implements + tests + calls + duplicates + symlinks).
 func (l *Linker) NewPhases() []Phase {
 	return []Phase{
 		{Name: "implements", Fn: l.linkImplements},
 		{Name: "tests", Fn: l.linkTests},
 		{Name: "calls", Fn: l.linkCalls},
+		{Name: "duplicates", Fn: l.linkDuplicates},
+		{Name: "symlinks", Fn: l.linkSymlinks},
 	}
+}
+
+// PhasesByName returns the named phases in the order Phases() defines them,
+// along with any names that matched nothing.
+func (l *Linker) PhasesByName(names ...string) (phases []Phase, unknown []string) {
+	wanted := make(map[string]bool, len(names))
+	for _, n := range names {
+		wanted[n] = true
+	}
+	for _, p := range l.Phases() {
+		if wanted[p.Name] {
+			phases = append(phases, p)
+			delete(wanted, p.Name)
+		}
+	}
+	for n := range wanted {
+		unknown = append(unknown, n)
+	}
+	sort.Strings(unknown)
+	return phases, unknown
 }
 
 // RunPhases executes the given phases in order and returns per-phase counts.
@@ -164,6 +192,33 @@ func (l *Linker) RunAll(ctx context.Context) error {
 	}
 	if l.verbose {
 		l.log("  Linked %d document-to-code edges", docCount)
+	}
+
+	// 4.95. Connect meetings to the code they discussed.
+	meetingCount, err := l.linkMeetingMentions(ctx)
+	if err != nil {
+		return fmt.Errorf("link meetings: %w", err)
+	}
+	if l.verbose {
+		l.log("  Linked %d meeting-to-code edges", meetingCount)
+	}
+
+	// 4.10. Detect duplicate files by content hash.
+	dupCount, err := l.linkDuplicates(ctx)
+	if err != nil {
+		return fmt.Errorf("link duplicates: %w", err)
+	}
+	if l.verbose {
+		l.log("  Linked %d duplicate file edges", dupCount)
+	}
+
+	// 4.11. Resolve symlink relationships.
+	symlinkCount, err := l.linkSymlinks(ctx)
+	if err != nil {
+		return fmt.Errorf("link symlinks: %w", err)
+	}
+	if l.verbose {
+		l.log("  Linked %d symlink edges", symlinkCount)
 	}
 
 	// 5. LLM-assisted analysis for unresolved calls (optional).

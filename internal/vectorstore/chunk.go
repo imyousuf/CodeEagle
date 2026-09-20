@@ -17,7 +17,19 @@ var embeddableProperties = []struct {
 	{graph.PropArchRole, "Role"},
 	{graph.PropDesignPattern, "Pattern"},
 	{graph.PropLayerTag, "Layer"},
+	// Meeting entities: who was there and when is often the whole of what
+	// someone remembers about a meeting, so it has to be searchable text.
+	{propParticipants, "Participants"},
+	{graph.PropAssignee, "Assignee"},
+	{graph.PropDueDate, "Due"},
+	{propKeywords, "Keywords"},
 }
+
+// Property keys written by meeting indexing that are worth embedding.
+const (
+	propParticipants = "participants"
+	propKeywords     = "keywords"
+)
 
 // ChunkConfig controls text chunking behavior.
 type ChunkConfig struct {
@@ -123,6 +135,16 @@ func findOverlapEnd(_, _ string) int {
 	return 0
 }
 
+// EmbeddableTextVersion identifies what EmbeddableText produces. It is
+// recorded in the index and compared on open: vectors computed from an
+// earlier version of the text sit in a different place from ones computed
+// from the current version, and an index holding both ranks them against
+// each other as if they were comparable. Bump it whenever the text changes.
+//
+//	1: doc comment / signature, with package, file and qualified name
+//	2: topics embed from their label and aliases
+const EmbeddableTextVersion = 2
+
 // EmbeddableText returns the text to embed for a graph node.
 // It enriches the raw content (doc comment / signature) with contextual
 // metadata — package name, file path, qualified name, and architectural
@@ -130,8 +152,14 @@ func findOverlapEnd(_, _ string) int {
 // "LLM provider" to functions whose names are generic (e.g. NewClient)
 // but whose package context makes the relationship clear.
 // Returns empty string if the node has no embeddable content.
+//
+// A topic is the exception to needing content: its label is the whole of
+// what it is, and leaving labels out of the index meant the one node named
+// exactly what someone was searching for could never be found by meaning.
+// (Measured on the real corpus, the label alone scores 0.70 against a query
+// for it; the segment discussing it, with its full summary, scores 0.66.)
 func EmbeddableText(n *graph.Node) string {
-	if n.DocComment == "" && n.Signature == "" {
+	if n.DocComment == "" && n.Signature == "" && n.Type != graph.NodeTopic {
 		return ""
 	}
 
@@ -159,6 +187,14 @@ func EmbeddableText(n *graph.Node) string {
 				b.WriteString(prop.prefix)
 				b.WriteString(": ")
 				b.WriteString(val)
+			}
+		}
+		// The other wordings meetings used for a topic are the phrases a
+		// searcher is most likely to reach for.
+		if n.Type == graph.NodeTopic {
+			if aliases := n.Properties[graph.PropAliases]; aliases != "" {
+				b.WriteString("\nAlso worded as: ")
+				b.WriteString(aliases)
 			}
 		}
 	}
@@ -190,6 +226,13 @@ var EmbeddableTypes = []graph.NodeType{
 	graph.NodeDirectory,
 	graph.NodeTopic,
 	graph.NodePerson,
+	// Meeting entities carry their substance in DocComment, so they embed the
+	// same way documents do. Including them is what lets a semantic query
+	// reach what was *said* about something, not only what was written in code.
+	graph.NodeMeeting,
+	graph.NodeTopicSegment,
+	graph.NodeDecision,
+	graph.NodeActionItem,
 }
 
 // IsEmbeddable returns true if the node type should be considered for embedding.

@@ -186,7 +186,7 @@ func (t *queryNodeEdgesTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"node": map[string]any{
 				"type":        "string",
-				"description": "The node name to look up (e.g., 'HandleRequest', 'Store', 'main.go').",
+				"description": "The node name or id to look up (e.g., 'HandleRequest', 'Store', 'main.go'). When several nodes share a name, the candidates are returned with their ids; call again with the id.",
 			},
 			"edge_type": map[string]any{
 				"type":        "string",
@@ -213,17 +213,40 @@ func (t *queryNodeEdgesTool) Execute(ctx context.Context, args map[string]any) (
 		dirFilter = "both"
 	}
 
-	// Find the node by name pattern.
-	nodes, err := t.store.QueryNodes(ctx, graph.NodeFilter{NamePattern: nodeName})
-	if err != nil {
-		return fmt.Sprintf("Error querying nodes: %v", err), false
+	// An id resolves directly; a name may not resolve at all.
+	node, err := t.store.GetNode(ctx, nodeName)
+	if err != nil || node == nil {
+		nodes, err := t.store.QueryNodes(ctx, graph.NodeFilter{NamePattern: nodeName})
+		if err != nil {
+			return fmt.Sprintf("Error querying nodes: %v", err), false
+		}
+		if len(nodes) == 0 {
+			return fmt.Sprintf("No node found matching %q.", nodeName), false
+		}
+		if len(nodes) > 1 {
+			// The edges of the wrong node read as plausibly as the right
+			// one's, so several candidates are handed back to choose from
+			// rather than resolved to whichever came first.
+			sort.Slice(nodes, func(i, j int) bool {
+				if nodes[i].Type != nodes[j].Type {
+					return nodes[i].Type < nodes[j].Type
+				}
+				return nodes[i].FilePath < nodes[j].FilePath
+			})
+			var b strings.Builder
+			fmt.Fprintf(&b, "%d nodes are named %q. Call again with the id of the one you mean as `node`:\n\n", len(nodes), nodeName)
+			b.WriteString("| ID | Type | File | Package |\n|---|---|---|---|\n")
+			for i, n := range nodes {
+				if i >= 10 {
+					fmt.Fprintf(&b, "\n... and %d more\n", len(nodes)-10)
+					break
+				}
+				fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", n.ID, n.Type, n.FilePath, n.Package)
+			}
+			return b.String(), false
+		}
+		node = nodes[0]
 	}
-	if len(nodes) == 0 {
-		return fmt.Sprintf("No node found matching %q.", nodeName), false
-	}
-
-	// Use the first match.
-	node := nodes[0]
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Edges for: %s (%s)\n", node.Name, node.Type)

@@ -3,8 +3,8 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -32,7 +32,7 @@ func newQueryCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			store, _, err := openBranchStore(cfg)
+			store, _, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -86,6 +86,7 @@ func newQueryCmd() *cobra.Command {
 	cmd.AddCommand(newQueryEdgesCmd())
 	cmd.AddCommand(newQueryUnusedCmd())
 	cmd.AddCommand(newQueryCoverageCmd())
+	cmd.AddCommand(newQueryDuplicatesCmd())
 
 	return cmd
 }
@@ -109,7 +110,7 @@ func newQuerySymbolsCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			store, _, err := openBranchStore(cfg)
+			store, _, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -257,7 +258,7 @@ func newQueryInterfaceCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			store, _, err := openBranchStore(cfg)
+			store, _, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -377,12 +378,20 @@ func newQueryEdgesCmd() *cobra.Command {
 		edgeType      string
 		direction     string
 		packageFilter string
+		nodeType      string
 		jsonOut       bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "edges",
 		Short: "Show all edges (relationships) for a node",
+		Long: `Show the relationships of one node, found by id or by name.
+
+A name that several nodes share — a topic and the segment of a meeting
+about it, a function defined in two packages — is refused rather than
+resolved to whichever came first: the edges of the wrong node look exactly
+as plausible as the right one's. The candidates are listed with their ids;
+re-run with the id, or narrow with --node-type or --package.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if nodeArg == "" {
 				return fmt.Errorf("--node is required")
@@ -393,7 +402,7 @@ func newQueryEdgesCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			store, _, err := openBranchStore(cfg)
+			store, _, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -401,36 +410,9 @@ func newQueryEdgesCmd() *cobra.Command {
 
 			ctx := context.Background()
 
-			// Try to find the node by ID first, then by name.
-			node, err := store.GetNode(ctx, nodeArg)
-			if err != nil || node == nil {
-				// Try name search, optionally filtered by package.
-				filter := graph.NodeFilter{NamePattern: nodeArg}
-				if packageFilter != "" {
-					filter.Package = packageFilter
-				}
-				candidates, qErr := store.QueryNodes(ctx, filter)
-				if qErr != nil {
-					return fmt.Errorf("query nodes: %w", qErr)
-				}
-				if len(candidates) == 0 {
-					return fmt.Errorf("no node found matching %q", nodeArg)
-				}
-				if len(candidates) > 1 && packageFilter == "" {
-					fmt.Fprintf(os.Stderr, "Warning: %d nodes match %q, using first. Use --package to disambiguate:\n", len(candidates), nodeArg)
-					for i, c := range candidates {
-						if i >= 5 {
-							fmt.Fprintf(os.Stderr, "  ... and %d more\n", len(candidates)-5)
-							break
-						}
-						loc := c.FilePath
-						if c.Line > 0 {
-							loc = fmt.Sprintf("%s:%d", c.FilePath, c.Line)
-						}
-						fmt.Fprintf(os.Stderr, "  %s (%s, %s)\n", c.Name, c.Package, loc)
-					}
-				}
-				node = candidates[0]
+			node, err := resolveNodeRef(ctx, store, nodeArg, packageFilter, nodeType)
+			if err != nil {
+				return err
 			}
 
 			// Fetch all edges for this node.
@@ -537,9 +519,58 @@ func newQueryEdgesCmd() *cobra.Command {
 	cmd.Flags().StringVar(&edgeType, "type", "", "filter by edge type (e.g. Calls, Implements)")
 	cmd.Flags().StringVar(&direction, "direction", "both", "edge direction: in, out, or both")
 	cmd.Flags().StringVar(&packageFilter, "package", "", "filter by package name (disambiguate common names)")
+	cmd.Flags().StringVar(&nodeType, "node-type", "", "filter by node type (e.g. Topic, TopicSegment, Function)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "output as JSON")
 
 	return cmd
+}
+
+// resolveNodeRef finds exactly one node from an id or a name. Several nodes
+// answering to a name is an error that lists them, never a guess.
+func resolveNodeRef(ctx context.Context, store graph.Store, ref, pkg, nodeType string) (*graph.Node, error) {
+	if node, err := store.GetNode(ctx, ref); err == nil && node != nil {
+		return node, nil
+	}
+	filter := graph.NodeFilter{NamePattern: ref, Package: pkg, Type: graph.NodeType(nodeType)}
+	candidates, err := store.QueryNodes(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("query nodes: %w", err)
+	}
+	switch len(candidates) {
+	case 0:
+		return nil, fmt.Errorf("no node found matching %q", ref)
+	case 1:
+		return candidates[0], nil
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Type != candidates[j].Type {
+			return candidates[i].Type < candidates[j].Type
+		}
+		if candidates[i].FilePath != candidates[j].FilePath {
+			return candidates[i].FilePath < candidates[j].FilePath
+		}
+		return candidates[i].ID < candidates[j].ID
+	})
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d nodes are named %q; pass one by id with --node <id>, or narrow with --node-type or --package:", len(candidates), ref)
+	for i, c := range candidates {
+		if i >= 10 {
+			fmt.Fprintf(&b, "\n  ... and %d more", len(candidates)-10)
+			break
+		}
+		fmt.Fprintf(&b, "\n  %s  %-13s", c.ID, c.Type)
+		switch {
+		case c.FilePath != "" && c.Line > 0:
+			fmt.Fprintf(&b, " %s:%d", c.FilePath, c.Line)
+		case c.FilePath != "":
+			fmt.Fprintf(&b, " %s", c.FilePath)
+		}
+		if c.Package != "" {
+			fmt.Fprintf(&b, " (package %s)", c.Package)
+		}
+	}
+	return nil, errors.New(b.String())
 }
 
 // formatEdgeNodeDetail formats a resolved edge entry for text display.

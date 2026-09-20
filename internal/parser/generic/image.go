@@ -14,13 +14,13 @@ import (
 	"golang.org/x/image/webp"
 )
 
-// downscaleImage decodes an image, scales the longest edge to maxRes,
+// DownscaleImage decodes an image, scales the longest edge to maxRes,
 // composites RGBA onto a white background (JPEG doesn't support alpha),
 // and re-encodes as JPEG. Returns the downscaled bytes and dimensions.
 //
 // If the image is already smaller than maxRes, it is still re-encoded
 // as JPEG to normalize the format for LLM consumption.
-func downscaleImage(data []byte, mimeType string, maxRes int) ([]byte, int, int, error) {
+func DownscaleImage(data []byte, mimeType string, maxRes int) ([]byte, int, int, error) {
 	if maxRes <= 0 {
 		maxRes = 1024
 	}

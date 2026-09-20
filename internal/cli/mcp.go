@@ -46,7 +46,7 @@ This command is typically invoked automatically by the Claude CLI via
 				return fmt.Errorf("load config: %w", err)
 			}
 
-			store, _, err := openBranchStore(cfg)
+			store, _, err := openReadOnlyBranchStore(cfg)
 			if err != nil {
 				return err
 			}
@@ -60,6 +60,11 @@ This command is typically invoked automatically by the Claude CLI via
 
 			registry := agents.NewRegistry()
 			for _, tool := range agents.NewPlannerTools(ctxBuilder) {
+				registry.Register(tool)
+			}
+			// Meeting tools appear only when meetings are indexed: a tool whose
+			// only possible answer is "nothing is indexed" wastes an agent's turns.
+			for _, tool := range agents.NewMeetingTools(context.Background(), store) {
 				registry.Register(tool)
 			}
 

@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "name": "errors/401-invalid-key-01",
+  "note": "Sent with the literal key apikey_invalid.",
+  "recorded_at": "2026-09-19T21:49:31+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": null,
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "command": "git push --force origin main",
+        "working_directory": "/app/service-payments",
+        "session_context": "Refactoring migration files"
+      },
+      "questions": {
+        "q": {
+          "type": "noul",
+          "instructions": "Is it destructive?"
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 401,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba55d37767a9a720cd15cf008e2",
+      "x-envoy-upstream-service-time": "3"
+    },
+    "body": {
+      "detail": {
+        "error_type": "authentication_error",
+        "message": "Cannot authenticate with the server. Please check your API key and try again."
+      }
+    }
+  },
+  "latency_ms": 298,
+  "key": "sha256:9b55aeeeeea1ed0def8d9903732f394ca4326f5df7ac9dcc780e01f52d36a73c"
+}

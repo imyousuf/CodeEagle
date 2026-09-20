@@ -1,0 +1,2085 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/imyousuf/CodeEagle/internal/config"
+	"github.com/imyousuf/CodeEagle/internal/decide"
+	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
+	"github.com/imyousuf/CodeEagle/internal/indexer"
+	"github.com/imyousuf/CodeEagle/internal/linker"
+	_ "github.com/imyousuf/CodeEagle/internal/llm" // register LLM providers
+	"github.com/imyousuf/CodeEagle/internal/search"
+	"github.com/imyousuf/CodeEagle/internal/transcript"
+	"github.com/imyousuf/CodeEagle/pkg/llm"
+)
+
+// newMeetingsCmd builds the `codeeagle meetings` command tree.
+func newMeetingsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "meetings",
+		Short: "Index and query meeting transcripts",
+		Long: `Index meeting transcripts into the knowledge graph.
+
+Recordings are diarized but anonymous: voices are labelled "Person 1",
+"Person 2", and so on, and those labels mean nothing outside a single
+recording. Indexing works out who was actually speaking, then extracts the
+topics, decisions, and follow-ups so agents can answer questions about what
+was said, by whom, and what it committed anyone to.`,
+	}
+	cmd.AddCommand(
+		newMeetingsSyncCmd(),
+		newMeetingsWatchCmd(),
+		newMeetingsListCmd(),
+		newMeetingsShowCmd(),
+		newMeetingsPeopleCmd(),
+		newMeetingsIdentifyCmd(),
+		newMeetingsLabelCmd(),
+		newMeetingsTopicsCmd(),
+		newMeetingsTaxonomyCmd(),
+		newMeetingsMigrateCmd(),
+		newMeetingsActionsCmd(),
+		newMeetingsSearchCmd(),
+		newMeetingsRelateCmd(),
+	)
+	return cmd
+}
+
+// --- sync ---
+
+func newMeetingsSyncCmd() *cobra.Command {
+	var (
+		dirs        []string
+		force       bool
+		limit       int
+		concurrency int
+		model       string
+		provider    string
+		dryRun      bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Enrich meeting transcripts and index them into the graph",
+		Long: `Enrich transcripts and write them into the knowledge graph.
+
+Recordings already indexed and unchanged are skipped, so re-running after new
+meetings costs nothing for the ones already done.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+
+			if dryRun {
+				return meetingsDryRun(cmd, out, dirs, limit, force)
+			}
+
+			pipeline, err := buildMeetingPipeline(cmd, meetingPipelineOverrides{
+				dirs: dirs, model: model, provider: provider,
+				concurrency: concurrency, force: force, limit: limit,
+			})
+			if err != nil {
+				return err
+			}
+			defer pipeline.close()
+
+			fmt.Fprintf(out, "Graph scope: %s\n", pipeline.branch)
+			fmt.Fprintf(out, "Provider: %s (%s)\n", pipeline.client.Provider(), pipeline.client.Model())
+			if judge := pipeline.analyzer.JudgeName(); judge != "" {
+				fmt.Fprintf(out, "Speakers:  %s\n", judge)
+			}
+			if pipeline.relater != nil {
+				fmt.Fprintln(out, "Topics:    related to their neighbours as each meeting is written")
+			}
+			fmt.Fprintln(out)
+
+			started := time.Now()
+			report, err := pipeline.indexer.Run(cmd.Context())
+			if err != nil {
+				return err
+			}
+			printRunReport(out, report)
+			if pipeline.relater != nil && report.Stats.RelatedPairs > 0 {
+				printRelateStats(out, pipeline.relater.Stats(), time.Since(started))
+			}
+
+			// Connect what the meetings discussed to the indexed codebase.
+			// This needs the whole graph in view, so it runs once at the end
+			// rather than per meeting.
+			if report.Stats.Meetings > 0 {
+				linkMeetingsToCode(cmd.Context(), out, pipeline.store)
+			}
+
+			// Failures are reported per recording so one bad file cannot end a
+			// run, but the command must still fail: a scheduled job whose API
+			// key expired would otherwise enrich nothing and report success.
+			if len(report.Failures) > 0 && report.Stats.Meetings == 0 {
+				return fmt.Errorf("no recordings were indexed: all %d failed", len(report.Failures))
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringSliceVar(&dirs, "dir", nil,
+		"directory to search for transcripts; repeatable, and replaces the configured set")
+	cmd.Flags().BoolVar(&force, "force", false, "re-enrich recordings that are already indexed")
+	cmd.Flags().IntVar(&limit, "limit", 0, "process at most N recordings")
+	cmd.Flags().IntVar(&concurrency, "concurrency", 0, "recordings to analyse at once")
+	cmd.Flags().StringVar(&model, "model", "", "model to use (overrides config)")
+	cmd.Flags().StringVar(&provider, "provider", "", "LLM provider (overrides config)")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report what would be processed without calling a model")
+	return cmd
+}
+
+// meetingsDryRun reports what a run would cover without spending anything.
+//
+// It plans through the indexer rather than repeating discovery, so what it
+// reports is what a real run will do: the same directories, the same
+// transcripts found among the indexed documents, and the same skipping of
+// recordings already enriched. An estimate built separately drifts from the
+// thing it is estimating, and this one guards real money.
+func meetingsDryRun(cmd *cobra.Command, out io.Writer, dirs []string, limit int, force bool) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	scan := dirs
+	if len(scan) == 0 {
+		scan = cfg.TranscriptDirs()
+	}
+	for i, d := range scan {
+		scan[i] = expandPath(d)
+	}
+
+	marked, err := transcriptDocuments(cmd.Context(), cfg)
+	if err != nil && verbose {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not read indexed documents: %v\n", err)
+	}
+	if len(scan) == 0 && len(marked) == 0 {
+		return fmt.Errorf(
+			"nothing to index: set transcripts.sessions_dir, pass --dir, " +
+				"or run `codeeagle sync` so transcripts among your documents are found")
+	}
+
+	// Read-only: a preview must not take the write lock, and must not need
+	// credentials for a model it is not going to call.
+	store, err := embedded.OpenMeetingsReadOnly(cfg, dbPath)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	indexer := transcript.NewIndexer(store, nil, nil, transcript.IndexOptions{
+		SessionsDirs: scan,
+		ExtraPaths:   marked,
+		Force:        force,
+		Limit:        limit,
+		Log:          func(string, ...any) {},
+	})
+	plan, err := indexer.Plan(cmd.Context())
+	if err != nil {
+		return err
+	}
+
+	var speech, chars float64
+	var participants int
+	byFormat := map[string]int{}
+
+	for _, p := range plan.Todo {
+		s, err := transcript.Load(p)
+		if err != nil {
+			// Planning already read this file successfully, so a failure here
+			// is a genuine problem rather than "not a transcript".
+			plan.Failures = append(plan.Failures, transcript.Failure{Path: p, Err: err})
+			continue
+		}
+		byFormat[s.Format]++
+		speech += s.SpeechSeconds()
+		chars += float64(len(s.Transcript()))
+		participants += len(s.SubstantiveSpeakers())
+	}
+
+	fmt.Fprintf(out, "To enrich:        %d recordings\n", len(plan.Todo))
+	if len(byFormat) > 0 {
+		formats := make([]string, 0, len(byFormat))
+		for name, n := range byFormat {
+			formats = append(formats, fmt.Sprintf("%s %d", name, n))
+		}
+		sort.Strings(formats)
+		fmt.Fprintf(out, "Formats:          %s\n", strings.Join(formats, ", "))
+	}
+	if plan.Skipped > 0 || plan.Empty > 0 || plan.Pending > 0 {
+		fmt.Fprintf(out, "Already indexed:  %d unchanged", plan.Skipped)
+		if plan.Empty > 0 {
+			fmt.Fprintf(out, ", %d with no speech", plan.Empty)
+		}
+		if plan.Pending > 0 {
+			fmt.Fprintf(out, ", %d still being written", plan.Pending)
+		}
+		fmt.Fprintln(out)
+	}
+	if plan.NotTranscripts > 0 {
+		fmt.Fprintf(out, "Not transcripts:  %d files skipped\n", plan.NotTranscripts)
+	}
+	fmt.Fprintf(out, "Speech:           %.1f hours\n", speech/3600)
+	fmt.Fprintf(out, "Participants:     %d across the recordings to enrich\n", participants)
+	// Both enrichment passes send the transcript, so the prompt cost is
+	// roughly twice its token count.
+	promptTokens := chars / 4 * 2
+	fmt.Fprintf(out, "Prompt tokens:    ~%.1fM (two passes per recording)\n", promptTokens/1e6)
+
+	if len(plan.Failures) > 0 {
+		fmt.Fprintf(out, "\nUnreadable:       %d\n", len(plan.Failures))
+		for _, f := range plan.Failures {
+			fmt.Fprintf(out, "  %s: %v\n", filepath.Base(f.Path), f.Err)
+		}
+	}
+	if len(plan.Todo) == 0 {
+		fmt.Fprintf(out, "\nNothing to do.\n")
+		return nil
+	}
+	fmt.Fprintf(out, "\nRun without --dry-run to enrich and index.\n")
+	return nil
+}
+
+// printRunReport summarizes a completed batch.
+func printRunReport(out io.Writer, r *transcript.RunReport) {
+	fmt.Fprintf(out, "\n── Indexed ──\n")
+	fmt.Fprintf(out, "  meetings      %d\n", r.Stats.Meetings)
+	fmt.Fprintf(out, "  participants  %d (%d identified, %d unresolved)\n",
+		r.Stats.Speakers, r.Stats.Identified, r.Stats.Unidentified)
+	if r.Stats.Background > 0 {
+		fmt.Fprintf(out, "  background    %d voices that were not people\n", r.Stats.Background)
+	}
+	fmt.Fprintf(out, "  new people    %d\n", r.Stats.People)
+	fmt.Fprintf(out, "  topics        %d across %d segments\n", r.Stats.Topics, r.Stats.Segments)
+	fmt.Fprintf(out, "  decisions     %d\n", r.Stats.Decisions)
+	fmt.Fprintf(out, "  action items  %d\n", r.Stats.ActionItems)
+	fmt.Fprintf(out, "  edges         %d\n", r.Stats.Edges)
+	if r.Skipped > 0 || r.Empty > 0 || r.NotTranscripts > 0 {
+		fmt.Fprintf(out, "  skipped       %d unchanged, %d with no speech", r.Skipped, r.Empty)
+		if r.NotTranscripts > 0 {
+			fmt.Fprintf(out, ", %d not transcripts", r.NotTranscripts)
+		}
+		fmt.Fprintln(out)
+	}
+	fmt.Fprintf(out, "\n── Cost ──\n")
+	fmt.Fprintf(out, "  %d requests, %d in / %d out tokens, %s\n",
+		r.Usage.Requests, r.Usage.InputTokens, r.Usage.OutputTokens, r.Duration.Round(time.Second))
+
+	if len(r.Failures) > 0 {
+		fmt.Fprintf(out, "\n── Failures (%d) ──\n", len(r.Failures))
+		for i, f := range r.Failures {
+			if i >= 10 {
+				fmt.Fprintf(out, "  ... and %d more\n", len(r.Failures)-10)
+				break
+			}
+			fmt.Fprintf(out, "  %s: %v\n", filepath.Base(filepath.Dir(f.Path)), f.Err)
+		}
+	}
+}
+
+// linkMeetingsToCode resolves mentioned systems to indexed code entities.
+//
+// A failure here is reported but not fatal: the meetings themselves are
+// already written, and a project with no code indexed yet simply has nothing
+// to link to.
+func linkMeetingsToCode(ctx context.Context, out io.Writer, store graph.Store) {
+	lnk := linker.NewLinker(store, nil, nil, false)
+	phases, _ := lnk.PhasesByName("meetings", "meeting_attendance", "meeting_series")
+	if len(phases) == 0 {
+		return
+	}
+	results, err := lnk.RunPhases(ctx, phases)
+	if err != nil {
+		fmt.Fprintf(out, "\nWarning: could not link meetings to code: %v\n", err)
+		return
+	}
+	if n := results["meetings"]; n > 0 {
+		fmt.Fprintf(out, "\nLinked %d meeting-to-code references.\n", n)
+	}
+}
+
+// meetingDateLinker attaches a meeting to the Year/Month/Date hierarchy, so
+// meetings answer temporal queries the same way modified files do.
+func meetingDateLinker(ctx context.Context, store graph.Store, t interface{ Unix() int64 }, nodeID string) error {
+	when, ok := t.(time.Time)
+	if !ok {
+		return nil
+	}
+	return indexer.EnsureDateNodes(ctx, store, when, nodeID)
+}
+
+// newTranscriptClient builds the LLM client used for enrichment.
+func newTranscriptClient(tc config.TranscriptsConfig) (llm.Client, error) {
+	provider := tc.TranscriptProvider()
+	if warning := tc.CredentialWarning(); warning != "" && verbose {
+		fmt.Fprintf(os.Stderr, "Note: %s\n", warning)
+	}
+	apiKey, err := config.ResolveSecret(tc.ProviderSecret())
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s API key: %w", provider, err)
+	}
+	client, err := llm.NewClient(llm.Config{
+		Provider:        provider,
+		Model:           tc.Model,
+		APIKey:          apiKey,
+		BaseURL:         tc.BaseURL,
+		MaxTokens:       tc.MaxTokens,
+		ReasoningEffort: tc.ReasoningEffort,
+		ContextWindow:   tc.ContextWindow,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create %s client: %w", provider, err)
+	}
+	return client, nil
+}
+
+// --- watch ---
+
+func newMeetingsWatchCmd() *cobra.Command {
+	var (
+		dirs     []string
+		interval time.Duration
+		settle   time.Duration
+	)
+
+	cmd := &cobra.Command{
+		Use:   "watch",
+		Short: "Index new meeting recordings as they appear",
+		Long: `Watch the sessions directory and index new recordings continuously.
+
+The directory is swept on an interval rather than watched for filesystem
+events. A recording is written by the recorder over the course of a meeting, so
+an event arrives while the file is still incomplete; a sweep waits until a
+transcript has been idle for a moment and skips everything already indexed on
+its content hash, which costs a file read and no model call.
+
+The first sweep runs immediately, so starting the watcher catches up on
+anything recorded while it was not running. Press Ctrl-C to stop.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+			pipeline, err := buildMeetingPipeline(cmd, meetingPipelineOverrides{dirs: dirs})
+			if err != nil {
+				return err
+			}
+			defer pipeline.close()
+
+			fmt.Fprintf(out, "Provider: %s (%s)\n", pipeline.client.Provider(), pipeline.client.Model())
+
+			return pipeline.indexer.Watch(cmd.Context(), transcript.WatchOptions{
+				Interval: interval,
+				Settle:   settle,
+			})
+		},
+	}
+
+	cmd.Flags().StringSliceVar(&dirs, "dir", nil,
+		"directory to search for transcripts; repeatable, and replaces the configured set")
+	cmd.Flags().DurationVar(&interval, "interval", transcript.DefaultWatchInterval, "how often to sweep for new recordings")
+	cmd.Flags().DurationVar(&settle, "settle", transcript.DefaultSettleTime,
+		"how long a transcript must be idle before indexing, so a recording in progress is left alone")
+	return cmd
+}
+
+// --- shared pipeline ---
+
+// maxOfferedTopics bounds the vocabulary shown to the model per meeting.
+const maxOfferedTopics = 80
+
+// maxTaxonomyLines bounds the hierarchy shown alongside it. The tree is what
+// the model places new subjects into, so it earns more room than the flat
+// list, but not so much that it crowds out the transcript.
+const maxTaxonomyLines = 150
+
+// meetingPipeline bundles everything needed to index transcripts.
+type meetingPipeline struct {
+	client   llm.Client
+	store    *embedded.BranchStore
+	branch   string
+	indexer  *transcript.Indexer
+	analyzer *transcript.Analyzer
+	people   *transcript.PersonRegistry
+	topics   *transcript.TopicRegistry
+	// relater is set when a decision model is configured; closeVectors
+	// releases the vector index it reads, if one was opened.
+	relater      *transcript.TopicRelater
+	closeVectors func()
+}
+
+func (p *meetingPipeline) close() {
+	if p.closeVectors != nil {
+		p.closeVectors()
+	}
+	if p.client != nil {
+		_ = p.client.Close()
+	}
+	if p.store != nil {
+		_ = p.store.Close()
+	}
+}
+
+// meetingPipelineOverrides carries the flags that can override config.
+type meetingPipelineOverrides struct {
+	dirs        []string
+	model       string
+	provider    string
+	concurrency int
+	force       bool
+	limit       int
+}
+
+// buildMeetingPipeline assembles the client, store, analyzer, writer, and
+// indexer that both sync and watch need.
+func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*meetingPipeline, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+
+	tc := cfg.Transcripts
+	if ov.model != "" {
+		tc.Model = ov.model
+	}
+	if ov.provider != "" {
+		tc.Provider = ov.provider
+	}
+	if ov.concurrency > 0 {
+		tc.Concurrency = ov.concurrency
+	}
+	// A directory named on the command line replaces the configured set, so a
+	// one-off scan of a downloads folder does not also re-walk everything else.
+	dirs := ov.dirs
+	if len(dirs) == 0 {
+		dirs = cfg.TranscriptDirs()
+	}
+	for i, d := range dirs {
+		dirs[i] = expandPath(d)
+	}
+	// Collected before the meeting store is opened, because both live in one
+	// database and only one writer may hold it at a time.
+	marked, err := transcriptDocuments(cmd.Context(), cfg)
+	if err != nil && verbose {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not read indexed documents: %v\n", err)
+	}
+
+	// Configuring a directory is not required: a transcript that turned up
+	// during document indexing is already known, and is indexed from there.
+	if len(dirs) == 0 && len(marked) == 0 {
+		return nil, fmt.Errorf(
+			"nothing to index: set transcripts.sessions_dir, pass --dir, " +
+				"or run `codeeagle sync` so transcripts among your documents are found")
+	}
+
+	client, err := newTranscriptClient(tc)
+	if err != nil {
+		return nil, err
+	}
+
+	store, err := openMeetingStore(cfg)
+	if err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+
+	ctx := cmd.Context()
+	people, err := transcript.LoadPersonRegistry(ctx, store)
+	if err != nil {
+		_ = client.Close()
+		_ = store.Close()
+		return nil, fmt.Errorf("load people: %w", err)
+	}
+	topics, err := transcript.LoadTopicRegistry(ctx, store)
+	if err != nil {
+		_ = client.Close()
+		_ = store.Close()
+		return nil, fmt.Errorf("load topics: %w", err)
+	}
+
+	analyzer := transcript.NewAnalyzer(client, transcript.Options{
+		Owner:         tc.Owner,
+		OwnerAliases:  tc.OwnerAliases,
+		Roster:        tc.Roster,
+		ExcludeNames:  tc.ExcludeNames,
+		MinConfidence: tc.MinConfidence,
+		// Screening for voices that are not people needs the decision model,
+		// so it is silently inert without one.
+		BackgroundFilter:        tc.BackgroundFilter,
+		BackgroundMinConfidence: tc.BackgroundMinConfidence,
+		// People found earlier in the run become known names for the
+		// meetings analysed after them, and topics likewise become the
+		// vocabulary later meetings are asked to reuse.
+		KnownPeople: people.Names,
+		KnownTopics: func() []string { return topics.Vocabulary(maxOfferedTopics) },
+		// Showing the hierarchy, not just a list of labels, is what lets a
+		// meeting place a new subject under an existing concept instead of
+		// leaving it loose for a later rebuild to sort out.
+		TopicTaxonomy: func() string {
+			tree, err := transcript.RenderTaxonomy(ctx, store, maxTaxonomyLines)
+			if err != nil {
+				return ""
+			}
+			return tree
+		},
+	})
+	// A decision model, when one is configured, adjudicates who was speaking.
+	// Everything else — titles, summaries, decisions, follow-ups — stays with
+	// the language model, because none of it is a choice between known
+	// options.
+	if judge, err := newSpeakerJudge(tc); err != nil {
+		_ = client.Close()
+		_ = store.Close()
+		return nil, err
+	} else if judge != nil {
+		analyzer = analyzer.WithJudge(judge)
+	}
+
+	writer := transcript.NewWriter(store, people, transcript.WriterOptions{
+		MinConfidence: tc.MinConfidence,
+		Owner:         tc.Owner,
+	}).WithDateLinker(meetingDateLinker).WithTopics(topics)
+
+	out := cmd.OutOrStdout()
+	// With a decision model, each meeting's topics are related to their
+	// neighbours as it is written, so the adjacency graph grows with the
+	// corpus instead of waiting for a bulk pass.
+	relater, closeVectors, err := newTopicRelater(cfg, tc, store, relaterSetup{
+		log: func(format string, args ...any) { fmt.Fprintf(out, format+"\n", args...) },
+	})
+	if err != nil {
+		_ = client.Close()
+		_ = store.Close()
+		return nil, err
+	}
+	if relater != nil {
+		writer = writer.WithRelater(relater)
+	}
+
+	indexer := transcript.NewIndexer(store, analyzer, writer, transcript.IndexOptions{
+		SessionsDirs: dirs,
+		ExtraPaths:   marked,
+		Concurrency:  tc.Concurrency,
+		Force:        ov.force,
+		Limit:        ov.limit,
+		Log: func(format string, args ...any) {
+			fmt.Fprintf(out, format+"\n", args...)
+		},
+	})
+
+	return &meetingPipeline{
+		client:       client,
+		store:        store,
+		branch:       embedded.MeetingScope,
+		indexer:      indexer,
+		analyzer:     analyzer,
+		people:       people,
+		topics:       topics,
+		relater:      relater,
+		closeVectors: closeVectors,
+	}, nil
+}
+
+// --- list ---
+
+func newMeetingsListCmd() *cobra.Command {
+	var (
+		limit    int
+		person   string
+		asJSON   bool
+		since    string
+		showWith bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List indexed meetings",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withGraph(cmd, func(ctx context.Context, store graph.Store) error {
+				meetings, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeMeeting})
+				if err != nil {
+					return err
+				}
+				sort.Slice(meetings, func(i, j int) bool {
+					return meetings[i].UpdatedAt.After(meetings[j].UpdatedAt)
+				})
+
+				if since != "" {
+					cutoff, err := time.Parse("2006-01-02", since)
+					if err != nil {
+						return fmt.Errorf("--since must be YYYY-MM-DD: %w", err)
+					}
+					var kept []*graph.Node
+					for _, m := range meetings {
+						if m.UpdatedAt.After(cutoff) {
+							kept = append(kept, m)
+						}
+					}
+					meetings = kept
+				}
+
+				if person != "" {
+					filtered, err := meetingsWithPerson(ctx, store, meetings, person)
+					if err != nil {
+						return err
+					}
+					meetings = filtered
+				}
+				total := len(meetings)
+				if limit > 0 && len(meetings) > limit {
+					meetings = meetings[:limit]
+				}
+
+				out := cmd.OutOrStdout()
+				if asJSON {
+					return json.NewEncoder(out).Encode(meetingsToJSON(ctx, store, meetings))
+				}
+				if len(meetings) == 0 {
+					fmt.Fprintln(out, "No meetings indexed. Run: codeeagle meetings sync")
+					return nil
+				}
+
+				tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+				fmt.Fprintln(tw, "DATE\tID\tDURATION\tPARTICIPANTS\tTITLE")
+				for _, m := range meetings {
+					who := "—"
+					if showWith || person != "" {
+						if names, err := attendeeNames(ctx, store, m.ID); err == nil && len(names) > 0 {
+							who = strings.Join(names, ", ")
+						}
+					} else if names, err := attendeeNames(ctx, store, m.ID); err == nil {
+						who = strconv.Itoa(len(names))
+					}
+					title := truncateText(m.Name, 70)
+					if m.Properties[graph.PropIncomplete] == "true" {
+						// Written partway and abandoned. Saying so beats
+						// letting it pass for a meeting where nothing was
+						// decided.
+						title += "  [incomplete]"
+					}
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+						m.UpdatedAt.Format("2006-01-02 15:04"),
+						transcript.ShortID(m),
+						formatSeconds(m.Properties[graph.PropDuration]),
+						truncateText(who, 40),
+						title)
+				}
+				if err := tw.Flush(); err != nil {
+					return err
+				}
+				noteTruncation(out, len(meetings), total, "meetings", "--limit 0")
+				return nil
+			})
+		},
+	}
+
+	cmd.Flags().IntVar(&limit, "limit", 30, "maximum meetings to show (0 for all)")
+	cmd.Flags().StringVar(&person, "person", "", "only meetings this person attended")
+	cmd.Flags().StringVar(&since, "since", "", "only meetings after this date (YYYY-MM-DD)")
+	cmd.Flags().BoolVar(&showWith, "who", false, "list attendee names instead of a count")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON")
+	return cmd
+}
+
+// --- show ---
+
+func newMeetingsShowCmd() *cobra.Command {
+	var asJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "show <meeting-id-or-title>",
+		Short: "Show a meeting's participants, topics, decisions, and follow-ups",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withGraph(cmd, func(ctx context.Context, store graph.Store) error {
+				m, err := findMeeting(ctx, store, args[0])
+				if err != nil {
+					return err
+				}
+				out := cmd.OutOrStdout()
+				if asJSON {
+					return json.NewEncoder(out).Encode(meetingsToJSON(ctx, store, []*graph.Node{m})[0])
+				}
+
+				fmt.Fprintf(out, "%s\n", m.Name)
+				fmt.Fprintf(out, "%s · %s · %s\n",
+					m.UpdatedAt.Format("Monday, 2 January 2006 15:04"),
+					formatSeconds(m.Properties[graph.PropDuration]),
+					orNone(m.Properties[graph.PropPlatform]))
+				fmt.Fprintf(out, "ID: %s\n\n", m.QualifiedName)
+
+				if s := m.Properties[graph.PropSummary]; s != "" {
+					fmt.Fprintf(out, "%s\n\n", s)
+				}
+
+				if err := showParticipants(ctx, store, out, m); err != nil {
+					return err
+				}
+				if err := showChildren(ctx, store, out, m); err != nil {
+					return err
+				}
+				if mentions := m.Properties["mentions"]; mentions != "" {
+					fmt.Fprintf(out, "Mentioned: %s\n", mentions)
+				}
+				showSeriesLinks(ctx, out, store, m)
+				return nil
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON")
+	return cmd
+}
+
+// showSeriesLinks points at the neighbouring instances of a standing meeting,
+// so a reader can follow the thread rather than treat each one as unrelated.
+func showSeriesLinks(ctx context.Context, out io.Writer, store graph.Store, m *graph.Node) {
+	if prev, err := store.GetNeighbors(ctx, m.ID, graph.EdgeFollowsUp, graph.Outgoing); err == nil && len(prev) > 0 {
+		fmt.Fprintf(out, "\nPrevious with these people: %s (%s)\n",
+			truncateText(prev[0].Name, 60), prev[0].QualifiedName)
+	}
+	if next, err := store.GetNeighbors(ctx, m.ID, graph.EdgeFollowsUp, graph.Incoming); err == nil && len(next) > 0 {
+		fmt.Fprintf(out, "Next with these people:     %s (%s)\n",
+			truncateText(next[0].Name, 60), next[0].QualifiedName)
+	}
+}
+
+func showParticipants(ctx context.Context, store graph.Store, out io.Writer, m *graph.Node) error {
+	speakers, err := store.GetNeighbors(ctx, m.ID, graph.EdgeContains, graph.Outgoing)
+	if err != nil {
+		return err
+	}
+	var rows []string
+	for _, sp := range speakers {
+		if sp.Type != graph.NodeSpeaker {
+			continue
+		}
+		name := "unidentified"
+		detail := ""
+		people, err := store.GetNeighbors(ctx, sp.ID, graph.EdgeIdentifiedAs, graph.Outgoing)
+		if err == nil && len(people) > 0 {
+			name = people[0].Name
+			if edges, err := store.GetEdges(ctx, sp.ID, graph.EdgeIdentifiedAs); err == nil {
+				for _, e := range edges {
+					if e.SourceID == sp.ID && e.Properties != nil {
+						detail = fmt.Sprintf(" (%s, confidence %s)",
+							e.Properties[graph.PropResolution], e.Properties[graph.PropConfidence])
+					}
+				}
+			}
+		}
+		secs, _ := strconv.ParseFloat(sp.Properties[graph.PropSpeakingSeconds], 64)
+		rows = append(rows, fmt.Sprintf("  %-22s %-10s spoke %s%s",
+			name, sp.Name, transcript.FormatTimestamp(secs), detail))
+	}
+	if len(rows) > 0 {
+		fmt.Fprintf(out, "Participants (%d)\n", len(rows))
+		for _, r := range rows {
+			fmt.Fprintln(out, r)
+		}
+		fmt.Fprintln(out)
+	}
+	return nil
+}
+
+func showChildren(ctx context.Context, store graph.Store, out io.Writer, m *graph.Node) error {
+	children, err := store.GetNeighbors(ctx, m.ID, graph.EdgeContains, graph.Outgoing)
+	if err != nil {
+		return err
+	}
+
+	var segments, decisions, actions []*graph.Node
+	for _, c := range children {
+		switch c.Type {
+		case graph.NodeTopicSegment:
+			segments = append(segments, c)
+		case graph.NodeDecision:
+			decisions = append(decisions, c)
+		case graph.NodeActionItem:
+			actions = append(actions, c)
+		}
+	}
+
+	sort.Slice(segments, func(i, j int) bool {
+		a, _ := strconv.ParseFloat(segments[i].Properties[graph.PropStartTime], 64)
+		b, _ := strconv.ParseFloat(segments[j].Properties[graph.PropStartTime], 64)
+		return a < b
+	})
+
+	if len(segments) > 0 {
+		fmt.Fprintf(out, "Topics (%d)\n", len(segments))
+		for _, s := range segments {
+			start, _ := strconv.ParseFloat(s.Properties[graph.PropStartTime], 64)
+			end, _ := strconv.ParseFloat(s.Properties[graph.PropEndTime], 64)
+			fmt.Fprintf(out, "  [%s–%s] %s\n",
+				transcript.FormatTimestamp(start), transcript.FormatTimestamp(end), s.Name)
+			if summary := s.Properties[graph.PropSummary]; summary != "" {
+				fmt.Fprintf(out, "      %s\n", wrapText(summary, 76, "      "))
+			}
+		}
+		fmt.Fprintln(out)
+	}
+
+	if len(decisions) > 0 {
+		fmt.Fprintf(out, "Decisions (%d)\n", len(decisions))
+		for _, d := range decisions {
+			mark := " "
+			if d.Properties["quote_verified"] != "true" {
+				// Flag anything whose supporting quote is not in the
+				// transcript: it is the one claim a reader should not take on
+				// trust.
+				mark = "?"
+			}
+			fmt.Fprintf(out, " %s %s\n", mark, d.Properties[graph.PropSummary])
+			if q := d.Properties[graph.PropQuote]; q != "" {
+				fmt.Fprintf(out, "      \"%s\"\n", truncateText(q, 100))
+			}
+		}
+		fmt.Fprintln(out)
+	}
+
+	if len(actions) > 0 {
+		fmt.Fprintf(out, "Follow-ups (%d)\n", len(actions))
+		for _, a := range actions {
+			who := a.Properties[graph.PropAssignee]
+			if who == "" {
+				who = "unassigned"
+			}
+			due := ""
+			if d := a.Properties[graph.PropDueDate]; d != "" {
+				due = " · due " + d
+			}
+			fmt.Fprintf(out, "  □ %s\n      %s%s\n", a.Properties[graph.PropSummary], who, due)
+		}
+		fmt.Fprintln(out)
+	}
+	return nil
+}
+
+// --- people ---
+
+func newMeetingsPeopleCmd() *cobra.Command {
+	var asJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "people",
+		Short: "List people identified across meetings",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withGraph(cmd, func(ctx context.Context, store graph.Store) error {
+				people, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodePerson})
+				if err != nil {
+					return err
+				}
+
+				type row struct {
+					Name     string   `json:"name"`
+					Aliases  []string `json:"aliases,omitempty"`
+					Meetings int      `json:"meetings"`
+					Seconds  float64  `json:"speaking_seconds"`
+					Actions  int      `json:"action_items"`
+					Owner    bool     `json:"owner,omitempty"`
+				}
+				var rows []row
+				for _, p := range people {
+					attended, err := store.GetEdges(ctx, p.ID, graph.EdgeAttended)
+					if err != nil {
+						return err
+					}
+					var secs float64
+					count := 0
+					for _, e := range attended {
+						if e.SourceID != p.ID {
+							continue
+						}
+						count++
+						if e.Properties != nil {
+							v, _ := strconv.ParseFloat(e.Properties[graph.PropSpeakingSeconds], 64)
+							secs += v
+						}
+					}
+					assigned, _ := store.GetEdges(ctx, p.ID, graph.EdgeAssignedTo)
+					nActions := 0
+					for _, e := range assigned {
+						if e.TargetID == p.ID {
+							nActions++
+						}
+					}
+					if count == 0 && nActions == 0 {
+						// Someone known only from photographs, not meetings.
+						continue
+					}
+					var aliases []string
+					if p.Properties != nil && p.Properties[graph.PropAliases] != "" {
+						aliases = strings.Split(p.Properties[graph.PropAliases], ",")
+					}
+					rows = append(rows, row{
+						Name: p.Name, Aliases: aliases, Meetings: count,
+						Seconds: secs, Actions: nActions,
+						Owner: p.Properties != nil && p.Properties[graph.PropIsOwner] == "true",
+					})
+				}
+				sort.Slice(rows, func(i, j int) bool {
+					if rows[i].Meetings != rows[j].Meetings {
+						return rows[i].Meetings > rows[j].Meetings
+					}
+					return rows[i].Name < rows[j].Name
+				})
+
+				out := cmd.OutOrStdout()
+				if asJSON {
+					return json.NewEncoder(out).Encode(rows)
+				}
+				if len(rows) == 0 {
+					fmt.Fprintln(out, "No people identified yet. Run: codeeagle meetings sync")
+					return nil
+				}
+				tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+				fmt.Fprintln(tw, "PERSON\tMEETINGS\tSPOKE\tFOLLOW-UPS\tALSO HEARD AS")
+				for _, r := range rows {
+					name := r.Name
+					if r.Owner {
+						name += " (you)"
+					}
+					fmt.Fprintf(tw, "%s\t%d\t%s\t%d\t%s\n",
+						name, r.Meetings, transcript.FormatTimestamp(r.Seconds),
+						r.Actions, strings.Join(r.Aliases, ", "))
+				}
+				return tw.Flush()
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON")
+	return cmd
+}
+
+// --- identify ---
+
+func newMeetingsIdentifyCmd() *cobra.Command {
+	var limit int
+
+	cmd := &cobra.Command{
+		Use:   "identify",
+		Short: "Review speakers that could not be identified automatically",
+		Long: `List the speakers whose identity the transcript did not settle.
+
+Each entry shows how much the speaker said and a sample of their words, so
+they can be recognized and assigned with "codeeagle meetings label".`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withGraph(cmd, func(ctx context.Context, store graph.Store) error {
+				speakers, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeSpeaker})
+				if err != nil {
+					return err
+				}
+				meetings, err := transcript.LoadMeetingIndex(ctx, store)
+				if err != nil {
+					return err
+				}
+
+				type pending struct {
+					speaker *graph.Node
+					meeting string
+					secs    float64
+				}
+				var out []pending
+				for _, sp := range speakers {
+					people, err := store.GetNeighbors(ctx, sp.ID, graph.EdgeIdentifiedAs, graph.Outgoing)
+					if err != nil || len(people) > 0 {
+						continue
+					}
+					secs, _ := strconv.ParseFloat(sp.Properties[graph.PropSpeakingSeconds], 64)
+					title := sp.Properties[graph.PropMeetingID]
+					if m, err := meetings.BySession(sp.Properties[graph.PropMeetingID]); err == nil && m != nil {
+						title = fmt.Sprintf("%s (%s)", m.Name, m.UpdatedAt.Format("2006-01-02"))
+					}
+					out = append(out, pending{speaker: sp, meeting: title, secs: secs})
+				}
+				// Most talkative first: identifying them recovers the most.
+				sort.Slice(out, func(i, j int) bool { return out[i].secs > out[j].secs })
+				total := len(out)
+				if limit > 0 && len(out) > limit {
+					out = out[:limit]
+				}
+
+				w := cmd.OutOrStdout()
+				if len(out) == 0 {
+					fmt.Fprintln(w, "Every speaker has been identified.")
+					return nil
+				}
+				fmt.Fprintf(w, "%d speakers await identification", total)
+				if len(out) < total {
+					fmt.Fprintf(w, "; showing the %d who spoke most (--limit 0 for all)", len(out))
+				}
+				fmt.Fprintln(w, ".")
+				fmt.Fprintln(w)
+				for _, p := range out {
+					fmt.Fprintf(w, "%s · %s · spoke %s\n",
+						p.speaker.Name, p.meeting, transcript.FormatTimestamp(p.secs))
+					if sample := speakerSample(p.speaker); sample != "" {
+						fmt.Fprintf(w, "    %s\n", sample)
+					}
+					fmt.Fprintf(w, "    codeeagle meetings label %s \"<name>\" --meeting %s\n\n",
+						p.speaker.Name, p.speaker.Properties[graph.PropMeetingID])
+				}
+				return nil
+			})
+		},
+	}
+	cmd.Flags().IntVar(&limit, "limit", 20, "maximum speakers to show (0 for all)")
+	return cmd
+}
+
+// speakerSample reads a few of a speaker's words from the source transcript,
+// which is what actually lets someone recognize who was talking.
+func speakerSample(sp *graph.Node) string {
+	if sp.FilePath == "" {
+		return ""
+	}
+	s, err := transcript.Load(sp.FilePath)
+	if err != nil {
+		return ""
+	}
+	for _, t := range s.Turns() {
+		if t.Speaker == sp.Name && len(t.Text) > 60 {
+			return "\"" + truncateText(t.Text, 140) + "\""
+		}
+	}
+	return ""
+}
+
+// --- label ---
+
+func newMeetingsLabelCmd() *cobra.Command {
+	var meetingID string
+
+	cmd := &cobra.Command{
+		Use:   "label <speaker-label> <person-name>",
+		Short: "Assign a speaker to a person by hand",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			label, name := args[0], args[1]
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			store, err := openMeetingStore(cfg)
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			ctx := cmd.Context()
+			speakers, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeSpeaker})
+			if err != nil {
+				return err
+			}
+
+			var matches []*graph.Node
+			for _, sp := range speakers {
+				if sp.Name != label {
+					continue
+				}
+				if meetingID != "" && sp.Properties[graph.PropMeetingID] != meetingID {
+					continue
+				}
+				matches = append(matches, sp)
+			}
+			switch {
+			case len(matches) == 0:
+				return fmt.Errorf("no speaker %q found%s", label, meetingSuffix(meetingID))
+			case len(matches) > 1:
+				// A label like "Person 1" exists in most recordings, so an
+				// ambiguous assignment must be refused rather than guessed.
+				return fmt.Errorf("%q appears in %d meetings; pass --meeting <id> to choose one",
+					label, len(matches))
+			}
+			speaker := matches[0]
+
+			people, err := transcript.LoadPersonRegistry(ctx, store)
+			if err != nil {
+				return err
+			}
+			person, err := people.Resolve(ctx, name)
+			if err != nil {
+				return err
+			}
+
+			// A speaker is one person. Correcting an identification has to
+			// remove the one it replaces, or the graph asserts both — and the
+			// attendance linker, which picks the first neighbour in an order
+			// derived from edge hashes, may go on preferring the wrong one and
+			// silently discard the correction.
+			meetingNodeID := graph.NewNodeID(string(graph.NodeMeeting), speaker.FilePath,
+				speaker.Properties[graph.PropMeetingID])
+			replaced, err := replacePriorIdentity(ctx, store, speaker, person, meetingNodeID)
+			if err != nil {
+				return err
+			}
+
+			if err := store.AddEdge(ctx, &graph.Edge{
+				ID:       graph.NewNodeID("edge", speaker.ID, person.ID+":"+string(graph.EdgeIdentifiedAs)),
+				Type:     graph.EdgeIdentifiedAs,
+				SourceID: speaker.ID,
+				TargetID: person.ID,
+				Properties: map[string]string{
+					graph.PropConfidence: "1.00",
+					graph.PropResolution: transcript.MethodManual,
+					graph.PropEvidence:   "assigned by hand",
+				},
+			}); err != nil {
+				return err
+			}
+
+			// Recomputed from every label that resolves to this person, not
+			// written from this one. Diarization splits a person across
+			// labels, and the attendance edge is keyed on the person and the
+			// meeting alone — so writing this label's figures would replace
+			// the total rather than add to it, and labelling a second
+			// fragment would quietly shrink the first one's credit.
+			if err := recomputeAttendance(ctx, store, person, speaker, meetingNodeID); err != nil {
+				return err
+			}
+
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "%s in meeting %s is %s\n",
+				label, speaker.Properties[graph.PropMeetingID], person.Name)
+			for _, name := range replaced {
+				fmt.Fprintf(out, "  replaced the earlier identification as %s\n", name)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&meetingID, "meeting", "", "meeting id, when the label appears in several")
+	return cmd
+}
+
+func meetingSuffix(id string) string {
+	if id == "" {
+		return ""
+	}
+	return " in meeting " + id
+}
+
+// --- topics ---
+
+func newMeetingsTopicsCmd() *cobra.Command {
+	var (
+		limit   int
+		themes  bool
+		related bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "topics [word...]",
+		Short: "List topics discussed across meetings",
+		Long: `List the topics meetings were filed under, most discussed first.
+
+Words given after the command keep only the topics containing them, matched
+as whole words without regard to case, so "topics agi" finds "AGI feasibility
+debate" and not "messaging". The list is long — thousands of labels in a
+corpus of a few hundred meetings — so it is capped by default and says so
+when it has been.
+
+--related shows, under each topic, the topics the decision model judged to
+be about the same thing and how sure it was (see "meetings relate"). These
+are what a search follows when its words match only one of them.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withGraph(cmd, func(ctx context.Context, store graph.Store) error {
+				if themes {
+					return showTaxonomy(ctx, cmd.OutOrStdout(), store)
+				}
+				topics, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeTopic})
+				if err != nil {
+					return err
+				}
+				terms := search.QueryTerms(strings.Join(args, " "))
+				if len(args) > 0 && len(terms) == 0 {
+					return fmt.Errorf("no searchable words in %q", strings.Join(args, " "))
+				}
+
+				type row struct {
+					name  string
+					count int
+					node  *graph.Node
+				}
+				var rows []row
+				for _, t := range topics {
+					if len(terms) > 0 && !topicMatches(t, terms) {
+						continue
+					}
+					edges, err := store.GetEdges(ctx, t.ID, graph.EdgeHasTopic)
+					if err != nil {
+						continue
+					}
+					n := 0
+					for _, e := range edges {
+						if e.TargetID != t.ID {
+							continue
+						}
+						src, err := store.GetNode(ctx, e.SourceID)
+						if err == nil && src != nil && src.Type == graph.NodeMeeting {
+							n++
+						}
+					}
+					if n > 0 {
+						rows = append(rows, row{t.Name, n, t})
+					}
+				}
+				sort.Slice(rows, func(i, j int) bool {
+					if rows[i].count != rows[j].count {
+						return rows[i].count > rows[j].count
+					}
+					return rows[i].name < rows[j].name
+				})
+				total := len(rows)
+				if limit > 0 && len(rows) > limit {
+					rows = rows[:limit]
+				}
+
+				out := cmd.OutOrStdout()
+				if len(rows) == 0 {
+					if len(terms) > 0 {
+						fmt.Fprintf(out, "No meeting topic contains %s.\n", quoteAll(terms))
+						return nil
+					}
+					fmt.Fprintln(out, "No meeting topics indexed yet.")
+					return nil
+				}
+				tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+				fmt.Fprintln(tw, "MEETINGS\tTOPIC")
+				for _, r := range rows {
+					fmt.Fprintf(tw, "%d\t%s\n", r.count, r.name)
+					if !related {
+						continue
+					}
+					// The wide gate, so that what a --breadth wide search
+					// would follow is visible here.
+					neighbours, err := transcript.RelatedTopics(ctx, store, r.node.ID, transcript.WideRelatedGate)
+					if err != nil {
+						return err
+					}
+					for _, n := range neighbours {
+						fmt.Fprintf(tw, "\t  ~ %.2f  %s\n", n.Probability, n.Topic.Name)
+					}
+				}
+				if err := tw.Flush(); err != nil {
+					return err
+				}
+				noteTruncation(out, len(rows), total, "topics", "--limit 0, or add words to filter")
+				return nil
+			})
+		},
+	}
+	cmd.Flags().IntVar(&limit, "limit", 40, "maximum topics to show (0 for all)")
+	cmd.Flags().BoolVar(&themes, "themes", false, "show the induced theme hierarchy instead of flat topics")
+	cmd.Flags().BoolVar(&related, "related", false, "under each topic, list the topics judged related to it with the probability")
+	return cmd
+}
+
+// --- migrate ---
+
+func newMeetingsMigrateCmd() *cobra.Command {
+	var (
+		from   string
+		fromDB string
+		dryRun bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "migrate",
+		Short: "Move a meeting corpus into this configuration's shared meeting scope",
+		Long: `Move an existing meeting corpus into the shared meeting scope.
+
+Two cases, and neither re-indexes anything: the data is already enriched, and
+re-deriving it would mean paying a model to reproduce what is on disk.
+
+Within one database, --from names the git branch the meetings were filed under.
+Earlier versions stored them under whichever branch was checked out at the
+time, so switching or renaming a branch hid the whole history. The scope lives
+in the key and not in the stored data, so this is a key rename.
+
+Across databases, --from-db names the other database. A corpus indexed against
+one project often belongs somewhere more central — a home configuration
+reachable from any directory — and this carries it over. The source is opened
+read-only and never modified, so the original stays put until the result has
+been checked.
+
+The target scope is merged into rather than replaced, so a corpus split across
+two scopes can be collected into one by running this twice.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if from == "" && fromDB == "" {
+				return fmt.Errorf(
+					"nothing to move: pass --from <branch> for a corpus in this database, " +
+						"or --from-db <path> for one in another")
+			}
+			cfg, err := config.Load()
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			store, err := openMeetingStore(cfg)
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			out := cmd.OutOrStdout()
+			var res *embedded.RescopeResult
+
+			if fromDB != "" {
+				// Default to the shared scope: a corpus in another database is
+				// usually already there rather than under a branch.
+				srcScope := from
+				if srcScope == "" {
+					srcScope = embedded.MeetingScope
+				}
+				before, err := store.ScopeNodeTypes(embedded.MeetingScope)
+				if err != nil {
+					return err
+				}
+				res, err = store.ImportScopeFrom(cmd.Context(),
+					expandPath(fromDB), srcScope, embedded.MeetingScope, dryRun)
+				if err != nil {
+					return err
+				}
+				if !dryRun {
+					reportScopeGrowth(out, before, store)
+				}
+			} else {
+				res, err = store.Rescope(from, embedded.MeetingScope, dryRun)
+				if err != nil {
+					return err
+				}
+			}
+
+			verb := "Moved"
+			if dryRun {
+				verb = "Would move"
+			}
+			source := fmt.Sprintf("%q", res.From)
+			if fromDB != "" {
+				source = fmt.Sprintf("%q in %s", res.From, expandPath(fromDB))
+			}
+			fmt.Fprintf(out, "%s %d %s from %s to %q.\n", verb, res.Keys, unit(fromDB), source, res.To)
+			if res.Keys == 0 {
+				if fromDB != "" {
+					fmt.Fprintf(out, "Nothing found under %q there.\n", res.From)
+				} else {
+					fmt.Fprintf(out, "Nothing found under %q. Check the branch name with `git branch`.\n", from)
+				}
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&from, "from", "",
+		"the scope to move from: a git branch, or the scope to read in --from-db")
+	cmd.Flags().StringVar(&fromDB, "from-db", "",
+		"another graph database to take the corpus from; it is opened read-only")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report what would move without changing anything")
+	return cmd
+}
+
+// unit names what was counted, which differs between the two paths: a rename
+// within one database moves keys, while a copy between databases moves nodes.
+func unit(fromDB string) string {
+	if fromDB != "" {
+		return "nodes"
+	}
+	return "keys"
+}
+
+// reportScopeGrowth says what the meeting scope gained, so a move that landed
+// nothing is obvious rather than silently reported as a success.
+func reportScopeGrowth(out io.Writer, before map[graph.NodeType]int, store *embedded.BranchStore) {
+	after, err := store.ScopeNodeTypes(embedded.MeetingScope)
+	if err != nil {
+		return
+	}
+	types := make([]string, 0, len(after))
+	for typ, n := range after {
+		if gained := n - before[typ]; gained > 0 {
+			types = append(types, fmt.Sprintf("%s +%d", typ, gained))
+		}
+	}
+	if len(types) == 0 {
+		return
+	}
+	sort.Strings(types)
+	fmt.Fprintf(out, "  %s\n", strings.Join(types, ", "))
+}
+
+// --- taxonomy ---
+
+func newMeetingsTaxonomyCmd() *cobra.Command {
+	var (
+		show    bool
+		rebuild bool
+		depth   int
+	)
+
+	cmd := &cobra.Command{
+		Use:   "taxonomy",
+		Short: "Group meeting topics into broader themes",
+		Long: `Induce a hierarchy over the topics meetings produced.
+
+Meetings name their subject in whatever words suited that conversation, so the
+topics a corpus produces are specific and numerous — several different labels
+usually describe facets of one larger subject, and each appears in only a
+meeting or two.
+
+Merging them into one another would be the obvious fix and the wrong one: fuse
+two genuinely different discussions and both are misrepresented; leave them
+apart and neither is findable. A hierarchy avoids the choice. The specific
+phrases stay exactly as they are, and each is placed under a broader theme that
+several of them share, so "which meetings covered authentication?" is answered
+by walking one level up.
+
+Themes are induced from the topics this corpus actually produced, not from a
+fixed ontology. Re-run as the corpus grows.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
+			if show {
+				return withGraph(cmd, func(ctx context.Context, store graph.Store) error {
+					return showTaxonomy(ctx, out, store)
+				})
+			}
+
+			pipeline, err := buildMeetingPipeline(cmd, meetingPipelineOverrides{})
+			if err != nil {
+				return err
+			}
+			defer pipeline.close()
+
+			ctx := cmd.Context()
+			roots, err := transcript.TopicRoots(ctx, pipeline.store)
+			if err != nil {
+				return err
+			}
+			if len(roots) == 0 {
+				fmt.Fprintln(out, "No topics indexed yet. Run: codeeagle meetings sync")
+				return nil
+			}
+
+			if rebuild {
+				removed, err := transcript.ClearTaxonomy(ctx, pipeline.store)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "Cleared %d existing concepts.\n", removed)
+				if roots, err = transcript.TopicRoots(ctx, pipeline.store); err != nil {
+					return err
+				}
+			}
+
+			fmt.Fprintf(out, "Organizing %d topics using %s\n\n", len(roots), pipeline.client.Model())
+			st, err := pipeline.analyzer.BuildTaxonomy(ctx, pipeline.store, depth, func(format string, args ...any) {
+				fmt.Fprintf(out, format+"\n", args...)
+			})
+			if err != nil {
+				return fmt.Errorf("build taxonomy: %w", err)
+			}
+
+			fmt.Fprintf(out, "\n%d concepts across %d level(s); %d topics at the top.\n",
+				st.Themes, st.Levels, st.Roots)
+			fmt.Fprintf(out, "%d requests, %d in / %d out tokens.\n",
+				st.Usage.Requests, st.Usage.InputTokens, st.Usage.OutputTokens)
+
+			return showTaxonomy(ctx, out, pipeline.store)
+		},
+	}
+
+	cmd.Flags().BoolVar(&show, "show", false, "print the existing taxonomy without rebuilding it")
+	cmd.Flags().BoolVar(&rebuild, "rebuild", false,
+		"discard the existing concepts and group from scratch, rather than extending")
+	cmd.Flags().IntVar(&depth, "depth", transcript.DefaultTaxonomyDepth,
+		"rounds of grouping to apply; a further round over already-good concepts tends to fuse unrelated work")
+	return cmd
+}
+
+// showTaxonomy prints the hierarchy as an indented tree.
+func showTaxonomy(ctx context.Context, out io.Writer, store graph.Store) error {
+	roots, err := transcript.TopicRoots(ctx, store)
+	if err != nil {
+		return err
+	}
+	if len(roots) == 0 {
+		fmt.Fprintln(out, "No topics indexed yet. Run: codeeagle meetings sync")
+		return nil
+	}
+
+	grouped := false
+	for _, r := range roots {
+		if transcript.TopicDepth(r.Node) > 0 {
+			grouped = true
+			break
+		}
+	}
+	if !grouped {
+		fmt.Fprintln(out, "No taxonomy yet. Run: codeeagle meetings taxonomy")
+		return nil
+	}
+
+	fmt.Fprintln(out)
+	for _, r := range roots {
+		if err := printTopicTree(ctx, out, store, r.Node, 0); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintln(out)
+	return nil
+}
+
+// maxTopicTreeDepth guards against a cycle, which a malformed grouping could
+// otherwise turn into an unbounded walk.
+const maxTopicTreeDepth = 6
+
+func printTopicTree(ctx context.Context, out io.Writer, store graph.Store, n *graph.Node, indent int) error {
+	if indent > maxTopicTreeDepth {
+		return nil
+	}
+	pad := strings.Repeat("  ", indent)
+
+	// Counts come from the graph, so a parent is never smaller than its children.
+	meetings := transcript.TopicMeetingCount(ctx, store, n)
+	if transcript.TopicDepth(n) > 0 {
+		fmt.Fprintf(out, "%s%s (%d)\n", pad, n.Name, meetings)
+		// Prefixed so a description is never mistaken for a child node.
+		if d := n.Properties[graph.PropSummary]; d != "" && indent == 0 {
+			fmt.Fprintf(out, "%s  — %s\n", pad, wrapText(d, 70-len(pad), pad+"    "))
+		}
+	} else {
+		fmt.Fprintf(out, "%s· %-*s %d\n", pad, 64-len(pad), truncateText(n.Name, 64-len(pad)), meetings)
+	}
+
+	children, err := transcript.TopicChildren(ctx, store, n.ID)
+	if err != nil {
+		return err
+	}
+	for _, c := range children {
+		if err := printTopicTree(ctx, out, store, c, indent+1); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// --- actions ---
+
+func newMeetingsActionsCmd() *cobra.Command {
+	var (
+		person     string
+		unassigned bool
+		asJSON     bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "actions",
+		Short: "List follow-ups and TODOs captured from meetings",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return withGraph(cmd, func(ctx context.Context, store graph.Store) error {
+				actions, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeActionItem})
+				if err != nil {
+					return err
+				}
+				meetings, err := transcript.LoadMeetingIndex(ctx, store)
+				if err != nil {
+					return err
+				}
+
+				type row struct {
+					Text     string `json:"text"`
+					Assignee string `json:"assignee,omitempty"`
+					Due      string `json:"due_date,omitempty"`
+					Meeting  string `json:"meeting"`
+					Date     string `json:"date"`
+					Quote    string `json:"quote,omitempty"`
+					Verified bool   `json:"quote_verified"`
+				}
+				var rows []row
+				for _, a := range actions {
+					assignee := a.Properties[graph.PropAssignee]
+					if people, err := store.GetNeighbors(ctx, a.ID, graph.EdgeAssignedTo, graph.Outgoing); err == nil && len(people) > 0 {
+						assignee = people[0].Name
+					}
+					if person != "" && !transcript.SameName(assignee, person) {
+						continue
+					}
+					if unassigned && assignee != "" {
+						continue
+					}
+					title, date := "", ""
+					if m, err := meetings.BySession(a.Properties[graph.PropMeetingID]); err == nil && m != nil {
+						title = m.Name
+						date = m.UpdatedAt.Format("2006-01-02")
+					}
+					rows = append(rows, row{
+						Text:     a.Properties[graph.PropSummary],
+						Assignee: assignee,
+						Due:      dueDate(a.Properties[graph.PropDueDate]),
+						Meeting:  title,
+						Date:     date,
+						Quote:    a.Properties[graph.PropQuote],
+						Verified: a.Properties["quote_verified"] == "true",
+					})
+				}
+				sort.Slice(rows, func(i, j int) bool { return rows[i].Date > rows[j].Date })
+
+				out := cmd.OutOrStdout()
+				if asJSON {
+					return json.NewEncoder(out).Encode(rows)
+				}
+				if len(rows) == 0 {
+					fmt.Fprintln(out, "No follow-ups found.")
+					return nil
+				}
+				for _, r := range rows {
+					who := r.Assignee
+					if who == "" {
+						who = "unassigned"
+					}
+					due := ""
+					if r.Due != "" {
+						due = " · due " + r.Due
+					}
+					fmt.Fprintf(out, "□ %s\n    %s%s · %s, %s\n", r.Text, who, due, r.Meeting, r.Date)
+				}
+				return nil
+			})
+		},
+	}
+	cmd.Flags().StringVar(&person, "person", "", "only follow-ups assigned to this person")
+	cmd.Flags().BoolVar(&unassigned, "unassigned", false, "only follow-ups with no owner")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "output JSON")
+	return cmd
+}
+
+// --- shared helpers ---
+
+// withGraph opens the meeting graph read-only and runs fn.
+func withGraph(cmd *cobra.Command, fn func(ctx context.Context, store graph.Store) error) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	store, err := embedded.OpenMeetingsReadOnly(cfg, dbPath)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	return fn(cmd.Context(), store)
+}
+
+// transcriptDocuments returns the files that document indexing recognized as
+// transcripts.
+//
+// A transcript committed beside the code it concerns is indexed as a document
+// like any other file, and marked. Reading those marks here is what makes it
+// additionally a meeting, without its directory having to be configured — the
+// file ends up in both indexes, which is what it is: prose worth searching,
+// and a record of who said what.
+func transcriptDocuments(ctx context.Context, cfg *config.Config) ([]string, error) {
+	store, _, err := openReadOnlyBranchStore(cfg)
+	if err != nil {
+		// No code graph yet is an ordinary state, not a problem.
+		return nil, nil
+	}
+	defer store.Close()
+
+	var out []string
+	seen := make(map[string]bool)
+	for _, nodeType := range []graph.NodeType{graph.NodeDocument, graph.NodeFile} {
+		nodes, err := store.QueryNodes(ctx, graph.NodeFilter{
+			Type:       nodeType,
+			Properties: map[string]string{graph.PropIsTranscript: "true"},
+		})
+		if err != nil {
+			return out, err
+		}
+		for _, n := range nodes {
+			path := resolveIndexedPath(cfg, n.FilePath)
+			if path == "" || seen[path] {
+				continue
+			}
+			seen[path] = true
+			out = append(out, path)
+		}
+	}
+	return out, nil
+}
+
+// resolveIndexedPath turns the relative path stored on an indexed node back
+// into a file on disk, returning "" when it cannot be found.
+func resolveIndexedPath(cfg *config.Config, rel string) string {
+	if rel == "" {
+		return ""
+	}
+	if filepath.IsAbs(rel) {
+		if _, err := os.Stat(rel); err == nil {
+			return rel
+		}
+		return ""
+	}
+	for _, repo := range cfg.Repositories {
+		root := expandPath(repo.Path)
+		candidate := filepath.Join(root, rel)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		// Non-git roots are stored with their basename prefixed, so the
+		// repository's own directory name appears twice when joined.
+		if trimmed := strings.TrimPrefix(rel, filepath.Base(root)+string(filepath.Separator)); trimmed != rel {
+			if candidate := filepath.Join(root, trimmed); fileExists(candidate) {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+// fileExists reports whether a path names a readable file.
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+// replacePriorIdentity removes any identification of this speaker as someone
+// other than the person now named, and returns the names it removed.
+//
+// It also drops that person's attendance of the meeting when this speaker was
+// the only reason to believe they were there. Diarization often splits one
+// person across several labels, so attendance is only withdrawn if no other
+// label in the same meeting still resolves to them — otherwise correcting one
+// label would erase a person who really did attend.
+func replacePriorIdentity(
+	ctx context.Context,
+	store *embedded.BranchStore,
+	speaker, person *graph.Node,
+	meetingNodeID string,
+) ([]string, error) {
+	edges, err := store.GetEdges(ctx, speaker.ID, graph.EdgeIdentifiedAs)
+	if err != nil {
+		return nil, err
+	}
+
+	var replaced []string
+	for _, e := range edges {
+		if e.SourceID != speaker.ID || e.TargetID == person.ID {
+			continue
+		}
+		previous, err := store.GetNode(ctx, e.TargetID)
+		if err == nil && previous != nil {
+			replaced = append(replaced, previous.Name)
+		}
+		if err := store.DeleteEdge(ctx, e.ID); err != nil {
+			return nil, err
+		}
+		stillPresent, err := speakerStillResolvesTo(ctx, store, speaker, e.TargetID, meetingNodeID)
+		if err != nil {
+			return nil, err
+		}
+		if stillPresent {
+			continue
+		}
+		attended := graph.NewNodeID("edge", e.TargetID, meetingNodeID+":"+string(graph.EdgeAttended))
+		if err := store.DeleteEdge(ctx, attended); err != nil {
+			return nil, err
+		}
+	}
+	return replaced, nil
+}
+
+// speakerStillResolvesTo reports whether any label in the meeting other than
+// this one is still identified as the given person.
+func speakerStillResolvesTo(
+	ctx context.Context,
+	store *embedded.BranchStore,
+	speaker *graph.Node,
+	personID, meetingNodeID string,
+) (bool, error) {
+	speakers, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeSpeaker})
+	if err != nil {
+		return false, err
+	}
+	for _, other := range speakers {
+		if other.ID == speaker.ID {
+			continue
+		}
+		if other.Properties[graph.PropMeetingID] != speaker.Properties[graph.PropMeetingID] {
+			continue
+		}
+		edges, err := store.GetEdges(ctx, other.ID, graph.EdgeIdentifiedAs)
+		if err != nil {
+			return false, err
+		}
+		for _, e := range edges {
+			if e.SourceID == other.ID && e.TargetID == personID {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// newSpeakerJudge builds the decision model that adjudicates speaker
+// identity, or returns nil when none is configured.
+//
+// Optional by design: without a key, identification runs through the language
+// model exactly as before, and nothing about an existing setup changes.
+func newSpeakerJudge(tc config.TranscriptsConfig) (decide.Judge, error) {
+	key := strings.TrimSpace(tc.JevAPIKey)
+	if key == "" {
+		return nil, nil
+	}
+	judge, err := decide.NewJevJudge(key, tc.JevModel)
+	if err != nil {
+		// The key is in hand but unusable, which is a configuration mistake
+		// rather than a reason to quietly fall back to the other path.
+		return nil, fmt.Errorf("speaker decision model: %w", err)
+	}
+	return judge, nil
+}
+
+// recomputeAttendance rewrites a person's attendance of one meeting from
+// every speaker label in it that resolves to them.
+//
+// This is what the attendance linker does after a sync; doing it here too
+// means a hand-assigned label agrees with the graph immediately rather than
+// only after the next one.
+func recomputeAttendance(
+	ctx context.Context,
+	store *embedded.BranchStore,
+	person, speaker *graph.Node,
+	meetingNodeID string,
+) error {
+	speakers, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeSpeaker})
+	if err != nil {
+		return err
+	}
+
+	var seconds float64
+	var labels []string
+	for _, sp := range speakers {
+		if sp.Properties[graph.PropMeetingID] != speaker.Properties[graph.PropMeetingID] {
+			continue
+		}
+		people, err := store.GetNeighbors(ctx, sp.ID, graph.EdgeIdentifiedAs, graph.Outgoing)
+		if err != nil {
+			return err
+		}
+		if !identifiesAs(people, person.ID) {
+			continue
+		}
+		labels = append(labels, sp.Name)
+		if v, err := strconv.ParseFloat(sp.Properties[graph.PropSpeakingSeconds], 64); err == nil {
+			seconds += v
+		}
+	}
+	sort.Strings(labels)
+
+	return store.AddEdge(ctx, &graph.Edge{
+		ID:       graph.NewNodeID("edge", person.ID, meetingNodeID+":"+string(graph.EdgeAttended)),
+		Type:     graph.EdgeAttended,
+		SourceID: person.ID,
+		TargetID: meetingNodeID,
+		Properties: map[string]string{
+			graph.PropSpeakerLabel:    strings.Join(labels, ", "),
+			graph.PropSpeakingSeconds: strconv.FormatFloat(seconds, 'f', 1, 64),
+		},
+	})
+}
+
+// identifiesAs reports whether a person is among a speaker's identifications.
+func identifiesAs(people []*graph.Node, personID string) bool {
+	for _, p := range people {
+		if p.ID == personID {
+			return true
+		}
+	}
+	return false
+}
+
+// openMeetingStore opens the meeting graph for writing.
+//
+// Meetings are stored outside the per-branch scopes the code graph uses: a
+// meeting happened, and it does not belong to a git branch. Filing them by
+// branch would hide the whole history the moment a branch is switched or
+// renamed, and make the next sync re-index everything.
+func openMeetingStore(cfg *config.Config) (*embedded.BranchStore, error) {
+	return embedded.OpenMeetings(cfg, dbPath)
+}
+
+// findMeeting resolves a reference a person would type — a node id, a session
+// identifier, a unique prefix of either, or a fragment of the title — and
+// refuses to guess between several.
+func findMeeting(ctx context.Context, store graph.Store, ref string) (*graph.Node, error) {
+	meetings, err := transcript.LoadMeetingIndex(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	return meetings.Resolve(ref)
+}
+
+// findMeetingByID resolves a session identifier exactly: nil when unknown,
+// an error when several recordings share it.
+func findMeetingByID(ctx context.Context, store graph.Store, sessionID string) (*graph.Node, error) {
+	if sessionID == "" {
+		return nil, nil
+	}
+	meetings, err := transcript.LoadMeetingIndex(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	return meetings.BySession(sessionID)
+}
+
+func attendeeNames(ctx context.Context, store graph.Store, meetingID string) ([]string, error) {
+	return transcript.Attendees(ctx, store, meetingID)
+}
+
+// noteTruncation says when a listing was cut short, and how to see the rest.
+// A capped list that looks complete leads to confident wrong conclusions —
+// "that topic does not exist" — which is worse than a long list.
+func noteTruncation(out io.Writer, shown, total int, what, remedy string) {
+	if shown < total {
+		fmt.Fprintf(out, "\nShowing %d of %d %s (%s).\n", shown, total, what, remedy)
+	}
+}
+
+// topicMatches reports whether every term appears in a topic's label or one
+// of its recorded wordings, as a whole word or the start of one.
+func topicMatches(t *graph.Node, terms []string) bool {
+	tokens := search.Tokenize(t.Name + " " + t.Properties[graph.PropAliases])
+	for _, term := range terms {
+		if search.TermCredit(term, tokens) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func quoteAll(words []string) string {
+	quoted := make([]string, len(words))
+	for i, w := range words {
+		quoted[i] = fmt.Sprintf("%q", w)
+	}
+	return strings.Join(quoted, " and ")
+}
+
+// dueDate returns a due date fit to print, or nothing. The model sometimes
+// writes punctuation where a date should be, and "due :" is noise.
+func dueDate(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) < 4 || !strings.ContainsAny(s, "0123456789") {
+		return ""
+	}
+	return s
+}
+
+func meetingsWithPerson(ctx context.Context, store graph.Store, meetings []*graph.Node, person string) ([]*graph.Node, error) {
+	var kept []*graph.Node
+	for _, m := range meetings {
+		names, err := attendeeNames(ctx, store, m.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range names {
+			if transcript.SameName(n, person) {
+				kept = append(kept, m)
+				break
+			}
+		}
+	}
+	return kept, nil
+}
+
+// meetingJSON is the machine-readable form of a meeting.
+type meetingJSON struct {
+	ID           string   `json:"id"`
+	Title        string   `json:"title"`
+	Date         string   `json:"date"`
+	Duration     string   `json:"duration"`
+	Summary      string   `json:"summary,omitempty"`
+	Participants []string `json:"participants,omitempty"`
+	Path         string   `json:"path,omitempty"`
+}
+
+func meetingsToJSON(ctx context.Context, store graph.Store, meetings []*graph.Node) []meetingJSON {
+	out := make([]meetingJSON, 0, len(meetings))
+	for _, m := range meetings {
+		names, _ := attendeeNames(ctx, store, m.ID)
+		out = append(out, meetingJSON{
+			ID:           m.QualifiedName,
+			Title:        m.Name,
+			Date:         m.UpdatedAt.Format(time.RFC3339),
+			Duration:     formatSeconds(m.Properties[graph.PropDuration]),
+			Summary:      m.Properties[graph.PropSummary],
+			Participants: names,
+			Path:         m.FilePath,
+		})
+	}
+	return out
+}
+
+func formatSeconds(v string) string {
+	secs, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return "—"
+	}
+	return transcript.FormatTimestamp(secs)
+}
+
+func orNone(s string) string {
+	if s == "" || s == "Unknown" || s == "None" {
+		return "no platform recorded"
+	}
+	return s
+}
+
+func truncateText(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
+}
+
+// wrapText reflows text to a width, indenting continuation lines.
+func wrapText(s string, width int, indent string) string {
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return ""
+	}
+	var lines []string
+	cur := words[0]
+	for _, w := range words[1:] {
+		if len(cur)+1+len(w) > width {
+			lines = append(lines, cur)
+			cur = w
+			continue
+		}
+		cur += " " + w
+	}
+	lines = append(lines, cur)
+	return strings.Join(lines, "\n"+indent)
+}
+
+// expandPath resolves a leading ~ to the user's home directory.
+func expandPath(p string) string {
+	if !strings.HasPrefix(p, "~") {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	return filepath.Join(home, strings.TrimPrefix(p, "~"))
+}

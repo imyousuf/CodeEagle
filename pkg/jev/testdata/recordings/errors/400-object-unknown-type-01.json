@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "name": "errors/400-object-unknown-type-01",
+  "note": "detail is an object: api_usage_error with a message.",
+  "recorded_at": "2026-09-19T21:49:29+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": null,
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "command": "git push --force origin main",
+        "working_directory": "/app/service-payments",
+        "session_context": "Refactoring migration files"
+      },
+      "questions": {
+        "destructive": {
+          "type": "boolean",
+          "instructions": "Is it destructive?"
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba553c67d259147d715f0174976",
+      "x-envoy-upstream-service-time": "5"
+    },
+    "body": {
+      "detail": {
+        "error_type": "api_usage_error",
+        "message": "Invalid request."
+      }
+    }
+  },
+  "latency_ms": 294,
+  "key": "sha256:e0468705490d0e2cc52f158d5ba6db86ca50a43128b972457b165d0c60107e35"
+}

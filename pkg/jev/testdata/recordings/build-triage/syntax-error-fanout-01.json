@@ -1,0 +1,118 @@
+{
+  "schema": 1,
+  "name": "build-triage/syntax-error-fanout-01",
+  "note": "Decisive 12-option choice; transient noul near 0.05; 4-level rubric.",
+  "recorded_at": "2026-09-19T21:49:25+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "log_excerpt": "$ go build ./...\n# github.com/acme/gateway/internal/router\ninternal/router/router.go:88:2: syntax error: unexpected newline in composite literal; possibly missing comma or }\ninternal/router/router.go:91:1: syntax error: non-declaration statement outside function body\nFAIL\tgithub.com/acme/gateway/internal/router [build failed]\nmake: *** [Makefile:42: build] Error 1\n",
+        "environment": "ci",
+        "retry_count": 0
+      },
+      "questions": {
+        "is_transient": {
+          "type": "noul",
+          "instructions": "Is this failure caused by a transient network issue, timeout, or external resource lock?",
+          "criteria": {
+            "true": "503s, socket hang-ups, external gateway timeouts, or lock contention",
+            "false": "Syntax errors, failed test assertions, or missing dependencies"
+          }
+        },
+        "category": {
+          "type": "choice",
+          "instructions": "Identify the root cause of the build failure.",
+          "criteria": {
+            "compiler_syntax": "Compilation or syntax parser failure",
+            "type_error": "Type mismatch or unresolved symbol at compile time",
+            "test_assertion": "Unit, integration, or end-to-end assertion failure",
+            "test_timeout": "A test exceeded its time limit",
+            "dependency_resolution": "Missing package or version conflict",
+            "linter": "Lint or formatting check failed",
+            "infrastructure": "Out of memory, disk exhaustion, or container runtime error",
+            "network": "DNS, TLS, or connection failure to an external service",
+            "permissions": "Credential, token, or filesystem permission failure",
+            "configuration": "Missing or malformed environment or config value",
+            "flaky": "Non-deterministic failure with no code cause",
+            "unknown": "The log does not contain enough to categorize the failure"
+          }
+        },
+        "urgency": {
+          "type": "score",
+          "instructions": "Score the urgency of escalating this failure to on-call engineering.",
+          "criteria": [
+            "Low: blocked local developer run or non-critical feature branch",
+            "Medium: failed staging integration build requiring developer triage",
+            "High: shared trunk pipeline failure blocking other developers",
+            "Critical: production deployment blocked"
+          ]
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba54266728e83c59718ee795d93",
+      "x-envoy-upstream-service-time": "108"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "is_transient": {
+          "type": "noul",
+          "noul": 0.02
+        },
+        "category": {
+          "type": "choice",
+          "choice": "compiler_syntax",
+          "confidence": 1.0,
+          "probabilities": {
+            "type_error": 0.0,
+            "network": 0.0,
+            "linter": 0.0,
+            "configuration": 0.0,
+            "infrastructure": 0.0,
+            "unknown": 0.0,
+            "compiler_syntax": 1.0,
+            "test_timeout": 0.0,
+            "permissions": 0.0,
+            "flaky": 0.0,
+            "test_assertion": 0.0,
+            "dependency_resolution": 0.0
+          }
+        },
+        "urgency": {
+          "type": "score",
+          "score": 1.84,
+          "confidence": 0.83,
+          "legend": {
+            "0": "Low: blocked local developer run or non-critical feature branch",
+            "1": "Medium: failed staging integration build requiring developer triage",
+            "2": "High: shared trunk pipeline failure blocking other developers",
+            "3": "Critical: production deployment blocked"
+          },
+          "probabilities": {
+            "0": 0.05,
+            "1": 0.07,
+            "2": 0.87,
+            "3": 0.01
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 797,
+        "output_tokens": 151
+      }
+    }
+  },
+  "latency_ms": 428,
+  "key": "sha256:bd7d4d32469a25bb8d610eb3e2944a601b78bc14861bde233ce31b046f04cd5a"
+}

@@ -20,12 +20,23 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# Go workspace file
-go.work
-go.work.sum
+# The Go workspace file is committed, not ignored.
+#
+# pkg/jev is its own module and the application imports it, so without the
+# workspace a fresh clone resolves that import through the module proxy --
+# where it does not exist until a version is tagged. The usual advice to keep
+# go.work out of version control is for libraries; this is an application
+# repository whose own build depends on it.
 
 # Build output
 bin/
+codeeagle
+/backpop-paths
+/facetest
+
+# Frontend build artifacts
+node_modules/
+internal/app/frontend/dist/
 
 # Graph database
 .codeeagle/

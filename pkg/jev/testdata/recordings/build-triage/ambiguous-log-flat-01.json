@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "name": "build-triage/ambiguous-log-flat-01",
+  "note": "The log says almost nothing: a large option set with a near-flat distribution, or a decisive 'unknown'.",
+  "recorded_at": "2026-09-19T21:49:25+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "log_excerpt": "[12:04:18] Running step: test\n[12:04:19] > make test\n[12:07:52] Error: Process completed with exit code 1.\n",
+        "environment": "ci",
+        "retry_count": 1
+      },
+      "questions": {
+        "category": {
+          "type": "choice",
+          "instructions": "Identify the root cause of the build failure.",
+          "criteria": {
+            "compiler_syntax": "Compilation or syntax parser failure",
+            "type_error": "Type mismatch or unresolved symbol at compile time",
+            "test_assertion": "Unit, integration, or end-to-end assertion failure",
+            "test_timeout": "A test exceeded its time limit",
+            "dependency_resolution": "Missing package or version conflict",
+            "linter": "Lint or formatting check failed",
+            "infrastructure": "Out of memory, disk exhaustion, or container runtime error",
+            "network": "DNS, TLS, or connection failure to an external service",
+            "permissions": "Credential, token, or filesystem permission failure",
+            "configuration": "Missing or malformed environment or config value",
+            "flaky": "Non-deterministic failure with no code cause",
+            "unknown": "The log does not contain enough to categorize the failure"
+          }
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba5440d70a4a807d7657c3e4890",
+      "x-envoy-upstream-service-time": "101"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "category": {
+          "type": "choice",
+          "choice": "unknown",
+          "confidence": 0.86,
+          "probabilities": {
+            "linter": 0.0,
+            "test_assertion": 0.13,
+            "compiler_syntax": 0.0,
+            "test_timeout": 0.0,
+            "permissions": 0.0,
+            "flaky": 0.0,
+            "configuration": 0.0,
+            "unknown": 0.87,
+            "infrastructure": 0.0,
+            "dependency_resolution": 0.0,
+            "network": 0.0,
+            "type_error": 0.0
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 602,
+        "output_tokens": 115
+      }
+    }
+  },
+  "latency_ms": 404,
+  "key": "sha256:67ec53c429cb1a3b81ca575f682f28704f8aaa687eb94cb61edc625cbec51f6d"
+}

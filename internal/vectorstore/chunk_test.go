@@ -206,6 +206,26 @@ func TestEmbeddableText(t *testing.T) {
 			},
 			want: "Process\nfunc Process() error",
 		},
+		{
+			// A topic's label is all there is to it; leaving labels out of
+			// the index hid the one node named what was being searched for.
+			name: "topic embeds from its label alone",
+			node: &graph.Node{Type: graph.NodeTopic, Name: "AGI feasibility debate", QualifiedName: "AGI feasibility debate"},
+			want: "AGI feasibility debate",
+		},
+		{
+			name: "topic includes the other wordings meetings used",
+			node: &graph.Node{
+				Type: graph.NodeTopic, Name: "MCP authentication",
+				Properties: map[string]string{graph.PropAliases: "MCP auth,authenticating MCP servers"},
+			},
+			want: "MCP authentication\nAlso worded as: MCP auth,authenticating MCP servers",
+		},
+		{
+			name: "topic concept keeps its description",
+			node: &graph.Node{Type: graph.NodeTopic, Name: "AI strategy", DocComment: "Where AI is taking the product."},
+			want: "AI strategy\nWhere AI is taking the product.",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

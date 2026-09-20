@@ -40,8 +40,8 @@ func TestNewClientDefaults(t *testing.T) {
 	}
 	defer client.Close()
 
-	if client.Model() != "claude-sonnet-4-5-20250929" {
-		t.Errorf("expected default model %q, got %q", "claude-sonnet-4-5-20250929", client.Model())
+	if client.Model() != "claude-sonnet-5" {
+		t.Errorf("expected default model %q, got %q", "claude-sonnet-5", client.Model())
 	}
 
 	if client.Provider() != "anthropic" {

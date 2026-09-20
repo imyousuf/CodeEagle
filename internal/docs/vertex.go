@@ -9,7 +9,7 @@ import (
 	"google.golang.org/genai"
 )
 
-const defaultVertexDocsModel = "gemini-2.0-flash"
+const defaultVertexDocsModel = "gemini-3.8-flash"
 
 type vertexProvider struct {
 	client *genai.Client

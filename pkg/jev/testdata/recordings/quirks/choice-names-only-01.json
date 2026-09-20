@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "name": "quirks/choice-names-only-01",
+  "note": "Null descriptions: the documented name-only form.",
+  "recorded_at": "2026-09-19T21:49:27+00:00",
+  "api_version": "0.2.0",
+  "model_requested": "jev-1.13.0",
+  "model_answered": "jev-1.13.0",
+  "request": {
+    "method": "POST",
+    "path": "/v1/systemone",
+    "body": {
+      "model": "jev-1.13.0",
+      "state": {
+        "command": "git push --force origin main",
+        "working_directory": "/app/service-payments",
+        "session_context": "Refactoring migration files"
+      },
+      "questions": {
+        "route": {
+          "type": "choice",
+          "instructions": "Which safety queue should process this command?",
+          "criteria": {
+            "auto_execute": null,
+            "require_peer_approval": null,
+            "hard_block": null,
+            "unrecognized": null
+          }
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-typesafe-request-id": "req_01a0bba54bca772a8aad3c05381b1e01",
+      "x-envoy-upstream-service-time": "89"
+    },
+    "body": {
+      "model": "jev-1.13.0",
+      "answers": {
+        "route": {
+          "type": "choice",
+          "choice": "require_peer_approval",
+          "confidence": 0.75,
+          "probabilities": {
+            "unrecognized": 0.01,
+            "require_peer_approval": 0.8099999999999999,
+            "auto_execute": 0.01,
+            "hard_block": 0.17
+          }
+        }
+      },
+      "usage": {
+        "input_tokens": 349,
+        "output_tokens": 58
+      }
+    }
+  },
+  "latency_ms": 397,
+  "key": "sha256:3c07764867e4af698d90cd3452f517ab97e31ffb2161287991edf5699ce8743b"
+}

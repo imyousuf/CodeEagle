@@ -10,16 +10,28 @@ It supports monorepos, multi-repo setups, and multi-language codebases (Go, Pyth
 - **15 language parsers**: Go (stdlib AST), Python, TypeScript, JavaScript, Java, Rust, C# (with ASP.NET), Ruby (with Rails), HTML, Markdown, Makefile, Shell, Terraform, YAML, plus a manifest parser (go.mod, package.json, pyproject.toml, requirements.txt)
 - **Document format extraction**: Text extraction from DOCX, PPTX, XLSX, ODT, ODS, ODP (pure Go, stdlib only) and PDF (`dslipak/pdf`). Documents are indexed, topic-extracted via LLM, and semantically searchable
 - **Non-code file indexing**: Changelogs, design docs, CSVs, images, config templates — all indexed as Document nodes with optional LLM-based topic extraction and image description
+- **Meeting transcripts**: Diarized recordings are indexed with speaker identification, topic segmentation, per-topic summaries, decisions, and follow-ups. Speakers arrive anonymous ("Person 1", "Person 2") and are resolved to durable people, shared with face recognition
+- **Face detection & recognition** (optional, `-tags faces`): OpenCV DNN-based face detection with 128-dim embeddings, agglomerative clustering, KNN classification, person management, and EXIF metadata extraction
 - **Cross-service dependency analysis**: API endpoint extraction, HTTP client call detection, import-to-manifest linking, cross-file interface implements resolution
 - **Test coverage mapping**: automatic test file/function detection across 8 languages with `EdgeTests` linking to source counterparts
 - **Code quality metrics**: cyclomatic complexity, lines of code, TODO/FIXME counts
 - **Graph analysis queries**: unused code detection and test coverage reporting
 - **AI agents** for planning, design, code review, and freeform Q&A — read-only, advisory, never modify code
+- **Temporal tracking**: Every file node records `UpdatedAt` with Year/Month/Date graph nodes for date-based queries (e.g., "files modified in March 2024")
+- **Duplicate file detection**: Content-hash-based identification of identical files across different paths, with `DuplicateOf` graph edges and `query duplicates` CLI command
+- **Symlink tracking**: Automatic detection of symbolic links with `SymLink` graph edges pointing to resolved targets
 - **Git-aware incremental sync** with branch tracking and diff-based updates
+- **Smart non-git sync**: Skips unchanged files by comparing mtime against DB, with crash-resilient periodic state saving
 - **MCP server** for integration with Claude Code and other MCP-compatible tools
 - **LLM auto-summarization** of services and architectural patterns
 
 ## Installation
+
+> **New to this, or setting it up for someone who is?** [docs/installation.md](docs/installation.md)
+> walks through it step by step — no Go toolchain assumed — and covers the
+> configuration file, storing API keys in your system keyring, Google
+> application default credentials, and the failures that actually happen.
+
 
 ### Pre-built Binaries (Recommended)
 
@@ -43,7 +55,7 @@ codeeagle update
 
 ### Build from Source
 
-Requires Go 1.24+ and a C compiler (gcc or clang) — needed for [tree-sitter](https://tree-sitter.github.io/tree-sitter/) parsing via CGO.
+Requires Go 1.27+ and a C compiler (gcc or clang) — needed for [tree-sitter](https://tree-sitter.github.io/tree-sitter/) parsing via CGO.
 
 ```bash
 go install github.com/imyousuf/CodeEagle/cmd/codeeagle@latest
@@ -54,7 +66,9 @@ Or clone and build:
 ```bash
 git clone https://github.com/imyousuf/CodeEagle.git
 cd CodeEagle
-make build
+make build           # Auto-detects OpenCV for face support
+make build-faces     # Explicitly enable face detection (requires libopencv-dev)
+make build-minimal   # Skip face detection
 # Binary: bin/codeeagle
 ```
 
@@ -102,17 +116,221 @@ codeeagle query interface --name <name>     Show interface and implementors
 codeeagle query edges --node <name>         Show relationships for a node
 codeeagle query unused [--type T]           Find potentially unused functions/methods
 codeeagle query coverage [--level L]        Show test coverage by file or function
+codeeagle query duplicates [--json]         Find duplicate files by content hash
 
 codeeagle backpop [--all]                   Run linker phases on existing graph
 codeeagle metrics [--file F] [--type T]     Show code quality metrics
 codeeagle mcp serve                         Start MCP server (stdio transport)
 codeeagle hook install                      Install git post-commit hook for auto-sync
 
+codeeagle faces scan [dirs...]              Detect, cluster, assign faces in images
+codeeagle faces clusters                    View/manage face clusters
+codeeagle faces label <id> <name>           Assign person name to a cluster
+codeeagle faces search <query>              Search by person or image
+codeeagle faces merge/split                 Merge or split face clusters
+codeeagle faces unlabeled                   Show unassigned clusters
+codeeagle faces suggest                     Auto-suggest face assignments
+codeeagle faces person [...]                Person CRUD (add, list, edit, delete)
+
 codeeagle version                           Print version, commit, build date
 codeeagle update [--check] [--force]        Check for and install updates
 ```
 
+> **Note:** `codeeagle faces` commands require building with `-tags faces` and OpenCV 4 (`libopencv-dev`).
+
 Global flags: `--config <path>`, `--db-path <path>`, `-p <project-name>`, `-v` (verbose).
+
+### Meeting transcripts
+
+```bash
+codeeagle meetings sync                    # Enrich transcripts and index them
+codeeagle meetings sync --dry-run          # Report scope and token cost, call no model
+codeeagle meetings sync --limit 20         # Process a subset
+codeeagle meetings sync --force            # Re-enrich already-indexed recordings
+codeeagle meetings watch                   # Index new recordings as they appear
+
+codeeagle meetings search AGI              # What was said about it, by whom, and when
+codeeagle meetings search pricing --person Kevin           # ...in meetings someone attended
+codeeagle meetings search --only decision --since 2026-08-01   # Every decision since a date
+codeeagle meetings search AGI --breadth wide   # Follow related topics two steps out (none|narrow|default|wide)
+codeeagle meetings list                    # List indexed meetings
+codeeagle meetings list --person Kevin     # Meetings a person attended
+codeeagle meetings list --since 2026-03-01 # Meetings after a date
+codeeagle meetings show <meeting-id>       # Participants, topics, decisions, follow-ups
+codeeagle meetings show a99b3645           # A prefix of the id, or a fragment of the title, works too
+codeeagle meetings people                  # People, with speaking time and follow-up counts
+codeeagle meetings topics                  # Topics discussed, by meeting count
+codeeagle meetings topics agi              # Only the topics containing a word
+codeeagle meetings topics --themes         # The induced topic hierarchy
+codeeagle meetings taxonomy                # Group topics into concepts (re-runnable)
+codeeagle meetings taxonomy --rebuild      # Group from scratch instead of extending
+codeeagle meetings relate --dry-run        # Count the topic pairs still to judge, and the cost
+codeeagle meetings relate                  # Judge which topics are about one thing (needs jev_api_key)
+codeeagle meetings topics agi --related    # Topics judged related to each match, with the probability
+codeeagle meetings migrate --from <branch> # Move a corpus indexed by an older version
+codeeagle meetings actions --person Kevin  # Follow-ups owned by someone
+codeeagle meetings actions --unassigned    # Follow-ups nobody owns
+
+codeeagle meetings identify                # Review speakers that could not be identified
+codeeagle meetings label "Person 3" Kevin --meeting <id>   # Assign one by hand
+```
+
+Recordings already indexed and unchanged are skipped on a content hash, so
+re-running after a few new meetings costs almost nothing. `meetings watch`
+sweeps on an interval for the same reason — an unchanged recording costs a file
+read and no model call — and leaves a transcript alone until it has been idle
+for a moment, so a meeting still being recorded is not indexed half-complete.
+
+#### Supported formats
+
+| Format | Written by | Speakers |
+|--------|-----------|----------|
+| `session.json` | local diarizing recorder | anonymous (`Person 1`, `You`) |
+| `.vtt` (WebVTT) | Zoom, Teams live captions | named |
+| `.srt` | Zoom and most recorders | named, when the tool writes them |
+| `.docx` | Teams "Meeting Recording" transcript export | named |
+
+Discovery walks every configured directory, so a folder of loose downloads and
+a folder of per-session directories both work, nested to any depth. Files that
+turn out to be something else are counted and skipped, not reported as
+failures.
+
+Recordings accumulate in more than one place, so `sessions_dir` takes either a
+single path or a list of them:
+
+```yaml
+transcripts:
+  sessions_dir: ~/.local/share/tomoe/sessions   # one place
+```
+
+```yaml
+transcripts:
+  sessions_dir:                                 # or several
+    - ~/.local/share/tomoe/sessions
+    - ~/Downloads
+    - /mnt/share/recordings
+```
+
+`--dir` does the same on the command line and repeats:
+`codeeagle meetings sync --dir ~/Downloads --dir ~/recordings`. A file reachable
+through two of them is indexed once.
+
+A transcript committed beside the code it concerns needs no directory setting at
+all. `codeeagle sync` indexes it as a document like any other file and marks it
+as a transcript; `codeeagle meetings sync` reads those marks and indexes it as a
+meeting too. The file ends up in both indexes, which is what it is: prose worth
+searching, and a record of who said what. Nothing is configured for this, and a
+file that is both marked and inside a configured directory is still indexed
+once.
+
+Where a transcript names its speakers, identification has nothing to work out
+and the model call is skipped entirely — it would cost money to produce a worse
+answer than the file already contains. Those identities are recorded as
+resolved by the transcript rather than by inference, and the speaking-time
+threshold is dropped for them: it exists to filter diarization debris, which a
+named transcript does not have, and a colleague who said one word was still in
+the meeting.
+
+One meeting is often exported twice — a caption file and a Word document of the
+same call. Duplicates are dropped, keeping the format that carries more, but
+only when the dates agree as well as the names: a weekly standup exports to the
+same filename every week.
+
+#### How speakers are identified
+
+Recording software separates voices but does not know whose they are, so it
+labels them `Person 1`, `Person 2`, and those labels mean nothing outside a
+single recording. Three signals resolve them:
+
+1. **Microphone audio is the recording's owner**, by construction. This is
+   structural rather than inferred, needs no model call, and is never wrong.
+2. **People say each other's names**, and each usage points somewhere.
+   "Kevin, what do you think?" names the next speaker; "Thanks, Kevin" names
+   the previous one; "this is Saki" names the speaker. Resolving direction
+   against turn order yields weighted votes for specific labels — computed
+   without a model, so it is free and reproducible.
+3. **A model adjudicates** the remaining ambiguity, given those votes and the
+   transcript. Leaving a speaker unidentified is an expected outcome: a wrong
+   name silently attributes one person's words to another, so the model is
+   instructed to return nothing when the evidence is thin, and
+   `meetings identify` lists what is left for a human.
+
+Identity is resolved across recordings too. A transcriber spells the same name
+differently between meetings ("Imran" and "Imron"), so variants are folded in
+as aliases rather than creating a second person. Names that merely resemble one
+another are kept apart.
+
+Where both names carry a surname, the surname decides: "Chris Banner" and
+"Christopher Stookey" are two colleagues, not one spelled two ways. Where one
+name has no surname — all a diarized recording ever offers — the given name
+settles it. Names written surname-first, as some directories export them, are
+recognized as the same person.
+
+People discovered in earlier meetings are fed back as known names for later
+ones, so recordings are processed in the order the meetings happened.
+
+#### How topics become a hierarchy
+
+A meeting names its subject in whatever words suited that conversation, so a
+flat vocabulary never converges: four meetings on one subject produce four
+labels, each used once, and `HasTopic` indexes nothing.
+
+Merging those labels into each other is the obvious fix and the wrong one. Fuse
+"MCP server vs OAuth architecture" with "OBO token concern" and two different
+discussions are misrepresented; leave them apart and neither is findable. The
+dilemma only exists because one label is being asked to serve as both the
+precise description and the searchable subject.
+
+So the specific phrases stay as leaves, and each is placed under the concept it
+is a facet of:
+
+```
+MCP (4)
+  MCP authentication (3)
+    - OAuth token revocation      1
+    - OAuth token lifetimes       1
+  - MCP tool access               3
+```
+
+Three mechanisms build this, and the third is what makes it hold:
+
+1. Topic labels are asked for as reusable subjects — two to four words — with
+   everything specific to the meeting going in the topic's summary.
+2. A registry canonicalizes wordings, so "authentication for MCP" and "MCP
+   authentication" resolve to one node.
+3. **Each meeting is shown the current hierarchy** and names the concept its
+   topics sit under. The tree therefore grows while meetings are indexed rather
+   than needing a bulk rebuild, and a model extending a structure it can see
+   produces a far better one than a model naming things blind.
+
+`meetings taxonomy` also groups in bulk, applying one operation repeatedly:
+group what is ungrouped, then group the groups. For large corpora it proposes
+the concepts from a sample and then places every label against that fixed list
+in batches, because a single request must name every label it places and its
+output would otherwise truncate mid-answer.
+
+It defaults to two rounds of grouping. A third measurably made things worse on a
+real corpus: two rounds produced concepts worth searching by ("Model routing",
+"Agent memory", "Tenant isolation"), while forcing a further pass to reach a
+handful of top-level headings fused unrelated work. Use `--depth` for a corpus
+that wants more.
+
+#### Recurring meetings
+
+Standing meetings are threaded together, so `meetings show` points at the
+previous and next instance and an agent can follow a thread backwards. The
+thread is inferred from who was in the room rather than from titles: a model's
+titles vary between instances of one standing meeting, while the set of people
+recurs reliably. A series needs at least two shared participants, and a gap of
+more than two months breaks the chain rather than inventing continuity across
+it.
+
+#### Verifying what was extracted
+
+Every decision and follow-up carries a verbatim quote, and whether that quote
+really appears in the transcript is recorded on the node. `meetings show` marks
+the ones that fail with `?`, and the agent tools say so in as many words — an
+unverified quote is the one claim that should not be taken on trust.
 
 ## Configuration
 
@@ -153,15 +371,16 @@ graph:
   storage: embedded
 
 agents:
-  llm_provider: claude-cli   # claude-cli, anthropic, or vertex-ai
-  model: sonnet
+  llm_provider: claude-cli   # claude-cli, anthropic, vertex-ai, baseten, ollama
+  model: sonnet              # see docs/models.md for every identifier
   auto_link: true            # enable LLM-assisted cross-service edge detection
+  # api_key: $(keyring get anthropic.com you@example.com)   # any provider
 
 docs:
   # provider: ollama          # auto-detected if omitted (ollama -> vertex-ai -> disabled)
   # model: qwen3.5:9b         # Ollama model for topic extraction
   # max_image_resolution: 1024
-  # context_window: 49152
+  # context_window: 120000
   exclude_extensions:
     - ".lock"
     - ".min.js"
@@ -171,13 +390,167 @@ docs:
     - ".pb.go"
 ```
 
+### Meeting transcripts
+
+```yaml
+transcripts:
+  enabled: true
+  sessions_dir: ~/.local/share/tomoe/sessions   # a path, or a list of them
+  owner: "Your Name"              # microphone audio is always this person
+  owner_aliases: ["Yourname"]     # spellings the transcriber produces
+
+  provider: baseten               # baseten | ollama | anthropic | vertex-ai
+  model: deepseek-ai/DeepSeek-V4.1-Flash
+  # Each credential is named for the service it belongs to, so several can
+  # sit here at once and changing `provider` above does not mean moving a key.
+  baseten_api_key: $(keyring get baseten.co you@example.com)
+  # anthropic_api_key: ${ANTHROPIC_API_KEY}
+  # Vertex AI takes no key: run `gcloud auth application-default login`.
+
+  reasoning_effort: low           # see the note below
+  max_tokens: 65536
+  min_confidence: 0.70            # bar for automatic identification
+  concurrency: 8
+
+  # Optional: adjudicate who was speaking with a decision model instead of
+  # the language model. See "Deciding who spoke" below.
+  jev_api_key: ${JEV_API_KEY}
+  # jev_model: jev-1.13.0
+
+  roster:                         # optional, and markedly improves accuracy:
+    - Kevin                       # it turns an open guess into a choice
+    - Mona                        # among known colleagues
+
+  exclude_names:                  # terms that read like names in conversation
+    - Acme
+    - Opal
+```
+
+Supplying a `roster` is the single most effective setting: it both raises
+recall on people who are never introduced by name and settles on one spelling
+for each of them.
+
+`reasoning_effort` and `max_tokens` matter more than they look. A reasoning
+model spends its token budget deliberating *before* emitting any answer, so too
+small a `max_tokens` produces an **empty** reply rather than a short one — on a
+32-minute transcript one model consumed 30,000 tokens reasoning and returned
+nothing. Low effort measurably reduces cost with no loss of identification
+quality; switching reasoning off entirely does hurt it, so that is used only as
+an automatic fallback when a request exhausts its budget.
+
+`meetings sync --dry-run` reports how many recordings, hours of speech, and
+prompt tokens a run involves before any of it is spent. It plans through the
+same code the real run uses, so it counts only what would actually be enriched:
+recordings already indexed and unchanged are excluded, and transcripts found
+among your indexed documents are included. It opens the graph read-only and
+needs no API key.
+
+### Searching more than one index
+
+A project's index holds its code; meetings and personal documents usually live
+in the home configuration. Asking "what did we decide about the retention job?"
+from inside a repository should find the meeting:
+
+```yaml
+federate:
+  - ~/.CodeEagle
+```
+
+`rag` then searches those indices too and shows what they found under their own
+heading, local results first. `--no-federate` searches only the local index for
+one command; `--federate` turns it on without configuring anything.
+
+Results are grouped rather than blended into a single ranking. Scores from
+corpora that were never calibrated against one another do not share units, so
+ranking by nearness would bury one decisive meeting under fifty near-miss code
+hits. An index built with a different embedding model is skipped with a reason,
+because its similarity scores cannot be compared with anything here.
+
+Listed explicitly rather than discovered by walking up the directory tree:
+discovery would make the same question answer differently depending on where it
+was asked, with nothing on screen explaining why. Reads only — nothing is ever
+written outside the local index, and federated indices are opened read-only so
+a running `watch` elsewhere cannot block a query.
+
+### Keeping credentials out of the config file
+
+Any value in the configuration may reference the environment or a command, and
+is resolved when the file is read:
+
+```yaml
+jev_api_key: ${JEV_API_KEY}                              # an environment variable
+jev_api_key: ${JEV_API_KEY:-}                            # ...with a fallback
+jev_api_key: $(keyring get typesafe.ai you@example.com)  # a command's output
+```
+
+So a wrapper can put the key in the environment, or the config can go to the
+system keyring itself. `$$` is a literal dollar, so a value that merely
+contains one is left alone.
+
+Credentials are named for the service they belong to — `baseten_api_key`,
+`anthropic_api_key`, `jev_api_key` — so several can sit in one file and
+changing `provider` is a one-line edit rather than moving a key between
+settings.
+
+`api_key_env` and `api_key_command` are superseded by this: expansion does
+what both did, on every setting rather than only those given bespoke
+companions. They are still read, so an older configuration keeps working, and
+`-v` says so when one of them is supplying the credential.
+
+A failing command is an error rather than an empty value — an empty credential
+surfaces much later as a confusing authentication failure. Neither the value
+nor the command's output ever appears in an error message.
+
+This is the same bargain `git` credential helpers make: running a command named
+in a config file is a real capability, and an intentional one. Nothing runs
+unless you wrote a `$(...)` yourself.
+
+### Deciding who spoke
+
+Identifying a speaker is not writing — it is choosing one of a few known
+people, or declining. `min_confidence` decides whether that choice is written
+into the graph at all, which makes the number attached to it load-bearing. A
+language model reports its own confidence, and reports it high whether or not
+it is right.
+
+Setting `jev_api_key` routes that one judgment to
+[TypeSafe Jev](https://www.datacamp.com/blog/system-one-models-jev), a decision
+model that answers with a calibrated probability instead of prose. The
+deterministic name-hint evidence goes with the transcript — on a sample meeting
+that moved a correct identification from 0.58 to 0.98 — and `unresolved` is
+always among the options, because leaving a speaker unnamed is a correct
+answer.
+
+Everything else stays where it was. Titles, topic summaries, decisions and
+follow-ups are all writing, and none of them go to the decision model.
+
+Measured over 70 real meetings against the identifications already in the
+graph: agreed on 27, disagreed on 6, found 9 the language model missed, and
+declined 43 that it had named. Most disagreements fall *below* the 0.70 gate
+and are therefore rejected rather than recorded — doubt expressed as a low
+number instead of a confident guess. There is no ground truth for the 43, so
+this is a precision/recall tradeoff rather than a clear improvement, and it
+stays opt-in for that reason. Identification cost about $0.0007 per meeting and
+ran in roughly a second.
+
 ### LLM Providers
 
 | Provider | Config | Auth |
 |----------|--------|------|
 | Claude CLI (default) | `llm_provider: claude-cli` | Claude Code installed and authenticated |
-| Anthropic API | `llm_provider: anthropic` | `ANTHROPIC_API_KEY` env var |
-| Vertex AI | `llm_provider: vertex-ai` | GCP Application Default Credentials + `project`, `location` |
+| Anthropic API | `llm_provider: anthropic` | `agents.api_key`, or the `ANTHROPIC_API_KEY` env var |
+| Vertex AI | `llm_provider: vertex-ai` | GCP Application Default Credentials + `project` |
+| Baseten | `llm_provider: baseten` | `agents.api_key` |
+| Ollama | `llm_provider: ollama` | nothing — a local server |
+
+Vertex AI serves its newer models from the `global` location, which is the
+default; set `location` only to pin an older one. Claude is published on Vertex
+but is not reachable through this provider, which speaks Gemini's API — use the
+Anthropic provider or the Claude CLI.
+
+Which model each provider uses by default, and how to change one, is in
+[docs/models.md](docs/models.md). The decision model is explained in
+[docs/jev.md](docs/jev.md).
 
 ### Multi-Project Registry
 
@@ -212,9 +585,17 @@ codeeagle -p my-project status
 | Dependency | External dependency |
 | Document | Documentation file, office document (DOCX, PPTX, XLSX, ODT, ODS, ODP, PDF), or other non-code file |
 | Directory | Directory in the file hierarchy |
-| Topic | Extracted topic from document content (via LLM) |
-| Person | Named person (from face detection, requires `-tags faces` build) |
+| Topic | A subject, either as a meeting named it or as an induced concept grouping several (`topic_level`, `topic_depth`) |
+| Person | Named person, identified by voice in meetings and/or by face in images |
 | AIGuideline | AI-related guideline files (CLAUDE.md, etc.) |
+| Year | Calendar year node (e.g., "2024") — part of date hierarchy |
+| Month | Calendar month node (e.g., "2024-03") — part of date hierarchy |
+| Date | Calendar date node (e.g., "2024-03-15") — part of date hierarchy |
+| Meeting | A recorded meeting, with title, summary, duration, and participants |
+| Speaker | A per-meeting diarization label; meaningful only once linked to a Person |
+| TopicSegment | A span of one meeting about one topic, with its own summary |
+| Decision | A choice a meeting settled on, with a supporting quote |
+| ActionItem | A follow-up arising from a meeting, with owner and due date |
 
 ### Edge Types
 
@@ -233,8 +614,39 @@ codeeagle -p my-project status
 | Migrates | Migration file migrates a schema |
 | HasTopic | Document has an extracted topic |
 | AppearsIn | Person appears in an image |
+| UpdatedOn | File node linked to its last-modified Date node |
+| DuplicateOf | File has identical content (same content_hash + mime_type) as canonical file |
+| SymLink | Symbolic link points to resolved target file |
+| Attended | Person participated in a meeting |
+| IdentifiedAs | Speaker resolves to a Person, with confidence, evidence, and method |
+| AssignedTo | Action item is owned by a person |
+| RaisedBy | Decision or action item was raised by a person |
+| Mentions | Meeting or topic segment refers to a code entity or person |
+| FollowsUp | Action item implements a decision, or a recurring meeting follows its previous instance |
 | References | General cross-reference |
 | Embeds | Struct embeds another type |
+
+### Meeting storage scope
+
+The graph partitions keys by git branch, so indexing a feature branch does not
+disturb main's view of the code. Meetings are exempt: a meeting happened, and it
+belongs to no branch. They are written under a fixed scope and included as a
+fallback on the read path, so they are visible whichever branch is checked out —
+otherwise switching branches would hide the entire history and the next sync
+would re-index everything.
+
+A corpus indexed by an older version moves across with
+`codeeagle meetings migrate --from <branch>`. The scope appears only in the key
+and never in the stored value, so it is a key rename rather than a re-index.
+
+`--from-db <path>` takes a corpus out of a *different* database — a project's
+index, say, when the meetings belong somewhere more central like the home
+configuration, reachable from any directory. The source is opened read-only and
+never modified, so the original stays put until you have checked the result.
+Neither form re-enriches: the data is already there, and re-deriving it would
+mean paying a model to reproduce what is on disk. The target scope is merged
+into rather than replaced, so a corpus split across two scopes is collected by
+running the command twice.
 
 ### Storage
 
@@ -272,6 +684,7 @@ Once installed, Claude Code gains access to all CodeEagle skills. The skills tea
 | `/codeeagle:codeeagle-sync` | Sync the graph with latest code changes, run linker phases |
 | `/codeeagle:codeeagle-review` | Review code changes and diffs against codebase conventions |
 | `/codeeagle:codeeagle-status` | Show indexing status and graph statistics |
+| `/codeeagle:codeeagle-meetings` | Search meetings for what was discussed, decided, and committed to |
 
 ### MCP Server (alternative)
 
@@ -299,7 +712,9 @@ codeeagle/
 │   ├── llm/               LLM provider implementations
 │   ├── mcp/               MCP server (JSON-RPC over stdio)
 │   ├── metrics/            Code quality metric calculators
-│   ├── linker/             Cross-service linker (8 phases: services, endpoints, API calls, deps, imports, implements, tests, documents)
+│   ├── linker/             Cross-service linker (11 phases: services, endpoints, API calls, deps, imports, implements, tests, calls, documents, duplicates, symlinks)
+│   ├── faces/              Face detection & recognition (OpenCV DNN, clustering, KNN classification)
+│   ├── queue/              Async job queue (face detection, clustering, document enrichment)
 │   ├── parser/             Language parsers + generic fallback (document formats, images, text files)
 │   └── watcher/            Filesystem watcher (fsnotify)
 └── pkg/llm/               Public LLM client interface + provider registry

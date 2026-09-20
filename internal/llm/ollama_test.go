@@ -3,8 +3,10 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/pkg/llm"
@@ -437,4 +439,103 @@ func searchString(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// --- context window and structured output ---
+
+// captureOllama starts a stub Ollama that records the request it was sent.
+func captureOllama(t *testing.T, content string) (*httptest.Server, *ollamaChatRequest) {
+	t.Helper()
+	var got ollamaChatRequest
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Errorf("malformed request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"m","message":{"role":"assistant","content":` +
+			strconv.Quote(content) + `},"done":true,"done_reason":"stop",` +
+			`"prompt_eval_count":10,"eval_count":5}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &got
+}
+
+func TestOllamaSendsContextWindow(t *testing.T) {
+	srv, got := captureOllama(t, "hi")
+	c, err := newOllamaClient(llm.Config{Model: "m", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := c.Chat(context.Background(), "", []llm.Message{{Role: llm.RoleUser, Content: "x"}}); err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+
+	// Ollama silently drops context that does not fit, so a large window must
+	// be requested explicitly rather than left to its small default.
+	if got.Options == nil {
+		t.Fatal("no options sent; num_ctx must be set explicitly")
+	}
+	if v, ok := got.Options["num_ctx"].(float64); !ok || int(v) != DefaultOllamaContextWindow {
+		t.Errorf("num_ctx = %v, want %d", got.Options["num_ctx"], DefaultOllamaContextWindow)
+	}
+}
+
+func TestOllamaContextWindowOverride(t *testing.T) {
+	srv, got := captureOllama(t, "hi")
+	c, err := newOllamaClient(llm.Config{Model: "m", BaseURL: srv.URL, ContextWindow: 8192})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := c.Chat(context.Background(), "", []llm.Message{{Role: llm.RoleUser, Content: "x"}}); err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	if v, _ := got.Options["num_ctx"].(float64); int(v) != 8192 {
+		t.Errorf("num_ctx = %v, want 8192", got.Options["num_ctx"])
+	}
+}
+
+func TestOllamaChatJSONSendsSchema(t *testing.T) {
+	srv, got := captureOllama(t, `{"speakers":[]}`)
+	c, err := newOllamaClient(llm.Config{Model: "m", BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	sc, ok := c.(llm.StructuredClient)
+	if !ok {
+		t.Fatal("ollama client should implement StructuredClient")
+	}
+
+	schema := map[string]any{"type": "object", "properties": map[string]any{}}
+	resp, err := sc.ChatJSON(context.Background(), "sys",
+		[]llm.Message{{Role: llm.RoleUser, Content: "x"}},
+		&llm.JSONSchema{Name: "s", Schema: schema, Strict: true})
+	if err != nil {
+		t.Fatalf("chat json: %v", err)
+	}
+	if resp.Content != `{"speakers":[]}` {
+		t.Errorf("content = %q", resp.Content)
+	}
+	// The schema itself goes in "format", which is what makes Ollama enforce it.
+	m, ok := got.Format.(map[string]any)
+	if !ok {
+		t.Fatalf("format = %#v, want the schema object", got.Format)
+	}
+	if m["type"] != "object" {
+		t.Errorf("format.type = %v, want object", m["type"])
+	}
+}
+
+func TestOllamaChatJSONWithoutSchema(t *testing.T) {
+	srv, got := captureOllama(t, `{}`)
+	c, _ := newOllamaClient(llm.Config{Model: "m", BaseURL: srv.URL})
+	sc := c.(llm.StructuredClient)
+
+	if _, err := sc.ChatJSON(context.Background(), "", []llm.Message{{Role: llm.RoleUser, Content: "x"}}, nil); err != nil {
+		t.Fatalf("chat json: %v", err)
+	}
+	// With no schema, the plain "json" mode still constrains the reply shape.
+	if got.Format != "json" {
+		t.Errorf("format = %#v, want \"json\"", got.Format)
+	}
 }

@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/parser"
+	"github.com/imyousuf/CodeEagle/internal/transcript"
 	"github.com/imyousuf/CodeEagle/internal/watcher"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
@@ -20,12 +23,23 @@ type IndexerConfig struct {
 	GraphStore     graph.Store
 	ParserRegistry *parser.Registry
 	WatcherConfig  *watcher.WatcherConfig
-	RepoRoots      []string // repository root paths for abs→rel path conversion
+	RepoRoots      []string        // repository root paths for abs→rel path conversion
+	NonGitRoots    map[string]bool // non-git repo roots that need basename prefix in relative paths
 	Verbose        bool
 	Logger         func(format string, args ...any) // optional logger, defaults to fmt.Fprintf(os.Stderr, ...)
 	LLMClient      llm.Client                       // optional LLM client for auto-summarization
 	AutoSummarize  bool                             // enable post-index LLM summarization
 	PostIndexHook  func(ctx context.Context) error  // optional hook called after initial full index (e.g., linker)
+	ShowProgress   bool                             // show progress bars during sync/index (independent of Verbose)
+	// MarkTranscripts records, on a document that turns out to be a meeting
+	// transcript, that it is one.
+	//
+	// The file stays in the documents index — it is prose worth searching —
+	// and the mark is what lets `codeeagle meetings sync` find it and
+	// additionally extract the speakers, decisions and follow-ups inside it.
+	// A transcript is therefore both a Document and a Meeting rather than
+	// either one.
+	MarkTranscripts bool
 }
 
 // IndexStats holds statistics about the indexing state.
@@ -39,16 +53,19 @@ type IndexStats struct {
 
 // Indexer orchestrates file parsing and knowledge graph updates.
 type Indexer struct {
-	store         graph.Store
-	registry      *parser.Registry
-	wcfg          *watcher.WatcherConfig
-	matcher       *watcher.GitIgnoreMatcher
-	repoRoots     []string
-	verbose       bool
-	log           func(format string, args ...any)
-	llmClient     llm.Client
-	autoSummarize bool
-	postIndexHook func(ctx context.Context) error
+	store           graph.Store
+	registry        *parser.Registry
+	wcfg            *watcher.WatcherConfig
+	matcher         *watcher.GitIgnoreMatcher
+	repoRoots       []string
+	nonGitRoots     map[string]bool // non-git repo roots needing basename prefix
+	verbose         bool
+	showProgress    bool
+	log             func(format string, args ...any)
+	llmClient       llm.Client
+	autoSummarize   bool
+	markTranscripts bool
+	postIndexHook   func(ctx context.Context) error
 
 	mu           sync.Mutex
 	filesIndexed int
@@ -81,17 +98,20 @@ func NewIndexer(cfg IndexerConfig) *Indexer {
 	}
 
 	return &Indexer{
-		store:         cfg.GraphStore,
-		registry:      cfg.ParserRegistry,
-		wcfg:          cfg.WatcherConfig,
-		matcher:       matcher,
-		repoRoots:     cfg.RepoRoots,
-		verbose:       cfg.Verbose,
-		log:           logFn,
-		llmClient:     cfg.LLMClient,
-		autoSummarize: cfg.AutoSummarize,
-		postIndexHook: cfg.PostIndexHook,
-		changedFiles:  make(map[string]struct{}),
+		store:           cfg.GraphStore,
+		registry:        cfg.ParserRegistry,
+		wcfg:            cfg.WatcherConfig,
+		matcher:         matcher,
+		repoRoots:       cfg.RepoRoots,
+		nonGitRoots:     cfg.NonGitRoots,
+		verbose:         cfg.Verbose,
+		showProgress:    cfg.ShowProgress,
+		log:             logFn,
+		llmClient:       cfg.LLMClient,
+		autoSummarize:   cfg.AutoSummarize,
+		markTranscripts: cfg.MarkTranscripts,
+		postIndexHook:   cfg.PostIndexHook,
+		changedFiles:    make(map[string]struct{}),
 	}
 }
 
@@ -119,11 +139,24 @@ func (idx *Indexer) ChangedFiles() []string {
 }
 
 // toRelativePath converts an absolute file path to a path relative to the
-// first matching repo root. If no repo root matches, the path is returned as-is.
+// first matching repo root. For non-git roots, the path is prefixed with the
+// root's basename (e.g., "/home/user/Pictures/a.jpg" → "Pictures/a.jpg") to
+// ensure unique identity across directories.
+// If no repo root matches, the path is returned as-is.
 func (idx *Indexer) toRelativePath(absPath string) string {
 	for _, root := range idx.repoRoots {
 		rel, err := filepath.Rel(root, absPath)
 		if err == nil && !strings.HasPrefix(rel, "..") {
+			if idx.nonGitRoots[root] || len(idx.repoRoots) > 1 {
+				// A path is only an identity if it is unique, and a bare
+				// repository-relative one is not: two repositories both
+				// holding cmd/main.go produce the same path, so the same node
+				// ID, so one silently overwrites the other. Naming the
+				// repository keeps them apart. A lone repository keeps the
+				// bare path, since there is nothing for it to collide with
+				// and changing it would invalidate every ID already indexed.
+				return filepath.Join(filepath.Base(root), rel)
+			}
 			return rel
 		}
 	}
@@ -131,19 +164,51 @@ func (idx *Indexer) toRelativePath(absPath string) string {
 }
 
 // IndexFile parses a single file and updates the knowledge graph.
+// It uses the file's modification time as the UpdatedAt timestamp.
 // filePath must be an absolute path (for reading from disk). It is converted
 // to a relative path (relative to repo roots) before passing to the parser
 // and graph store.
 // If no parser is registered for the file extension, it silently returns nil.
 func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return fmt.Errorf("stat file %s: %w", filePath, err)
+	}
+	return idx.IndexFileWithTimestamp(ctx, filePath, info.ModTime())
+}
+
+// IndexFileWithTimestamp parses a single file and updates the knowledge graph
+// using the provided timestamp as UpdatedAt for all nodes.
+// filePath must be an absolute path. It is converted to a relative path before
+// passing to the parser and graph store.
+func (idx *Indexer) IndexFileWithTimestamp(ctx context.Context, filePath string, updatedAt time.Time) error {
 	p, ok := idx.registry.ParserForFile(filePath)
 	if !ok {
 		return nil // no parser for this file
 	}
 
+	// Pre-read skip: avoid expensive os.ReadFile for files the parser would skip.
+	if skipper, ok := p.(parser.FileSkipper); ok && skipper.ShouldSkipFile(filePath) {
+		return nil
+	}
+
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("read file %s: %w", filePath, err)
+	}
+
+	contentHash := computeContentHash(content)
+	return idx.IndexFileWithContent(ctx, filePath, content, contentHash, updatedAt)
+}
+
+// IndexFileWithContent parses a single file using pre-read content and a
+// pre-computed content hash, updating the knowledge graph.
+// This avoids redundant file reads and hash computations when the caller
+// has already read the file (e.g., during sync with duplicate detection).
+func (idx *Indexer) IndexFileWithContent(ctx context.Context, filePath string, content []byte, contentHash string, updatedAt time.Time) error {
+	p, ok := idx.registry.ParserForFile(filePath)
+	if !ok {
+		return nil // no parser for this file
 	}
 
 	relPath := idx.toRelativePath(filePath)
@@ -152,7 +217,14 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
 		idx.log("Parsing %s (%s)...", relPath, p.Language())
 	}
 
-	result, err := p.ParseFile(relPath, content)
+	// Use ContentHashParser if available to avoid re-hashing in the parser.
+	var result *parser.ParseResult
+	var err error
+	if chp, ok := p.(parser.ContentHashParser); ok {
+		result, err = chp.ParseFileWithHash(ctx, relPath, content, contentHash)
+	} else {
+		result, err = p.ParseFile(relPath, content)
+	}
 	if err != nil {
 		return fmt.Errorf("parse file %s: %w", relPath, err)
 	}
@@ -161,13 +233,60 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
 	classifier := parser.NewClassifier()
 	result = classifier.Classify(result)
 
+	// A document that is also a meeting transcript is marked as one. It stays
+	// in the documents index, and the mark is what lets meeting indexing find
+	// it and additionally extract who spoke and what was agreed.
+	transcriptFormat := ""
+	if idx.markTranscripts && transcript.MayBeTranscript(filePath) {
+		if f := transcript.FormatFor(filePath, content); f != nil {
+			transcriptFormat = f.Name()
+		}
+	}
+
+	// Inject content_hash and mime_type into file-type nodes that lack them.
+	mimeType := detectMIMEType(relPath)
+	for _, node := range result.Nodes {
+		if isFileTypeNode(node.Type) && node.Type != graph.NodeDirectory {
+			if node.Properties == nil {
+				node.Properties = make(map[string]string)
+			}
+			if transcriptFormat != "" {
+				node.Properties[graph.PropIsTranscript] = "true"
+				node.Properties[graph.PropTranscriptFormat] = transcriptFormat
+			}
+			if node.Properties[graph.PropContentHash] == "" {
+				node.Properties[graph.PropContentHash] = contentHash
+			}
+			if node.Properties[graph.PropMimeType] == "" {
+				node.Properties[graph.PropMimeType] = mimeType
+			}
+		}
+	}
+
+	// Detect symlinks and record the target path.
+	if linfo, lerr := os.Lstat(filePath); lerr == nil && linfo.Mode()&os.ModeSymlink != 0 {
+		if target, eerr := filepath.EvalSymlinks(filePath); eerr == nil {
+			relTarget := idx.toRelativePath(target)
+			for _, node := range result.Nodes {
+				if isFileTypeNode(node.Type) && node.Type != graph.NodeDirectory {
+					if node.Properties == nil {
+						node.Properties = make(map[string]string)
+					}
+					node.Properties[graph.PropSymlinkTarget] = relTarget
+					break
+				}
+			}
+		}
+	}
+
 	// Delete old nodes for this file to support incremental updates.
 	if err := idx.store.DeleteByFile(ctx, relPath); err != nil {
 		return fmt.Errorf("delete old nodes for %s: %w", relPath, err)
 	}
 
-	// Add new nodes.
+	// Add new nodes with UpdatedAt timestamp.
 	for _, node := range result.Nodes {
+		node.UpdatedAt = updatedAt
 		if err := idx.store.AddNode(ctx, node); err != nil {
 			return fmt.Errorf("add node %s: %w", node.ID, err)
 		}
@@ -177,6 +296,19 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
 	for _, edge := range result.Edges {
 		if err := idx.store.AddEdge(ctx, edge); err != nil {
 			return fmt.Errorf("add edge %s: %w", edge.ID, err)
+		}
+	}
+
+	// Create date hierarchy nodes and UpdatedOn edge for the file node.
+	for _, node := range result.Nodes {
+		if isFileTypeNode(node.Type) {
+			if err := DeleteUpdatedOnEdges(ctx, idx.store, node.ID); err != nil {
+				idx.log("Warning: delete UpdatedOn edges for %s: %v", node.ID, err)
+			}
+			if err := EnsureDateNodes(ctx, idx.store, updatedAt, node.ID); err != nil {
+				idx.log("Warning: create date nodes for %s: %v", node.ID, err)
+			}
+			break
 		}
 	}
 
@@ -193,15 +325,85 @@ func (idx *Indexer) IndexFile(ctx context.Context, filePath string) error {
 	return nil
 }
 
-// IndexDirectory walks a directory tree and indexes all supported files.
-func (idx *Indexer) IndexDirectory(ctx context.Context, dirPath string) error {
-	if idx.verbose {
-		idx.log("Scanning directory: %s", dirPath)
+// IndexDuplicateFile creates a minimal node for a file that is a content
+// duplicate of an already-indexed file. Instead of full parsing, it creates
+// a Document node with the same content_hash and mime_type, plus a DuplicateOf
+// edge pointing to the canonical (first-seen) node. This is much faster than
+// full indexing for directories with many duplicate files (e.g., photos).
+func (idx *Indexer) IndexDuplicateFile(ctx context.Context, filePath string, updatedAt time.Time, contentHash, mimeType, canonicalNodeID string) error {
+	relPath := idx.toRelativePath(filePath)
+	fileName := filepath.Base(relPath)
+	nodeID := graph.NewNodeID(string(graph.NodeDocument), relPath, fileName)
+
+	// Delete old nodes for this file.
+	if err := idx.store.DeleteByFile(ctx, relPath); err != nil {
+		return fmt.Errorf("delete old nodes for %s: %w", relPath, err)
 	}
 
-	dirStart := time.Now()
-	startFiles := idx.filesIndexed
-	fileCount := 0
+	// Create minimal document node.
+	node := &graph.Node{
+		ID:            nodeID,
+		Type:          graph.NodeDocument,
+		Name:          fileName,
+		QualifiedName: relPath,
+		FilePath:      relPath,
+		Package:       filepath.Dir(relPath),
+		Properties: map[string]string{
+			graph.PropContentHash: contentHash,
+			graph.PropMimeType:    mimeType,
+		},
+		UpdatedAt: updatedAt,
+	}
+	if err := idx.store.AddNode(ctx, node); err != nil {
+		return fmt.Errorf("add duplicate node %s: %w", nodeID, err)
+	}
+
+	// Create DuplicateOf edge.
+	edge := &graph.Edge{
+		ID:       graph.NewNodeID(string(graph.EdgeDuplicateOf), nodeID, canonicalNodeID),
+		Type:     graph.EdgeDuplicateOf,
+		SourceID: nodeID,
+		TargetID: canonicalNodeID,
+		Properties: map[string]string{
+			graph.PropContentHash: contentHash,
+			graph.PropMimeType:    mimeType,
+		},
+	}
+	if err := idx.store.AddEdge(ctx, edge); err != nil {
+		return fmt.Errorf("add DuplicateOf edge: %w", err)
+	}
+
+	// Create date hierarchy nodes.
+	if err := EnsureDateNodes(ctx, idx.store, updatedAt, nodeID); err != nil {
+		idx.log("Warning: create date nodes for %s: %v", nodeID, err)
+	}
+
+	idx.mu.Lock()
+	idx.filesIndexed++
+	idx.lastIndex = time.Now()
+	idx.changedFiles[relPath] = struct{}{}
+	idx.mu.Unlock()
+
+	if idx.verbose {
+		idx.log("  -> duplicate of canonical node (skipped parsing)")
+	}
+
+	return nil
+}
+
+// IndexDirectory walks a directory tree and indexes all supported files.
+func (idx *Indexer) IndexDirectory(ctx context.Context, dirPath string) error {
+	// Pre-scan to count indexable files for progress reporting.
+	var progress *syncProgress
+	if idx.showProgress {
+		idx.log("Indexing %s: counting files...", dirPath)
+		totalFiles := idx.countIndexableFiles(dirPath)
+		idx.log("Indexing %s: %d files to process", dirPath, totalFiles)
+		progress = newSyncProgress(totalFiles, "index", idx.log)
+	}
+
+	const gcInterval = 50
+	filesIndexedSinceGC := 0
 
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -231,28 +433,56 @@ func (idx *Indexer) IndexDirectory(ctx context.Context, dirPath string) error {
 			return nil
 		}
 
-		if err := idx.IndexFile(ctx, path); err != nil {
+		if err := idx.IndexFileWithTimestamp(ctx, path, info.ModTime()); err != nil {
 			idx.mu.Lock()
 			idx.errors = append(idx.errors, fmt.Sprintf("%s: %v", path, err))
 			idx.mu.Unlock()
 			// Continue indexing other files.
 		}
 
-		fileCount++
-		if idx.verbose && fileCount%100 == 0 {
-			idx.log("  Progress: %d files indexed...", fileCount)
+		// Periodically force GC to reclaim large image pixel buffers.
+		filesIndexedSinceGC++
+		if filesIndexedSinceGC >= gcInterval {
+			runtime.GC()
+			debug.FreeOSMemory()
+			filesIndexedSinceGC = 0
+		}
+
+		if progress != nil {
+			progress.tickIndexed()
 		}
 
 		return nil
 	})
 
-	if idx.verbose {
-		elapsed := time.Since(dirStart)
-		newFiles := idx.filesIndexed - startFiles
-		idx.log("  Directory complete: %s (%d files indexed in %s)", dirPath, newFiles, elapsed)
+	if progress != nil {
+		elapsed := time.Since(progress.startTime).Round(time.Second)
+		idx.log("Indexing %s: complete (%d files in %s)", dirPath, progress.indexed, elapsed)
 	}
 
 	return err
+}
+
+// countIndexableFiles counts files in a directory tree, respecting exclude patterns.
+func (idx *Indexer) countIndexableFiles(dirPath string) int {
+	count := 0
+	_ = filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			if idx.matcher.Match(path) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if idx.matcher.Match(path) {
+			return nil
+		}
+		count++
+		return nil
+	})
+	return count
 }
 
 // Start performs an initial full index of all configured paths, then starts
@@ -319,7 +549,7 @@ func (idx *Indexer) Start(ctx context.Context) error {
 func (idx *Indexer) handleEvent(ctx context.Context, evt watcher.Event) {
 	switch evt.Op {
 	case watcher.Create, watcher.Write:
-		if err := idx.IndexFile(ctx, evt.Path); err != nil {
+		if err := idx.IndexFileWithTimestamp(ctx, evt.Path, time.Now()); err != nil {
 			idx.mu.Lock()
 			idx.errors = append(idx.errors, fmt.Sprintf("index %s: %v", evt.Path, err))
 			idx.mu.Unlock()

@@ -35,7 +35,7 @@ type ProjectConf struct {
 type DocsConfig struct {
 	// Provider is the docs LLM provider ("ollama", "vertex-ai").
 	Provider string `mapstructure:"provider" yaml:"provider,omitempty"`
-	// Model is the multimodal model name (e.g., "qwen3.5:9b", "gemini-2.0-flash").
+	// Model is the multimodal model name (e.g., "qwen3.5:9b", "gemini-3.8-flash").
 	Model string `mapstructure:"model" yaml:"model,omitempty"`
 	// Project is the GCP project ID (for Vertex AI).
 	Project string `mapstructure:"project" yaml:"project,omitempty"`
@@ -47,7 +47,7 @@ type DocsConfig struct {
 	BaseURL string `mapstructure:"base_url" yaml:"base_url,omitempty"`
 	// MaxImageRes is the maximum image resolution (longest edge in pixels) before LLM processing.
 	MaxImageRes int `mapstructure:"max_image_resolution" yaml:"max_image_resolution,omitempty"`
-	// ContextWindow is the Ollama num_ctx value (default 49152).
+	// ContextWindow is the Ollama num_ctx value. Default: docs.DefaultContextWindow (120000).
 	ContextWindow int `mapstructure:"context_window" yaml:"context_window,omitempty"`
 	// DisableThinking appends /no_think to prompts (saves tokens, may reduce quality).
 	DisableThinking bool `mapstructure:"disable_thinking" yaml:"disable_thinking,omitempty"`
@@ -73,14 +73,178 @@ type FacesConfig struct {
 	ObjectDetection bool `mapstructure:"object_detection" yaml:"object_detection,omitempty"`
 	// ObjectConfidence is the minimum confidence for object labels.
 	ObjectConfidence float64 `mapstructure:"object_confidence" yaml:"object_confidence,omitempty"`
+	// CheckpointClusters is the number of new clusters that triggers a checkpoint pause (default 10).
+	CheckpointClusters int `mapstructure:"checkpoint_clusters" yaml:"checkpoint_clusters,omitempty"`
+	// AutoAcceptThreshold is the KNN confidence above which faces are auto-assigned (default 0.55).
+	AutoAcceptThreshold float64 `mapstructure:"auto_accept_threshold" yaml:"auto_accept_threshold,omitempty"`
+	// RejectThreshold is the KNN confidence below which classifications are discarded (default 0.30).
+	RejectThreshold float64 `mapstructure:"reject_threshold" yaml:"reject_threshold,omitempty"`
+	// ClassifyK is the K value for KNN classification (default 7).
+	ClassifyK int `mapstructure:"classify_k" yaml:"classify_k,omitempty"`
+	// MaxExemplarsPerEvent caps exemplars per person per event (default 10).
+	MaxExemplarsPerEvent int `mapstructure:"max_exemplars_per_event" yaml:"max_exemplars_per_event,omitempty"`
+	// ConfidenceDecayWarning is the per-year confidence decay factor (default 0.10).
+	ConfidenceDecayWarning float64 `mapstructure:"confidence_decay_warning" yaml:"confidence_decay_warning,omitempty"`
+}
+
+// TranscriptsConfig holds meeting transcript indexing configuration.
+type TranscriptsConfig struct {
+	// Enabled turns on meeting transcript indexing.
+	Enabled bool `mapstructure:"enabled" yaml:"enabled,omitempty"`
+	// SessionsDir lists the directories to search for transcripts.
+	//
+	// Recordings accumulate in more than one place — a recorder's folder, a
+	// downloads folder, a shared drive — so this takes either a single path or
+	// a list, under the one key:
+	//
+	//	sessions_dir: ~/.local/share/tomoe/sessions
+	//	sessions_dir: [~/.local/share/tomoe/sessions, ~/Downloads]
+	//
+	// Transcripts that turn up during ordinary document indexing are found
+	// without being listed here at all.
+	SessionsDir []string `mapstructure:"sessions_dir" yaml:"sessions_dir,omitempty"`
+	// Owner is the person whose microphone made these recordings. Microphone
+	// audio is always this person, which anchors identity resolution.
+	Owner string `mapstructure:"owner" yaml:"owner,omitempty"`
+	// OwnerAliases lists other spellings of the owner's name, including ones
+	// speech recognition produces (e.g. "Imron" for "Imran").
+	OwnerAliases []string `mapstructure:"owner_aliases" yaml:"owner_aliases,omitempty"`
+	// Provider is the LLM provider used for enrichment ("baseten", "ollama",
+	// "anthropic", "vertex-ai").
+	Provider string `mapstructure:"provider" yaml:"provider,omitempty"`
+	// Model is the model identifier for the chosen provider.
+	Model string `mapstructure:"model" yaml:"model,omitempty"`
+	// BaseURL overrides the provider endpoint.
+	BaseURL string `mapstructure:"base_url" yaml:"base_url,omitempty"`
+	// APIKey is the credential for whichever provider is configured, used
+	// when no provider-named key matches it. Kept so configs written before
+	// the provider-named settings existed keep working.
+	APIKey string `mapstructure:"api_key" yaml:"api_key,omitempty"`
+	// APIKeyEnv names an environment variable holding the credential.
+	//
+	// Deprecated: write `baseten_api_key: ${THE_VARIABLE}` instead. Any value
+	// in the configuration expands, so a setting does not need its own `_env`
+	// companion. Still read, so older configurations keep working.
+	APIKeyEnv string `mapstructure:"api_key_env" yaml:"api_key_env,omitempty"`
+	// APIKeyCommand is a command whose output is the credential.
+	//
+	// Deprecated: write `baseten_api_key: $(keyring get baseten.co you)`
+	// instead. Any value expands, so a setting does not need its own
+	// `_command` companion. Still read, so older configurations keep working.
+	APIKeyCommand string `mapstructure:"api_key_command" yaml:"api_key_command,omitempty"`
+	// BasetenAPIKey and AnthropicAPIKey are credentials named
+	// after the service they belong to, so several can sit in one config and
+	// changing `provider` does not mean moving a key to a differently-named
+	// setting.
+	//
+	// The one matching `provider` is used. APIKey below is consulted only
+	// when the matching one is absent, which is what keeps older configs
+	// working. Vertex AI is not here because it authenticates with Google
+	// application default credentials rather than a key — see `gcloud auth
+	// application-default login` — and Ollama needs none at all.
+	BasetenAPIKey   string `mapstructure:"baseten_api_key" yaml:"baseten_api_key,omitempty"`
+	AnthropicAPIKey string `mapstructure:"anthropic_api_key" yaml:"anthropic_api_key,omitempty"`
+	// JevAPIKey enables adjudicating speaker identity with the TypeSafe Jev
+	// decision model instead of the language model.
+	//
+	// Optional. Without it identification runs as it always has. With it, the
+	// confidence attached to an identification is calibrated against outcomes
+	// rather than self-reported — which matters because MinConfidence decides
+	// whether a speaker is written into the graph at all.
+	//
+	// Keep the key out of this file; the value is expanded at read time:
+	//
+	//	jev_api_key: ${JEV_API_KEY}
+	//	jev_api_key: $(keyring get typesafe.ai me@example.com)
+	JevAPIKey string `mapstructure:"jev_api_key" yaml:"jev_api_key,omitempty"`
+	// JevModel pins the decision model version. Defaults to a pinned release
+	// rather than a rolling alias, because a confidence threshold tuned
+	// against one set of weights does not transfer silently to another.
+	JevModel string `mapstructure:"jev_model" yaml:"jev_model,omitempty"`
+	// BackgroundFilter screens out voices that are not people — a television,
+	// a video being demonstrated, a stream left running nearby. Requires a
+	// decision model; on by default when one is configured.
+	BackgroundFilter *bool `mapstructure:"background_filter" yaml:"background_filter,omitempty"`
+	// BackgroundMinConfidence is the bar for treating a voice as background
+	// audio rather than a person. Zero uses the package default of 0.85, set
+	// from reading every flag the model produced over the whole corpus.
+	BackgroundMinConfidence float64 `mapstructure:"background_min_confidence" yaml:"background_min_confidence,omitempty"`
+	// MinConfidence is the score at or above which a speaker is automatically
+	// identified. Below it, the speaker is left for manual review.
+	MinConfidence float64 `mapstructure:"min_confidence" yaml:"min_confidence,omitempty"`
+	// MaxTokens caps enrichment responses. It needs to be generous: reasoning
+	// models spend this budget on internal deliberation before emitting any
+	// answer, and too small a cap yields an empty reply rather than a short one.
+	MaxTokens int `mapstructure:"max_tokens" yaml:"max_tokens,omitempty"`
+	// ContextWindow is how much context the model is given, in tokens. It
+	// matters for a locally served model: Ollama defaults to a small window and
+	// silently drops whatever does not fit, which summarizes a long meeting
+	// from its opening minutes.
+	ContextWindow int `mapstructure:"context_window" yaml:"context_window,omitempty"`
+	// ReasoningEffort budgets a reasoning model's deliberation ("low",
+	// "medium", "high"). Low measurably reduces cost on meeting transcripts
+	// without hurting identification quality; switching reasoning off entirely
+	// does hurt it, so that is only used as a fallback.
+	ReasoningEffort string `mapstructure:"reasoning_effort" yaml:"reasoning_effort,omitempty"`
+	// Concurrency is how many sessions are enriched in parallel.
+	Concurrency int `mapstructure:"concurrency" yaml:"concurrency,omitempty"`
+	// Roster lists people known to attend these meetings. Supplying it
+	// markedly improves identification: it turns an open-ended guess into a
+	// choice among known colleagues and fixes the spelling of their names.
+	Roster []string `mapstructure:"roster" yaml:"roster,omitempty"`
+	// ExcludeNames lists terms never to treat as people — product and team
+	// names that otherwise look like names in conversation.
+	ExcludeNames []string `mapstructure:"exclude_names" yaml:"exclude_names,omitempty"`
+}
+
+// QueueConfig holds enrichment queue configuration.
+type QueueConfig struct {
+	// MaxWorkers is the maximum number of concurrent workers (0 = NumCPU/2).
+	MaxWorkers int `mapstructure:"max_workers" yaml:"max_workers,omitempty"`
+	// TargetCPU is the target CPU percentage for auto-throttle (default 70).
+	TargetCPU int `mapstructure:"target_cpu" yaml:"target_cpu,omitempty"`
+	// RetryAttempts is the maximum number of retry attempts per job (default 3).
+	RetryAttempts int `mapstructure:"retry_attempts" yaml:"retry_attempts,omitempty"`
 }
 
 // Config holds all configuration for CodeEagle.
 type Config struct {
+	// resolved remembers which values came from a ${VAR} or $(command)
+	// reference and what each one resolved to.
+	//
+	// Loading expands references in place, so by the time anything reads a
+	// credential it holds the secret rather than the expression that fetched
+	// it. Writing the file back would then replace `$(keyring get ...)` with
+	// the key itself — destroying the reference and committing the secret to
+	// a file, which is the exact outcome the syntax exists to prevent. This
+	// lets the write put the expression back.
+	//
+	// Unexported, so neither yaml nor mapstructure sees it and the reflection
+	// walk skips it.
+	resolved map[string]resolvedValue
+
 	// Project contains project metadata.
 	Project ProjectConfig `mapstructure:"project" yaml:"project"`
 	// Repositories lists the repositories to index.
 	Repositories []RepositoryConfig `mapstructure:"repositories" yaml:"repositories"`
+	// Federate lists other CodeEagle directories to search alongside this
+	// one, for `query` and `rag` only.
+	//
+	// A project's index holds its code; meetings and personal documents
+	// usually live in the home configuration. Asking "what did we decide
+	// about the retention job?" from inside a repository should find the
+	// meeting, and this is what lets it.
+	//
+	// Listed explicitly rather than discovered by walking up the directory
+	// tree. Discovery would make the same question answer differently
+	// depending on where it was asked from, with nothing on screen explaining
+	// why, and would be unbounded when run from / or a temporary directory.
+	//
+	//	federate:
+	//	  - ~/.CodeEagle
+	//
+	// Reads only. Nothing is ever written outside the local index.
+	Federate []string `mapstructure:"federate" yaml:"federate,omitempty"`
 	// Watch contains file watching configuration.
 	Watch WatchConfig `mapstructure:"watch" yaml:"watch"`
 	// Languages lists the languages to parse.
@@ -91,6 +255,10 @@ type Config struct {
 	Agents AgentsConfig `mapstructure:"agents" yaml:"agents"`
 	// Docs contains non-code file indexing configuration.
 	Docs DocsConfig `mapstructure:"docs" yaml:"docs"`
+	// Queue contains enrichment queue configuration.
+	Queue QueueConfig `mapstructure:"queue" yaml:"queue,omitempty"`
+	// Transcripts contains meeting transcript indexing configuration.
+	Transcripts TranscriptsConfig `mapstructure:"transcripts" yaml:"transcripts,omitempty"`
 	// ConfigDir is the resolved .CodeEagle directory path (not persisted in YAML).
 	ConfigDir string `mapstructure:"-" yaml:"-"`
 	// ProjectConf is the parsed .CodeEagle.conf if found (not persisted).
@@ -134,7 +302,7 @@ type AgentsConfig struct {
 	// LLMProvider is the LLM provider (anthropic, vertex-ai, openai, ollama).
 	LLMProvider string `mapstructure:"llm_provider" yaml:"llm_provider"`
 	// Model is the model identifier.
-	Model string `mapstructure:"model" yaml:"model"`
+	Model string `mapstructure:"model" yaml:"model,omitempty"`
 	// Project is the GCP project ID (used when LLMProvider is "vertex-ai").
 	Project string `mapstructure:"project" yaml:"project,omitempty"`
 	// Location is the GCP region (used when LLMProvider is "vertex-ai", e.g. "us-central1").
@@ -143,6 +311,14 @@ type AgentsConfig struct {
 	AutoSummarize bool `mapstructure:"auto_summarize" yaml:"auto_summarize"`
 	// AutoLink enables LLM-assisted cross-service edge detection after static linking.
 	AutoLink bool `mapstructure:"auto_link" yaml:"auto_link"`
+	// APIKey is the credential for whichever provider is configured.
+	//
+	// Expanded like any other value, so it belongs in a keyring rather than
+	// in the file: `api_key: $(keyring get anthropic.com you@example.com)`.
+	// For Anthropic the ANTHROPIC_API_KEY environment variable is still read
+	// when this is empty; for every other provider this is the only way to
+	// supply one.
+	APIKey string `mapstructure:"api_key" yaml:"api_key,omitempty"`
 	// CredentialsFile is the path to a GCP service account credentials JSON file (for Vertex AI).
 	CredentialsFile string `mapstructure:"credentials_file" yaml:"credentials_file,omitempty"`
 	// BaseURL is the base URL for the LLM provider API (e.g. Ollama endpoint).
@@ -332,6 +508,13 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("error parsing config: %w", err)
 	}
 
+	// Resolve ${VAR} and $(command) references before anything reads a value,
+	// so a credential can live in the environment or the system keyring
+	// rather than in a file that gets committed.
+	if err := expandConfig(&cfg); err != nil {
+		return nil, fmt.Errorf("error expanding config: %w", err)
+	}
+
 	cfg.ConfigDir = configDir
 
 	// Discover .CodeEagle.conf from CWD (or configDir parent).
@@ -404,11 +587,15 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("graph.storage", "embedded")
 
 	v.SetDefault("agents.llm_provider", "anthropic")
-	v.SetDefault("agents.model", "claude-sonnet-4-5-20250929")
+	// Deliberately unset: each provider supplies its own default, and a
+	// provider-agnostic one is wrong for every provider but the first. A
+	// Claude identifier handed to Gemini's API is a 404 that reads like the
+	// model was withdrawn, which is the wrong thing to go looking for.
+	v.SetDefault("agents.model", "")
 	v.SetDefault("agents.auto_summarize", false)
 
 	v.SetDefault("docs.max_image_resolution", 1024)
-	v.SetDefault("docs.context_window", 49152)
+	v.SetDefault("docs.context_window", 120000) // Must match docs.DefaultContextWindow
 	v.SetDefault("docs.exclude_extensions", []string{".lock", ".min.js", ".min.css", ".map", ".wasm", ".pb.go"})
 	v.SetDefault("docs.faces.enabled", false)
 	v.SetDefault("docs.faces.model_dir", "~/.codeeagle/models/")
@@ -417,6 +604,25 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("docs.faces.confidence_threshold", 0.7)
 	v.SetDefault("docs.faces.object_detection", true)
 	v.SetDefault("docs.faces.object_confidence", 0.5)
+
+	v.SetDefault("transcripts.enabled", false)
+	v.SetDefault("transcripts.provider", "baseten")
+	v.SetDefault("transcripts.model", "deepseek-ai/DeepSeek-V4.1-Flash")
+	v.SetDefault("transcripts.api_key_env", "BASETEN_API_KEY")
+	v.SetDefault("transcripts.min_confidence", 0.70)
+	v.SetDefault("transcripts.max_tokens", 65536)
+	v.SetDefault("transcripts.reasoning_effort", "low")
+	v.SetDefault("transcripts.concurrency", 4)
+	v.SetDefault("docs.faces.checkpoint_clusters", 10)
+	v.SetDefault("docs.faces.auto_accept_threshold", 0.55)
+	v.SetDefault("docs.faces.reject_threshold", 0.30)
+	v.SetDefault("docs.faces.classify_k", 7)
+	v.SetDefault("docs.faces.max_exemplars_per_event", 10)
+	v.SetDefault("docs.faces.confidence_decay_warning", 0.10)
+
+	v.SetDefault("queue.max_workers", 0)
+	v.SetDefault("queue.target_cpu", 70)
+	v.SetDefault("queue.retry_attempts", 3)
 }
 
 // loadEnvFile reads a .env file and sets environment variables from it.
@@ -449,4 +655,89 @@ func loadEnvFile(path string) {
 			os.Setenv(key, value)
 		}
 	}
+}
+
+// CredentialWarning describes a credential supplied through a setting that
+// has been superseded, or "" when none is.
+//
+// There were four ways to give CodeEagle a key — a literal, a named
+// environment variable, a command, and now expansion of any value — and the
+// last does everything the middle two did, on every setting rather than only
+// those given bespoke companions. Two ways to say one thing is how
+// `sessions_dir` and `sessions_dirs` went wrong. The old settings still work;
+// this is what says they need not be used.
+//
+// Reported only when a superseded setting actually supplies the credential,
+// so a configuration that has moved on never hears about it.
+func (c *TranscriptsConfig) CredentialWarning() string {
+	provider := c.TranscriptProvider()
+	named := map[string]string{
+		"baseten":   c.BasetenAPIKey,
+		"anthropic": c.AnthropicAPIKey,
+	}
+	if strings.TrimSpace(named[provider]) != "" {
+		return ""
+	}
+
+	switch {
+	case strings.TrimSpace(c.APIKeyCommand) != "":
+		return fmt.Sprintf(
+			"transcripts.api_key_command is superseded; write "+
+				"%s_api_key: $(%s) instead", provider, c.APIKeyCommand)
+	case strings.TrimSpace(c.APIKeyEnv) != "" && os.Getenv(c.APIKeyEnv) != "":
+		return fmt.Sprintf(
+			"transcripts.api_key_env is superseded; write "+
+				"%s_api_key: ${%s} instead", provider, c.APIKeyEnv)
+	case strings.TrimSpace(c.APIKey) != "":
+		return fmt.Sprintf(
+			"transcripts.api_key holds the credential for %s; "+
+				"%s_api_key names what it is for", provider, provider)
+	}
+	return ""
+}
+
+// TranscriptProvider returns the configured provider, or the default.
+func (c *TranscriptsConfig) TranscriptProvider() string {
+	if p := strings.TrimSpace(c.Provider); p != "" {
+		return p
+	}
+	return "baseten"
+}
+
+// ProviderSecret returns where to find the credential for the configured
+// provider.
+//
+// A key named after its service is preferred, so switching provider is a
+// one-line change rather than a rewrite of whichever setting happened to hold
+// the old key, and several services can sit configured at once. The unnamed
+// `api_key` is the fallback, for configs written before that was possible.
+func (c *TranscriptsConfig) ProviderSecret() SecretSource {
+	named := map[string]string{
+		"baseten":   c.BasetenAPIKey,
+		"anthropic": c.AnthropicAPIKey,
+	}
+	if key := strings.TrimSpace(named[c.TranscriptProvider()]); key != "" {
+		return SecretSource{Literal: key}
+	}
+	return SecretSource{
+		Literal: c.APIKey,
+		EnvVar:  c.APIKeyEnv,
+		Command: c.APIKeyCommand,
+	}
+}
+
+// TranscriptDirs returns every directory to search for transcripts, with
+// blanks and duplicates removed.
+func (c *Config) TranscriptDirs() []string {
+	var out []string
+	seen := make(map[string]bool)
+	for _, dir := range c.Transcripts.SessionsDir {
+		dir = strings.TrimSpace(dir)
+		if dir == "" || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		out = append(out, dir)
+	}
+	return out
 }

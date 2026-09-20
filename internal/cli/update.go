@@ -76,6 +76,13 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	if isWSL() {
 		fmt.Println("(Running in WSL)")
 	}
+
+	if isLocalBuild(Version) && !forceFlag {
+		fmt.Println("\nThis is a local build (not an official release).")
+		fmt.Println("Auto-update is disabled for local builds to avoid overwriting your binary.")
+		fmt.Println("Use --force to update anyway.")
+		return nil
+	}
 	fmt.Println()
 
 	// Determine release tag to download
@@ -183,6 +190,31 @@ func isWSL() bool {
 // isDevVersion checks if the given version is a dev version.
 func isDevVersion(version string) bool {
 	return version == "dev" || strings.HasPrefix(version, "dev-")
+}
+
+// isLocalBuild returns true if the version string indicates a local build
+// rather than an official release. Local builds are produced by `make build`
+// which uses `git describe --tags --always --dirty`, yielding versions like
+// "v1.2.0-5-g12b180f", "v1.2.0-dirty", "12b180f-dirty", or bare commit
+// hashes — none of which should trigger auto-update.
+func isLocalBuild(version string) bool {
+	if isDevVersion(version) {
+		return false // dev versions are handled separately
+	}
+	// A clean release version is exactly "vN.N.N" (e.g. "v1.2.0").
+	// Anything with extra components (git describe suffixes like "-dirty",
+	// "-N-gXXXXX", or bare commit hashes) is a local build.
+	if !strings.HasPrefix(version, "v") {
+		return true // bare commit hash like "12b180f"
+	}
+	// Strip "v" prefix and check if what remains is a clean semver (digits and dots only).
+	rest := version[1:]
+	for _, c := range rest {
+		if c != '.' && (c < '0' || c > '9') {
+			return true // has extra suffixes like "-dirty", "-5-g12b180f"
+		}
+	}
+	return false
 }
 
 // buildDownloadURL constructs the GitHub release download URL for the given version and platform.
@@ -323,7 +355,12 @@ func readDateFile(filename string) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	data, err := os.ReadFile(filepath.Join(homeDir, filename))
+	return readDateFileIn(homeDir, filename)
+}
+
+// readDateFileIn reads a date from a file in the given directory.
+func readDateFileIn(dir, filename string) (time.Time, error) {
+	data, err := os.ReadFile(filepath.Join(dir, filename))
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -339,7 +376,12 @@ func writeDateFile(filename string, t time.Time) error {
 	if err := config.EnsureHomeDir(); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(homeDir, filename), []byte(t.Format(time.RFC3339)), 0644)
+	return writeDateFileIn(homeDir, filename, t)
+}
+
+// writeDateFileIn writes a date to a file in the given directory.
+func writeDateFileIn(dir, filename string, t time.Time) error {
+	return os.WriteFile(filepath.Join(dir, filename), []byte(t.Format(time.RFC3339)), 0644)
 }
 
 // getLocalReleaseDate returns the date of our installed dev release.
@@ -353,15 +395,40 @@ func getLocalReleaseDate() (time.Time, error) {
 
 // shouldCheckNow returns true if enough time has passed since the last check.
 func shouldCheckNow() bool {
-	lastCheck, err := readDateFile(devLastCheckFile)
+	homeDir, err := config.HomeDir()
+	if err != nil {
+		return true
+	}
+	return shouldCheckNowIn(homeDir)
+}
+
+// shouldCheckNowIn returns true if enough time has passed since the last check
+// recorded in the given directory. Extracted for testability.
+func shouldCheckNowIn(dir string) bool {
+	lastCheck, err := readDateFileIn(dir, devLastCheckFile)
 	if err != nil {
 		return true
 	}
 	return time.Since(lastCheck) >= devCheckInterval
 }
 
+// shouldUpdateDevDates returns true if the remote release date is strictly newer
+// than both the local release date and the binary modification time.
+// A zero binModTime is treated as unavailable (skipped).
+func shouldUpdateDevDates(remoteDate, localDate, binModTime time.Time) bool {
+	if !remoteDate.After(localDate) {
+		return false
+	}
+	if !binModTime.IsZero() && !remoteDate.After(binModTime) {
+		return false
+	}
+	return true
+}
+
 // shouldAutoUpdateDev checks if we should update the dev version.
 // Returns true if an update is needed, along with the release info.
+// Compares the remote release date against both the recorded release date
+// and the binary modification time — if either is newer, skip the update.
 func shouldAutoUpdateDev() (bool, *githubRelease) {
 	if !shouldCheckNow() {
 		return false, nil
@@ -373,12 +440,13 @@ func shouldAutoUpdateDev() (bool, *githubRelease) {
 	}
 
 	localDate, _ := getLocalReleaseDate()
+	binTime, _ := getBinaryModTime()
 
-	if release.PublishedAt.After(localDate) {
-		return true, release
+	if !shouldUpdateDevDates(release.PublishedAt, localDate, binTime) {
+		return false, nil
 	}
 
-	return false, nil
+	return true, release
 }
 
 // recordDevUpdate stores the release's published date after a successful update.
@@ -556,23 +624,27 @@ func copyFile(src, dst string) error {
 // loadUpdateConfig reads update configuration from ~/.CodeEagle/update.yaml.
 // Returns defaults if the file doesn't exist.
 func loadUpdateConfig() updateConfig {
+	homeDir, err := config.HomeDir()
+	if err != nil {
+		return updateConfig{AutoUpdateDev: true}
+	}
+	return loadUpdateConfigFrom(filepath.Join(homeDir, "update.yaml"))
+}
+
+// loadUpdateConfigFrom reads update configuration from the given path.
+// Returns defaults if the file doesn't exist or is invalid.
+func loadUpdateConfigFrom(path string) updateConfig {
 	cfg := updateConfig{
 		AutoUpdateDev: true,
 		Disabled:      false,
 	}
 
-	homeDir, err := config.HomeDir()
-	if err != nil {
-		return cfg
-	}
-
-	configPath := filepath.Join(homeDir, "update.yaml")
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return cfg
 	}
 
 	v := viper.New()
-	v.SetConfigFile(configPath)
+	v.SetConfigFile(path)
 	v.SetDefault("auto_update_dev", true)
 	v.SetDefault("disabled", false)
 
@@ -596,6 +668,11 @@ func CheckAndAutoUpdate() bool {
 
 	cfg := loadUpdateConfig()
 	if cfg.Disabled {
+		return false
+	}
+
+	// Never auto-update local builds (e.g. "make build" on a feature branch).
+	if isLocalBuild(Version) {
 		return false
 	}
 
@@ -626,8 +703,12 @@ func CheckAndAutoUpdate() bool {
 		return true
 	}
 
-	// Stable version: check for new release
-	fmt.Println("[Checking for updates...]")
+	// Stable version: check for new release (throttled to devCheckInterval).
+	if !shouldCheckNow() {
+		return false
+	}
+	_ = recordLastCheck()
+
 	latestTag, err := getLatestReleaseTag()
 	if err != nil {
 		return false
