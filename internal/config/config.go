@@ -33,8 +33,12 @@ type ProjectConf struct {
 
 // DocsConfig holds configuration for non-code file indexing (docs LLM).
 type DocsConfig struct {
-	// Provider is the docs LLM provider ("ollama", "vertex-ai").
+	// Provider is the docs LLM provider ("ollama", "vertex-ai", "baseten").
 	Provider string `mapstructure:"provider" yaml:"provider,omitempty"`
+	// APIKey authenticates against a hosted docs provider (Baseten). Left
+	// empty, a Baseten provider falls back to transcripts.baseten_api_key,
+	// so one key need not be written twice.
+	APIKey string `mapstructure:"api_key" yaml:"api_key,omitempty"`
 	// Model is the multimodal model name (e.g., "qwen3.5:9b", "gemini-3.8-flash").
 	Model string `mapstructure:"model" yaml:"model,omitempty"`
 	// Project is the GCP project ID (for Vertex AI).

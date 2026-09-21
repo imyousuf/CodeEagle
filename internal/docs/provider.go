@@ -47,12 +47,18 @@ type Provider interface {
 
 // Config holds configuration for creating a docs provider.
 type Config struct {
-	// Provider specifies which docs provider to use ("ollama", "vertex-ai").
+	// Provider specifies which docs provider to use ("ollama", "vertex-ai",
+	// "baseten").
 	Provider string
 	// Model is the multimodal model name.
 	Model string
 	// OllamaBaseURL is the Ollama API base URL (default "http://localhost:11434").
 	OllamaBaseURL string
+	// BaseURL overrides the endpoint for providers that speak to a hosted
+	// API rather than a local daemon (Baseten).
+	BaseURL string
+	// APIKey authenticates against a hosted provider (Baseten).
+	APIKey string
 	// Project is the GCP project ID (for Vertex AI).
 	Project string
 	// Location is the GCP region (for Vertex AI).

@@ -127,9 +127,19 @@ func matchesModelName(pulled, target string) bool {
 
 // docsConfigFromApp builds a docs Config from the app config.
 func docsConfigFromApp(cfg *appconfig.Config) Config {
+	// A hosted docs provider needs a key. Rather than make the user write the
+	// same keyring command twice, an unset docs.api_key falls back to the
+	// Baseten key the transcripts pipeline already has.
+	apiKey := cfg.Docs.APIKey
+	if apiKey == "" {
+		apiKey = cfg.Transcripts.BasetenAPIKey
+	}
+
 	return Config{
 		Provider:        cfg.Docs.Provider,
 		Model:           cfg.Docs.Model,
+		APIKey:          apiKey,
+		BaseURL:         cfg.Docs.BaseURL,
 		OllamaBaseURL:   cfg.Docs.BaseURL,
 		Project:         cfg.Docs.Project,
 		Location:        cfg.Docs.Location,
