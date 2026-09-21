@@ -19,6 +19,7 @@ Last reviewed: 2026-09-20.
 | Meeting enrichment | `baseten` | `deepseek-ai/DeepSeek-V4.1-Flash` | `internal/config/config.go` |
 | Speaker adjudication, topic relating, search re-ranking | Jev | `jev-1.13.0` | `pkg/jev/client.go` |
 | Document and image description | `ollama` | `qwen3.5:9b` | `internal/docs/ollama.go` |
+| Document and image description, hosted | `baseten` | `zai-org/GLM-5.3-Flash` | `internal/docs/baseten.go` |
 | Document and image description, on GCP | `vertex-ai` | `gemini-3.8-flash` | `internal/docs/vertex.go` |
 | Embeddings (semantic search) | `ollama` | `nomic-embed-text-v2-moe` | `internal/embedding/ollama.go` |
 | Embeddings, on GCP | `vertex-ai` | `gemini-embedding-001` | `internal/embedding/vertex.go` |
@@ -89,7 +90,9 @@ cost dominates.
 | Model | Identifier | Notes |
 |---|---|---|
 | DeepSeek V4.1 Flash | `deepseek-ai/DeepSeek-V4.1-Flash` | **Default.** Chosen on measured cost against quality. |
-| GLM 5.3 Flash | see Baseten's catalogue | Used for one topic-label regeneration; comparable. |
+| GLM 5.3 Flash | `zai-org/GLM-5.3-Flash` | Comparable on text. **Accepts images**, which most
+  open-weight models on Baseten do not — so it is also the default for the hosted
+  document and image description provider. Verified against the live API 2026-09-21. |
 
 Set `transcripts.max_tokens` generously — reasoning models spend their budget
 on reasoning first, and too small a ceiling returns an empty reply rather than

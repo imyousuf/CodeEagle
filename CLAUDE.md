@@ -439,8 +439,11 @@ transcripts:
   exclude_names: ["Acme"]     # terms that read like names in conversation
 
 docs:
-  # provider: ollama          # auto-detected if omitted (ollama -> vertex-ai -> disabled)
-  # model: qwen3.5:9b         # Ollama model for topic extraction
+  # provider: ollama          # ollama | vertex-ai | baseten
+  #                           # auto-detected if omitted (ollama -> vertex-ai -> disabled);
+  #                           # baseten is never auto-detected, since it costs money
+  # model: qwen3.5:9b         # model for topic extraction and image description
+  # api_key: ...              # baseten only; falls back to transcripts.baseten_api_key
   # max_image_resolution: 1024
   # context_window: 120000
   # disable_thinking: false
@@ -466,7 +469,7 @@ codeeagle/
 │   ├── graph/              # Knowledge graph interface + embedded store (BadgerDB)
 │   ├── indexer/            # Orchestrates parsing -> graph updates + LLM summarization
 │   ├── decide/             # Bounded decisions with calibrated confidence (Jev-backed); speaker adjudication
-│   ├── docs/               # Document content extraction providers (Ollama, Vertex AI) with topic extraction + caching
+│   ├── docs/               # Document content extraction providers (Ollama, Vertex AI, Baseten) with topic extraction + caching
 │   ├── linker/             # Cross-service linker (11 phases: services, endpoints, API calls, deps, imports, implements, tests, calls, documents, duplicates, symlinks)
 │   ├── llm/                # LLM provider implementations (Anthropic, Vertex AI, Claude CLI)
 │   ├── mcp/                # MCP server (JSON-RPC over stdio)
