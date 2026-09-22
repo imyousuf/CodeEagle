@@ -28,11 +28,13 @@ terminal or from Claude Code.
 7. [Index your meeting recordings](#7-index-your-meeting-recordings)
 8. [Install Ollama](#8-install-ollama-for-search-and-document-topics)
 9. [Add a decision model](#9-add-a-decision-model-optional-but-worth-it)
-10. [Troubleshooting](#troubleshooting)
+10. [Keep everything indexed automatically](#10-keep-everything-indexed-automatically)
+11. [Troubleshooting](#troubleshooting)
 
 Steps 1–3 get you a working setup. Steps 5–7 are only needed if you want
 meeting transcripts. Step 8 is needed for semantic search. Step 9 is optional
-and makes the meeting features noticeably better.
+and makes the meeting features noticeably better. Step 10 stops you having to
+remember to run `codeeagle sync` at all.
 
 ---
 
@@ -551,6 +553,37 @@ automatically as they are indexed, so this is a one-time catch-up.
 > For what a decision model is, where it helps and where it does not, see
 > [jev.md](jev.md). For which model versions are used and how to change them,
 > see [models.md](models.md).
+
+---
+
+## 10. Keep everything indexed automatically
+
+Everything so far assumes you run `codeeagle sync` yourself, in each project.
+You do not have to.
+
+```bash
+codeeagle service install
+```
+
+That installs a small background worker that watches every project you have
+registered and re-syncs whichever one changed — a **systemd user unit** on
+Linux, a **launchd LaunchAgent** on macOS. Neither needs root, and it starts
+again each time you log in.
+
+To see what it would watch first:
+
+```bash
+codeeagle worker --list
+```
+
+Projects come from `~/.codeeagle.conf`, which `codeeagle init` writes an entry
+in each time you set one up — so adding a second, third or tenth project is
+just `codeeagle init` in it. Each keeps its own graph, and a change is synced
+against the project that owns it.
+
+> Full details, including what gets watched, what triggers a sync, how to
+> follow the logs on each platform, and troubleshooting:
+> [worker.md](worker.md).
 
 ---
 
