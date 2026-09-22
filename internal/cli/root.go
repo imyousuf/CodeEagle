@@ -87,6 +87,7 @@ func init() {
 	rootCmd.AddCommand(newRagCmd())
 	rootCmd.AddCommand(newQueueCmd())
 	rootCmd.AddCommand(newMeetingsCmd())
+	rootCmd.AddCommand(newWorkerCmd())
 
 	// Conditionally register faces commands (requires -tags faces build).
 	if registerFacesCmd != nil {

@@ -93,6 +93,8 @@ codeeagle config                        # View current configuration
 codeeagle config edit                    # Edit configuration interactively
 codeeagle sync [--full]                 # Sync knowledge graph (incremental or full)
 codeeagle watch                         # Start watching and building/updating the knowledge graph
+codeeagle worker [--once|--list]        # Watch every registered project and sync the one that changed
+codeeagle worker --project NAME         # ...limited to one project
 codeeagle status                        # Show indexing status, graph stats
 
 codeeagle agent plan <query>            # Ask the planning agent a question
@@ -339,6 +341,42 @@ not an assignable follow-up, while "Kevin will update the schema" is.
 People identified in earlier meetings are fed back as known names for later
 ones, so recordings are processed in the order the meetings happened.
 
+### 4c. Watching Every Project On A Machine
+
+`codeeagle worker` keeps every project registered in `~/.codeeagle.conf`
+indexed, rather than asking for one `watch` per project. Three things decide
+its shape:
+
+- **A project is the unit, not a directory.** A sync must run from the
+  project's root and against its configuration, because both decide which
+  graph is written and how paths are recorded. The worker therefore shells out
+  to `codeeagle sync` per project rather than indexing in-process: a sync
+  opens a BadgerDB and may talk to a model for minutes, and one project's
+  failure must not stop every other project being watched.
+- **What is watched is the configured repositories, not the registry root.**
+  A root may hold far more than it indexes — the home project's root is
+  `~` while it indexes four directories under it — and two roots may nest.
+  Watching repositories makes the nesting question disappear for the common
+  case, and where trees genuinely overlap a change is attributed to the
+  most specific project that indexes it. Syncing the outer project for an
+  inner project's change would file the same file under the wrong graph.
+- **A sync must not trigger itself.** Sync writes its BadgerDBs under the
+  project's `.CodeEagle`, which for most projects sits inside a watched
+  repository, so those writes would look like changes and start the next sync
+  forever. The guard is on the path rather than on timing, because no quiet
+  period distinguishes "the user saved a file" from "the sync is still
+  flushing".
+
+Changes are coalesced: a project syncs once its own files have been quiet for
+`--settle`, so a build or a checkout costs one sync rather than hundreds. A
+change arriving *during* a sync is kept rather than folded into it, since the
+running sync may already have walked past that file. Failures back off
+exponentially so a broken project cannot spin, and `--concurrency` defaults to
+one because a sync can saturate a GPU or spend money.
+
+Nothing is installed. The worker runs in the foreground until interrupted, and
+lets a sync already in flight finish rather than killing it halfway.
+
 ### 5. Multi-Language Support
 
 Language parsing and graph extraction:
@@ -495,7 +533,9 @@ codeeagle/
 │   ├── faces/              # Face detection & recognition (OpenCV DNN, Caffe SSD + ONNX SFace, agglomerative clustering, KNN classification)
 │   ├── queue/              # Async job queue with worker pool (face detection, clustering, document enrichment)
 │   ├── transcript/         # Meeting transcripts: loading, speaker identification, enrichment, graph projection
-│   └── watcher/            # Filesystem watcher (fsnotify + gitignore)
+│   ├── watcher/            # Filesystem watcher (fsnotify + gitignore)
+│   └── worker/             # Cross-project supervisor: discovers registered projects, attributes a
+│                           #   change to the most specific one, and runs its sync in the right place
 ├── pkg/jev/                # TypeSafe Jev client (decision model: noul/choice/score)
 ├── pkg/llm/                # Public LLM client interface + provider registry
 ├── testdata/               # Test fixtures
