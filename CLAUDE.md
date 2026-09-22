@@ -95,6 +95,9 @@ codeeagle sync [--full]                 # Sync knowledge graph (incremental or f
 codeeagle watch                         # Start watching and building/updating the knowledge graph
 codeeagle worker [--once|--list]        # Watch every registered project and sync the one that changed
 codeeagle worker --project NAME         # ...limited to one project
+codeeagle service install [--dry-run]   # Run the worker at login (systemd user unit / launchd agent)
+codeeagle service status                # Is it installed, is it running
+codeeagle service uninstall             # Stop it and remove it
 codeeagle status                        # Show indexing status, graph stats
 
 codeeagle agent plan <query>            # Ask the planning agent a question
@@ -374,8 +377,16 @@ running sync may already have walked past that file. Failures back off
 exponentially so a broken project cannot spin, and `--concurrency` defaults to
 one because a sync can saturate a GPU or spend money.
 
-Nothing is installed. The worker runs in the foreground until interrupted, and
-lets a sync already in flight finish rather than killing it halfway.
+The worker runs in the foreground until interrupted, and lets a sync already in
+flight finish rather than killing it halfway. `codeeagle service install` puts
+it behind a systemd user unit or a launchd LaunchAgent so it starts at login.
+
+**At login, not at boot.** A sync reads credentials from the login keyring --
+config values like `$(keyring get ...)`. A service started before anyone logs
+in has no unlocked keyring, and CodeEagle stops rather than continue with an
+empty credential, so a boot-time service would fail on its first sync. Tying
+the worker to the login session sidesteps that, at the cost of not running
+while logged out -- which is the right trade for a machine someone uses.
 
 ### 5. Multi-Language Support
 
@@ -534,6 +545,7 @@ codeeagle/
 │   ├── queue/              # Async job queue with worker pool (face detection, clustering, document enrichment)
 │   ├── transcript/         # Meeting transcripts: loading, speaker identification, enrichment, graph projection
 │   ├── watcher/            # Filesystem watcher (fsnotify + gitignore)
+│   ├── service/            # Installs the worker at login (systemd user unit, launchd LaunchAgent)
 │   └── worker/             # Cross-project supervisor: discovers registered projects, attributes a
 │                           #   change to the most specific one, and runs its sync in the right place
 ├── pkg/jev/                # TypeSafe Jev client (decision model: noul/choice/score)
