@@ -293,6 +293,23 @@ func GetChangedFilesSince(repoPath, sinceCommit string) (added, modified, delete
 }
 
 // runGit executes a git command in the given repository path and returns trimmed stdout.
+// runGitRaw returns git's output byte for byte.
+//
+// runGit trims surrounding whitespace, which is right for the commands that
+// print a single value and wrong for any whose output has significant leading
+// whitespace. `status --porcelain` is the latter: a record like " M file"
+// begins with a space, and trimming it shifts every path in the first record
+// by one character.
+func runGitRaw(repoPath string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repoPath
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return string(output), nil
+}
+
 func runGit(repoPath string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = repoPath

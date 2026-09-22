@@ -111,10 +111,15 @@ func syncGitRepo(ctx context.Context, idx *Indexer, repoPath string, state *Sync
 			return err
 		}
 	} else if bs.LastCommit == currentHEAD {
-		if idx.verbose {
-			idx.log("Already at HEAD %s, skipping %s (branch: %s)", currentHEAD[:min(12, len(currentHEAD))], repoPath, branch)
+		// HEAD has not moved, but the working tree may still have changed.
+		// Skipping here was wrong: a file is usually written long before it
+		// is committed, and often never is, so an index that only moves with
+		// HEAD is stale for exactly as long as someone is working. It also
+		// made the worker useless on git-backed projects -- it fires on a
+		// file event, and every sync it triggered did nothing.
+		if err := syncWorkingTree(ctx, idx, repoPath); err != nil {
+			return err
 		}
-		return nil
 	} else {
 		// Diff-aware incremental sync.
 		added, modified, deleted, err := gitutil.GetChangedFilesSince(repoPath, bs.LastCommit)
@@ -154,6 +159,60 @@ func syncGitRepo(ctx context.Context, idx *Indexer, repoPath string, state *Sync
 
 	bs.LastCommit = currentHEAD
 	bs.Timestamp = time.Now()
+	return nil
+}
+
+// syncWorkingTree indexes files that differ from HEAD: modified, staged and
+// untracked, and removes the nodes of ones that are gone.
+//
+// Deliberately not gated on mtime. The non-git path compares mtime against
+// what the database recorded, but here git has already told us precisely what
+// differs, and re-reading a handful of named files costs less than the walk
+// that answering the same question by mtime would need.
+func syncWorkingTree(ctx context.Context, idx *Indexer, repoPath string) error {
+	changed, deleted, err := gitutil.GetWorkingTreeChanges(repoPath)
+	if err != nil {
+		// Not fatal: a repository in an odd state should not fail the sync,
+		// and the next commit will bring these files in anyway.
+		idx.log("Warning: read working tree of %s: %v", repoPath, err)
+		return nil
+	}
+	if len(changed) == 0 && len(deleted) == 0 {
+		if idx.verbose {
+			idx.log("Nothing changed in %s since the last sync", repoPath)
+		}
+		return nil
+	}
+
+	if idx.verbose || idx.showProgress {
+		idx.log("Working tree of %s: %d changed, %d deleted", repoPath, len(changed), len(deleted))
+	}
+
+	for _, relPath := range deleted {
+		if err := idx.Store().DeleteByFile(ctx, relPath); err != nil {
+			idx.log("Warning: delete by file %s: %v", relPath, err)
+		}
+	}
+
+	syncTime := time.Now()
+	for _, relPath := range changed {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		absPath := filepath.Join(repoPath, relPath)
+		// git reports a path that may since have been removed again, and a
+		// directory when a whole tree is untracked; neither is indexable.
+		info, err := os.Stat(absPath)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		if err := idx.IndexFileWithTimestamp(ctx, absPath, syncTime); err != nil {
+			idx.log("Warning: index file %s: %v", absPath, err)
+		}
+	}
 	return nil
 }
 
