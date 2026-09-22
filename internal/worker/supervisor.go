@@ -95,24 +95,47 @@ func NewSupervisor(projects []Project, opts Options) *Supervisor {
 // in flight. A sync is not abandoned half-written just because the worker was
 // asked to stop.
 func (s *Supervisor) Run(ctx context.Context) error {
-	roots := WatchRoots(s.projects)
-	if len(roots) == 0 {
+	if len(WatchRoots(s.projects)) == 0 {
 		return fmt.Errorf("no watchable directories across %d project(s)", len(s.projects))
 	}
 
-	w, err := watcher.NewWatcher(watcher.WatcherConfig{Paths: roots})
-	if err != nil {
-		return fmt.Errorf("create watcher: %w", err)
-	}
-	defer w.Close()
+	// One watcher per project, each with that project's own excludes. A
+	// single watcher would have to merge every project's patterns, and a
+	// merged exclude would stop another project's directory being watched at
+	// all -- a miss nothing downstream can recover from.
+	events := make(chan string, 256)
+	var watched int
+	for _, p := range s.projects {
+		w, err := watcher.NewWatcher(watcher.WatcherConfig{
+			Paths:           p.Repos,
+			ExcludePatterns: p.Excludes,
+		})
+		if err != nil {
+			return fmt.Errorf("create watcher for %s: %w", p.Name, err)
+		}
+		defer w.Close()
 
-	events, err := w.Start(ctx)
-	if err != nil {
-		return fmt.Errorf("start watcher: %w", err)
+		ch, err := w.Start(ctx)
+		if err != nil {
+			return fmt.Errorf("start watcher for %s: %w", p.Name, err)
+		}
+		watched += len(p.Repos)
+
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			for ev := range ch {
+				select {
+				case events <- ev.Path:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
 	}
 
 	s.opts.Log("Watching %d director(ies) for %d project(s); settle %s, %d sync(s) at a time",
-		len(roots), len(s.projects), s.opts.Settle, s.opts.MaxConcurrent)
+		watched, len(s.projects), s.opts.Settle, s.opts.MaxConcurrent)
 
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
@@ -124,12 +147,12 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			s.wg.Wait()
 			return nil
 
-		case ev, ok := <-events:
+		case path, ok := <-events:
 			if !ok {
 				s.wg.Wait()
 				return nil
 			}
-			s.onEvent(ev.Path)
+			s.onEvent(path)
 
 		case <-ticker.C:
 			s.dispatch(ctx)

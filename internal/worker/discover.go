@@ -38,6 +38,11 @@ type Project struct {
 	// These, not Root, are what the worker watches: a project's root may hold
 	// far more than it indexes, and the home project is exactly that case.
 	Repos []string
+	// Excludes are this project's watch.exclude patterns. They keep build
+	// output and dependency trees from waking the worker, and -- because the
+	// watcher skips excluded directories when adding watches -- keep a
+	// node_modules from consuming thousands of inotify watches.
+	Excludes []string
 }
 
 // Skipped records a registry entry the worker could not use, so that a silent
@@ -103,7 +108,12 @@ func load(e config.ProjectEntry) (*Project, error) {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 
-	p := &Project{Name: e.Name, Root: filepath.Clean(e.Root), ConfigDir: e.ConfigDir}
+	p := &Project{
+		Name:      e.Name,
+		Root:      filepath.Clean(e.Root),
+		ConfigDir: e.ConfigDir,
+		Excludes:  nc.Watch.Exclude,
+	}
 
 	for _, r := range nc.Repositories {
 		dir := expandHome(strings.TrimSpace(r.Path))
