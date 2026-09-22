@@ -72,6 +72,19 @@ make build-minimal   # Skip face detection
 # Binary: bin/codeeagle
 ```
 
+## Keeping the index current
+
+`codeeagle sync` indexes a project once. To stop doing that by hand:
+
+```bash
+codeeagle worker --list       # every registered project, and what it watches
+codeeagle service install     # run it at login (Linux: systemd; macOS: launchd)
+```
+
+The worker watches every project registered in `~/.codeeagle.conf` and
+re-syncs whichever one's files changed, each with its own configuration and
+its own graph. See [docs/worker.md](docs/worker.md).
+
 ## Quick Start
 
 ```bash
