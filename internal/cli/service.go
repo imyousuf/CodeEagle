@@ -33,6 +33,7 @@ func newServiceInstallCmd() *cobra.Command {
 		dryRun      bool
 		settle      string
 		concurrency int
+		exclude     []string
 	)
 
 	cmd := &cobra.Command{
@@ -50,6 +51,9 @@ func newServiceInstallCmd() *cobra.Command {
 			}
 			if concurrency > 0 {
 				workerArgs = append(workerArgs, "--concurrency", fmt.Sprint(concurrency))
+			}
+			for _, name := range exclude {
+				workerArgs = append(workerArgs, "--exclude-project", name)
 			}
 
 			plan, err := service.Build(service.Config{Args: workerArgs})
@@ -79,6 +83,8 @@ func newServiceInstallCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would be installed without installing it")
 	cmd.Flags().StringVar(&settle, "settle", "", "pass --settle to the worker (e.g. 60s)")
 	cmd.Flags().IntVar(&concurrency, "concurrency", 0, "pass --concurrency to the worker")
+	cmd.Flags().StringSliceVar(&exclude, "exclude-project", nil,
+		"projects the service should not watch (repeatable)")
 	return cmd
 }
 

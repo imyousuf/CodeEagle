@@ -38,6 +38,12 @@ type Project struct {
 	// These, not Root, are what the worker watches: a project's root may hold
 	// far more than it indexes, and the home project is exactly that case.
 	Repos []string
+	// TranscriptDirs are the directories holding meeting recordings, from
+	// transcripts.sessions_dir. They are kept apart from Repos because a
+	// change in one means `meetings sync` and a change in the other means
+	// `sync`: running the wrong one is either useless or, for a large
+	// project, an expensive walk for nothing.
+	TranscriptDirs []string
 	// Excludes are this project's watch.exclude patterns. They keep build
 	// output and dependency trees from waking the worker, and -- because the
 	// watcher skips excluded directories when adding watches -- keep a
@@ -67,6 +73,31 @@ type narrowConfig struct {
 	Watch struct {
 		Exclude []string `yaml:"exclude"`
 	} `yaml:"watch"`
+	Transcripts struct {
+		Enabled bool `yaml:"enabled"`
+		// sessions_dir is one path or several; a config may name either.
+		SessionsDir any `yaml:"sessions_dir"`
+	} `yaml:"transcripts"`
+}
+
+// sessionDirs reads transcripts.sessions_dir, which may be a single path or a
+// list of them.
+func (nc narrowConfig) sessionDirs() []string {
+	switch v := nc.Transcripts.SessionsDir.(type) {
+	case string:
+		if v != "" {
+			return []string{v}
+		}
+	case []any:
+		var out []string
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // Discover reads the registry and returns the projects worth watching,
@@ -133,7 +164,28 @@ func load(e config.ProjectEntry) (*Project, error) {
 		p.Repos = append(p.Repos, dir)
 	}
 
-	if len(p.Repos) == 0 {
+	// Meeting recordings, when this project indexes any. Absent
+	// transcripts.enabled the directory is not watched, so a recorder writing
+	// there costs nothing.
+	if nc.Transcripts.Enabled {
+		for _, raw := range nc.sessionDirs() {
+			dir := expandHome(strings.TrimSpace(raw))
+			if dir == "" {
+				continue
+			}
+			if !filepath.IsAbs(dir) {
+				dir = filepath.Join(p.Root, dir)
+			}
+			dir = filepath.Clean(dir)
+			if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+				continue
+			}
+			p.TranscriptDirs = append(p.TranscriptDirs, dir)
+		}
+		p.TranscriptDirs = dedupeNested(p.TranscriptDirs)
+	}
+
+	if len(p.Repos) == 0 && len(p.TranscriptDirs) == 0 {
 		return nil, fmt.Errorf("no readable repositories configured")
 	}
 

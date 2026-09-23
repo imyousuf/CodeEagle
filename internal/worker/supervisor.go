@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +38,10 @@ const (
 // supervisor can be tested without spawning processes.
 type Runner interface {
 	Sync(ctx context.Context, p Project) error
+	// Meetings enriches new recordings into meetings. It is a separate
+	// command because indexing a transcript as a document and extracting the
+	// speakers, decisions and follow-ups from it are separate passes.
+	Meetings(ctx context.Context, p Project) error
 }
 
 // Options configures a Supervisor.
@@ -164,11 +169,11 @@ func (s *Supervisor) onEvent(path string) {
 	if Ignored(path) {
 		return
 	}
-	p, ok := Attribute(s.projects, path)
+	p, kind, ok := Attribute(s.projects, path)
 	if !ok {
 		return
 	}
-	s.tracker.Touch(p.Name, s.opts.Now())
+	s.tracker.Touch(p.Name, kind, s.opts.Now())
 }
 
 // dispatch starts syncs for whatever is due, up to the concurrency cap.
@@ -182,22 +187,34 @@ func (s *Supervisor) dispatch(ctx context.Context) {
 			continue
 		}
 
-		s.tracker.Started(name)
+		needSync, needMeetings := s.tracker.Started(name)
 		s.wg.Add(1)
-		go func(p Project) {
+		go func(p Project, needSync, needMeetings bool) {
 			defer s.wg.Done()
 
 			start := s.opts.Now()
-			s.opts.Log("Syncing %s (%s)", p.Name, p.Root)
-			err := s.opts.Runner.Sync(ctx, p)
+			var err error
+
+			if needSync {
+				s.opts.Log("Syncing %s (%s)", p.Name, p.Root)
+				err = s.opts.Runner.Sync(ctx, p)
+			}
+			// Enrichment is skipped when the sync before it failed: a
+			// half-indexed project is a poor base to extract meetings from,
+			// and the retry will run both.
+			if err == nil && needMeetings {
+				s.opts.Log("Enriching meetings for %s", p.Name)
+				err = s.opts.Runner.Meetings(ctx, p)
+			}
+
 			took := s.opts.Now().Sub(start).Round(time.Second)
 			if err != nil && ctx.Err() == nil {
 				s.opts.Log("Sync %s failed after %s: %v", p.Name, took, err)
 			} else if err == nil {
 				s.opts.Log("Synced %s in %s", p.Name, took)
 			}
-			s.tracker.Finished(p.Name, s.opts.Now(), err, s.opts.Backoff)
-		}(p)
+			s.tracker.Finished(p.Name, s.opts.Now(), err, s.opts.Backoff, needSync, needMeetings)
+		}(p, needSync, needMeetings)
 	}
 }
 
@@ -214,6 +231,16 @@ func (s *Supervisor) SyncOnce(ctx context.Context) error {
 			s.opts.Log("Sync %s failed: %v", p.Name, err)
 			if firstErr == nil {
 				firstErr = err
+			}
+			continue
+		}
+		if len(p.TranscriptDirs) > 0 {
+			s.opts.Log("Enriching meetings for %s", p.Name)
+			if err := s.opts.Runner.Meetings(ctx, p); err != nil {
+				s.opts.Log("Meetings sync %s failed: %v", p.Name, err)
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 	}
@@ -236,6 +263,15 @@ type ExecRunner struct {
 
 // Sync runs one project's sync to completion.
 func (r ExecRunner) Sync(ctx context.Context, p Project) error {
+	return r.run(ctx, p, "sync")
+}
+
+// Meetings runs one project's meeting enrichment to completion.
+func (r ExecRunner) Meetings(ctx context.Context, p Project) error {
+	return r.run(ctx, p, "meetings", "sync")
+}
+
+func (r ExecRunner) run(ctx context.Context, p Project, args ...string) error {
 	bin := r.Bin
 	if bin == "" {
 		self, err := os.Executable()
@@ -246,7 +282,8 @@ func (r ExecRunner) Sync(ctx context.Context, p Project) error {
 	}
 
 	cfg := filepath.Join(p.ConfigDir, "config.yaml")
-	cmd := exec.CommandContext(ctx, bin, "--config", cfg, "sync")
+	full := append([]string{"--config", cfg}, args...)
+	cmd := exec.CommandContext(ctx, bin, full...)
 	// The working directory matters beyond tidiness: a sync resolves relative
 	// repository paths and discovers the project registry from where it runs.
 	cmd.Dir = p.Root
@@ -254,7 +291,7 @@ func (r ExecRunner) Sync(ctx context.Context, p Project) error {
 	cmd.Stderr = r.Stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("sync %s: %w", p.Name, err)
+		return fmt.Errorf("%s %s: %w", strings.Join(args, " "), p.Name, err)
 	}
 	return nil
 }

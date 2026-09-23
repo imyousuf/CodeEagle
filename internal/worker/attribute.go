@@ -20,32 +20,47 @@ var selfWritten = []string{
 	".git",       // index churn on every checkout, and never indexed anyway
 }
 
-// Attribute returns the project that owns a changed path, and whether any
-// does.
+// Kind says what work a changed path implies.
+type Kind int
+
+const (
+	// KindCode is an ordinary indexed file: it means `codeeagle sync`.
+	KindCode Kind = iota
+	// KindTranscript is a meeting recording: it means `codeeagle meetings
+	// sync`, and nothing else. Running an ordinary sync for it would walk
+	// every indexed directory to no purpose.
+	KindTranscript
+)
+
+// Attribute returns the project that owns a changed path, what kind of work it
+// implies, and whether any project claims it at all.
 //
 // Projects are searched most-specific-first, so a path inside a project nested
 // within another project's tree is attributed to the inner one. Syncing the
 // outer project for an inner project's change would index the same file under
 // the wrong graph.
-func Attribute(projects []Project, path string) (*Project, bool) {
+func Attribute(projects []Project, path string) (*Project, Kind, bool) {
 	path = filepath.Clean(path)
 
 	best := -1
 	bestLen := -1
+	kind := KindCode
 	for i := range projects {
 		for _, repo := range projects[i].Repos {
-			if !under(path, repo) {
-				continue
+			if under(path, repo) && len(repo) > bestLen {
+				best, bestLen, kind = i, len(repo), KindCode
 			}
-			if len(repo) > bestLen {
-				best, bestLen = i, len(repo)
+		}
+		for _, dir := range projects[i].TranscriptDirs {
+			if under(path, dir) && len(dir) > bestLen {
+				best, bestLen, kind = i, len(dir), KindTranscript
 			}
 		}
 	}
 	if best < 0 {
-		return nil, false
+		return nil, KindCode, false
 	}
-	return &projects[best], true
+	return &projects[best], kind, true
 }
 
 // Ignored reports whether a path is one CodeEagle writes itself, or otherwise
@@ -82,6 +97,7 @@ func WatchRoots(projects []Project) []string {
 	var all []string
 	for _, p := range projects {
 		all = append(all, p.Repos...)
+		all = append(all, p.TranscriptDirs...)
 	}
 	return dedupeNested(all)
 }

@@ -36,7 +36,7 @@ func TestAttributePicksTheMostSpecificProject(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			got, ok := Attribute(ps, tt.path)
+			got, _, ok := Attribute(ps, tt.path)
 			if !ok {
 				t.Fatalf("no project claimed %s", tt.path)
 			}
@@ -61,7 +61,7 @@ func TestAttributeRejectsPathsNoProjectIndexes(t *testing.T) {
 		"/home/u/Documents-old/x",
 	} {
 		t.Run(path, func(t *testing.T) {
-			if p, ok := Attribute(ps, path); ok {
+			if p, _, ok := Attribute(ps, path); ok {
 				t.Errorf("%s was attributed to %q, want no project", path, p.Name)
 			}
 		})
@@ -135,5 +135,43 @@ func TestUnderDoesNotConfusePrefixWithParent(t *testing.T) {
 	}
 	if !under(filepath.Clean("/a/b/c"), filepath.Clean("/a/b")) {
 		t.Error("/a/b/c must count as being under /a/b")
+	}
+}
+
+// TestTranscriptDirsAreAttributedAsMeetings covers the directory holding
+// meeting recordings: it belongs to the project, but implies a different
+// command from an ordinary source file.
+func TestTranscriptDirsAreAttributedAsMeetings(t *testing.T) {
+	ps := []Project{{
+		Name: "home", Root: "/home/u",
+		Repos:          []string{"/home/u/Documents"},
+		TranscriptDirs: []string{"/home/u/.local/share/tomoe/sessions"},
+	}}
+
+	p, kind, ok := Attribute(ps, "/home/u/.local/share/tomoe/sessions/abc/session.json")
+	if !ok {
+		t.Fatal("a recording was claimed by no project")
+	}
+	if p.Name != "home" {
+		t.Errorf("attributed to %q, want home", p.Name)
+	}
+	if kind != KindTranscript {
+		t.Error("a recording was treated as ordinary code; an expensive walk would run for nothing")
+	}
+
+	_, kind, ok = Attribute(ps, "/home/u/Documents/notes.md")
+	if !ok || kind != KindCode {
+		t.Errorf("an ordinary document came back kind=%v ok=%v", kind, ok)
+	}
+}
+
+func TestWatchRootsIncludesTranscriptDirs(t *testing.T) {
+	ps := []Project{{
+		Name: "home", Repos: []string{"/home/u/Documents"},
+		TranscriptDirs: []string{"/home/u/sessions"},
+	}}
+	roots := WatchRoots(ps)
+	if len(roots) != 2 {
+		t.Fatalf("WatchRoots() = %v, want both the documents and the sessions directory", roots)
 	}
 }

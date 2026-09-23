@@ -19,6 +19,7 @@ func newWorkerCmd() *cobra.Command {
 		once        bool
 		list        bool
 		only        []string
+		exclude     []string
 		settle      time.Duration
 		concurrency int
 		quiet       bool
@@ -51,6 +52,7 @@ sync already in flight is allowed to finish rather than being killed halfway.`,
 
 			projects, skipped := worker.Discover()
 			projects = filterProjects(projects, only)
+			projects = excludeProjects(projects, exclude)
 
 			for _, s := range skipped {
 				fmt.Fprintf(out, "Skipping %s: %s\n", s.Name, s.Reason)
@@ -93,6 +95,8 @@ sync already in flight is allowed to finish rather than being killed halfway.`,
 	cmd.Flags().BoolVar(&once, "once", false, "sync every project once and exit, without watching")
 	cmd.Flags().BoolVar(&list, "list", false, "print the projects and directories that would be watched")
 	cmd.Flags().StringSliceVar(&only, "project", nil, "limit to these registered project names (repeatable)")
+	cmd.Flags().StringSliceVar(&exclude, "exclude-project", nil,
+		"skip these registered project names (repeatable); everything else is still watched")
 	cmd.Flags().DurationVar(&settle, "settle", worker.DefaultSettle,
 		"how long a project must be quiet before it is synced")
 	cmd.Flags().IntVar(&concurrency, "concurrency", worker.DefaultMaxConcurrent,
@@ -118,12 +122,36 @@ func filterProjects(projects []worker.Project, only []string) []worker.Project {
 	return out
 }
 
+// excludeProjects drops the named projects, leaving every other one watched.
+func excludeProjects(projects []worker.Project, exclude []string) []worker.Project {
+	if len(exclude) == 0 {
+		return projects
+	}
+	skip := make(map[string]bool, len(exclude))
+	for _, n := range exclude {
+		skip[strings.TrimSpace(n)] = true
+	}
+	out := projects[:0:0]
+	for _, p := range projects {
+		if !skip[p.Name] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func printProjects(out interface{ Write([]byte) (int, error) }, projects []worker.Project) error {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "PROJECT\tROOT\tWATCHES")
 	fmt.Fprintln(w, "-------\t----\t-------")
 	for _, p := range projects {
-		for i, dir := range p.Repos {
+		// Transcript directories are marked, because a change in one runs
+		// meetings enrichment rather than an ordinary sync.
+		lines := append([]string(nil), p.Repos...)
+		for _, dir := range p.TranscriptDirs {
+			lines = append(lines, dir+"   (recordings)")
+		}
+		for i, dir := range lines {
 			if i == 0 {
 				fmt.Fprintf(w, "%s\t%s\t%s\n", p.Name, p.Root, dir)
 			} else {

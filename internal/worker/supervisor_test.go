@@ -10,11 +10,26 @@ import (
 
 // fakeRunner records which projects were synced, without spawning anything.
 type fakeRunner struct {
-	mu     sync.Mutex
-	ran    []string
-	err    error
-	block  chan struct{} // if non-nil, Sync waits on it
-	inCall chan string   // if non-nil, receives the project name on entry
+	mu          sync.Mutex
+	ran         []string
+	meetings    []string
+	err         error
+	meetingsErr error
+	block       chan struct{} // if non-nil, Sync waits on it
+	inCall      chan string   // if non-nil, receives the project name on entry
+}
+
+func (f *fakeRunner) Meetings(_ context.Context, p Project) error {
+	f.mu.Lock()
+	f.meetings = append(f.meetings, p.Name)
+	f.mu.Unlock()
+	return f.meetingsErr
+}
+
+func (f *fakeRunner) meetingsRan() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.meetings...)
 }
 
 func (f *fakeRunner) Sync(_ context.Context, p Project) error {
@@ -195,5 +210,85 @@ func TestSyncOnceReportsFailureButKeepsGoing(t *testing.T) {
 	}
 	if got := r.calls(); len(got) != 2 {
 		t.Errorf("stopped after %d project(s); one failure must not skip the rest", len(got))
+	}
+}
+
+// TestARecordingRunsMeetingsSyncOnly is the point of the transcript split: a
+// new recording must not drag an entire project through an ordinary sync.
+func TestARecordingRunsMeetingsSyncOnly(t *testing.T) {
+	r := &fakeRunner{}
+	c := &clock{now: time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)}
+	projects := []Project{{
+		Name: "home", Root: "/p/home", ConfigDir: "/p/home/.CodeEagle",
+		Repos:          []string{"/p/home/Documents"},
+		TranscriptDirs: []string{"/p/home/sessions"},
+	}}
+	s := NewSupervisor(projects, Options{
+		Settle: time.Second, MaxConcurrent: 1, Runner: r, Now: c.Now,
+	})
+
+	s.onEvent("/p/home/sessions/abc/session.json")
+	c.advance(2 * time.Second)
+	s.dispatch(context.Background())
+	s.wg.Wait()
+
+	if got := r.calls(); len(got) != 0 {
+		t.Errorf("an ordinary sync ran for a recording: %v", got)
+	}
+	if got := r.meetingsRan(); len(got) != 1 || got[0] != "home" {
+		t.Errorf("meetings sync ran %v, want exactly [home]", got)
+	}
+}
+
+func TestAnOrdinaryFileDoesNotRunMeetingsSync(t *testing.T) {
+	r := &fakeRunner{}
+	c := &clock{now: time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)}
+	projects := []Project{{
+		Name: "home", Root: "/p/home", ConfigDir: "/p/home/.CodeEagle",
+		Repos:          []string{"/p/home/Documents"},
+		TranscriptDirs: []string{"/p/home/sessions"},
+	}}
+	s := NewSupervisor(projects, Options{
+		Settle: time.Second, MaxConcurrent: 1, Runner: r, Now: c.Now,
+	})
+
+	s.onEvent("/p/home/Documents/notes.md")
+	c.advance(2 * time.Second)
+	s.dispatch(context.Background())
+	s.wg.Wait()
+
+	if got := r.calls(); len(got) != 1 {
+		t.Errorf("sync ran %v, want exactly [home]", got)
+	}
+	if got := r.meetingsRan(); len(got) != 0 {
+		t.Errorf("meetings sync ran for an ordinary file: %v", got)
+	}
+}
+
+// TestBothRunWhenBothChanged covers a project where code and a recording both
+// changed inside one settle window.
+func TestBothRunWhenBothChanged(t *testing.T) {
+	r := &fakeRunner{}
+	c := &clock{now: time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)}
+	projects := []Project{{
+		Name: "home", Root: "/p/home", ConfigDir: "/p/home/.CodeEagle",
+		Repos:          []string{"/p/home/Documents"},
+		TranscriptDirs: []string{"/p/home/sessions"},
+	}}
+	s := NewSupervisor(projects, Options{
+		Settle: time.Second, MaxConcurrent: 1, Runner: r, Now: c.Now,
+	})
+
+	s.onEvent("/p/home/Documents/notes.md")
+	s.onEvent("/p/home/sessions/abc/session.json")
+	c.advance(2 * time.Second)
+	s.dispatch(context.Background())
+	s.wg.Wait()
+
+	if got := r.calls(); len(got) != 1 {
+		t.Errorf("sync ran %v, want once", got)
+	}
+	if got := r.meetingsRan(); len(got) != 1 {
+		t.Errorf("meetings sync ran %v, want once", got)
 	}
 }

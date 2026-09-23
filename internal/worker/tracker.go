@@ -23,6 +23,11 @@ type projectState struct {
 	// one sync rather than one per file.
 	dirtyAt time.Time
 	dirty   bool
+	// needSync and needMeetings record which commands the pending change
+	// calls for. A recording implies meetings enrichment only; forcing an
+	// ordinary sync as well would walk every indexed directory for nothing.
+	needSync     bool
+	needMeetings bool
 	// running means a sync is in flight; another must not start.
 	running bool
 	// againAt records a change that arrived while a sync was running. The
@@ -49,17 +54,31 @@ func (t *tracker) get(name string) *projectState {
 	return s
 }
 
-// Touch records that a project's files changed.
-func (t *tracker) Touch(name string, now time.Time) {
+// Touch records that a project's files changed, and what kind of change it
+// was.
+func (t *tracker) Touch(name string, kind Kind, now time.Time) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	s := t.get(name)
 	if s.running {
 		s.again, s.againAt = true, now
+		// Remember it across the run: a change arriving mid-sync must not
+		// lose the fact that it was a recording rather than a source file.
+		s.markKind(kind)
 		return
 	}
 	s.dirty, s.dirtyAt = true, now
+	s.markKind(kind)
+}
+
+func (s *projectState) markKind(kind Kind) {
+	switch kind {
+	case KindTranscript:
+		s.needMeetings = true
+	default:
+		s.needSync = true
+	}
 }
 
 // Due returns the projects that have been quiet long enough to sync, oldest
@@ -87,19 +106,24 @@ func (t *tracker) Due(now time.Time) []string {
 	return due
 }
 
-// Started marks a sync as in flight and clears the pending change it covers.
-func (t *tracker) Started(name string) {
+// Started marks a project as in flight and reports which commands the
+// pending change calls for, clearing them.
+func (t *tracker) Started(name string) (needSync, needMeetings bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	s := t.get(name)
 	s.running = true
 	s.dirty = false
+	needSync, needMeetings = s.needSync, s.needMeetings
+	s.needSync, s.needMeetings = false, false
+	return needSync, needMeetings
 }
 
 // Finished records the outcome. A change that arrived mid-run becomes the new
 // pending change, so it is never lost.
-func (t *tracker) Finished(name string, now time.Time, err error, backoff time.Duration) {
+func (t *tracker) Finished(name string, now time.Time, err error, backoff time.Duration,
+	needSync, needMeetings bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -107,6 +131,13 @@ func (t *tracker) Finished(name string, now time.Time, err error, backoff time.D
 	s.running = false
 
 	if err != nil {
+		// A failed run leaves its work undone, so put back what it was for.
+		if needSync {
+			s.needSync = true
+		}
+		if needMeetings {
+			s.needMeetings = true
+		}
 		s.failures++
 		// Exponential, capped: a project whose sync is broken must not spin.
 		wait := backoff << min(s.failures-1, 5)
