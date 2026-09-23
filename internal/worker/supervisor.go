@@ -111,10 +111,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	events := make(chan string, 256)
 	var watched int
 	for _, p := range s.projects {
-		// Both kinds: a project's indexed directories and, where it has
-		// them, the directories its recordings arrive in. Attribute sorts out
-		// which command a given event implies.
-		paths := append(append([]string(nil), p.Repos...), p.TranscriptDirs...)
+		paths := WatchPaths(p)
 		w, err := watcher.NewWatcher(watcher.WatcherConfig{
 			Paths:           paths,
 			ExcludePatterns: p.Excludes,
@@ -167,6 +164,19 @@ func (s *Supervisor) Run(ctx context.Context) error {
 			s.dispatch(ctx)
 		}
 	}
+}
+
+// WatchPaths returns every directory watched on behalf of one project:
+// the directories it indexes, and where it has them, the directories its
+// recordings arrive in. Attribute sorts out which command a given event
+// implies.
+//
+// Exported and separate from Run so a test can see it. Computed inline it was
+// unreachable, because Run opens real watchers -- and that is precisely how
+// transcript directories came to be known to WatchRoots, which only reports,
+// and not to the watcher, which is what actually matters.
+func WatchPaths(p Project) []string {
+	return append(append([]string(nil), p.Repos...), p.TranscriptDirs...)
 }
 
 func (s *Supervisor) onEvent(path string) {
