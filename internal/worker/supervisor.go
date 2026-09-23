@@ -111,8 +111,12 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	events := make(chan string, 256)
 	var watched int
 	for _, p := range s.projects {
+		// Both kinds: a project's indexed directories and, where it has
+		// them, the directories its recordings arrive in. Attribute sorts out
+		// which command a given event implies.
+		paths := append(append([]string(nil), p.Repos...), p.TranscriptDirs...)
 		w, err := watcher.NewWatcher(watcher.WatcherConfig{
-			Paths:           p.Repos,
+			Paths:           paths,
 			ExcludePatterns: p.Excludes,
 		})
 		if err != nil {
@@ -124,7 +128,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("start watcher for %s: %w", p.Name, err)
 		}
-		watched += len(p.Repos)
+		watched += len(paths)
 
 		s.wg.Add(1)
 		go func() {
