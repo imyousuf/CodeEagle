@@ -264,15 +264,32 @@ func (s *Supervisor) SyncOnce(ctx context.Context) error {
 // ExecRunner runs `codeeagle sync` as a subprocess, in the project's root and
 // against the project's configuration.
 //
-// Re-executing this same binary rather than a `codeeagle` found on PATH means
-// the worker and the sync are always the same build. A worker left running
-// across an upgrade would otherwise start driving a different version than the
-// one it was built alongside.
+// Re-executing the binary the worker was started from, rather than a
+// `codeeagle` found on PATH, means a sync never runs some other installation
+// that happens to be first on PATH. After an upgrade in place it is the new
+// build, which is what the upgrade was for.
 type ExecRunner struct {
-	// Bin is the binary to run. Empty means this executable.
+	// Bin is the binary to run. NewExecRunner sets it to this executable.
 	Bin string
 	// Stdout and Stderr receive the sync's output; nil discards it.
 	Stdout, Stderr *os.File
+}
+
+// NewExecRunner returns a runner for this executable, located now rather than
+// when each sync starts.
+//
+// Asking later is wrong once the binary is replaced under a running worker,
+// which the worker itself causes: every sync it starts checks for an update,
+// and the updater renames the running file to codeeagle.old, installs the new
+// one and deletes the old. os.Executable then follows this process's own
+// inode and names the deleted codeeagle.old, so every later sync failed to
+// start. The path found at startup still names what is installed there.
+func NewExecRunner(stdout, stderr *os.File) (ExecRunner, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return ExecRunner{}, fmt.Errorf("locate this executable: %w", err)
+	}
+	return ExecRunner{Bin: self, Stdout: stdout, Stderr: stderr}, nil
 }
 
 // Sync runs one project's sync to completion.
@@ -286,18 +303,15 @@ func (r ExecRunner) Meetings(ctx context.Context, p Project) error {
 }
 
 func (r ExecRunner) run(ctx context.Context, p Project, args ...string) error {
-	bin := r.Bin
-	if bin == "" {
-		self, err := os.Executable()
-		if err != nil {
-			return fmt.Errorf("locate this executable: %w", err)
-		}
-		bin = self
+	// No fallback to os.Executable here: by the time a sync runs, that may
+	// name a file the updater has already deleted. See NewExecRunner.
+	if r.Bin == "" {
+		return fmt.Errorf("%s %s: no binary to run", strings.Join(args, " "), p.Name)
 	}
 
 	cfg := filepath.Join(p.ConfigDir, "config.yaml")
 	full := append([]string{"--config", cfg}, args...)
-	cmd := exec.CommandContext(ctx, bin, full...)
+	cmd := exec.CommandContext(ctx, r.Bin, full...)
 	// The working directory matters beyond tidiness: a sync resolves relative
 	// repository paths and discovers the project registry from where it runs.
 	cmd.Dir = p.Root

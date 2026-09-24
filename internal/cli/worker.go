@@ -50,6 +50,14 @@ sync already in flight is allowed to finish rather than being killed halfway.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			out := cmd.OutOrStdout()
 
+			// Located first, before any sync can replace the binary. Inherit
+			// the terminal so a sync's own progress is visible rather than
+			// swallowed.
+			runner, err := worker.NewExecRunner(os.Stdout, os.Stderr)
+			if err != nil {
+				return err
+			}
+
 			projects, skipped := worker.Discover()
 			projects = filterProjects(projects, only)
 			projects = excludeProjects(projects, exclude)
@@ -77,9 +85,7 @@ sync already in flight is allowed to finish rather than being killed halfway.`,
 				Settle:        settle,
 				MaxConcurrent: concurrency,
 				Log:           logf,
-				// Inherit the terminal so a sync's own progress is visible
-				// rather than swallowed.
-				Runner: worker.ExecRunner{Stdout: os.Stdout, Stderr: os.Stderr},
+				Runner:        runner,
 			})
 
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
