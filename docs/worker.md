@@ -207,6 +207,23 @@ Binding the worker to the login session removes that. The cost is that it does
 not run while you are logged out, which is the right trade on a machine you
 use.
 
+### It runs with the PATH you installed it from
+
+A service does not get your shell's `PATH`. systemd gives a user unit the
+service manager's own PATH, and launchd gives an agent
+`/usr/bin:/bin:/usr/sbin:/sbin`. A credential helper like `keyring` usually
+lives in `~/.local/bin` or under Homebrew, where neither one looks. The
+`$(keyring ...)` in your config then exits 127 and every sync fails, even
+though the same command works in a terminal.
+
+A desktop session may push its PATH to systemd after login. That is too late
+for this: the worker starts as soon as the user manager does, a running process
+never picks up the change, and a console login never pushes a PATH at all.
+
+So `install` writes the `PATH` of the shell you run it from into the unit
+(`Environment=`) or plist (`EnvironmentVariables`). Run it from a shell where
+`codeeagle sync` works, and run it again if you change your `PATH`.
+
 ### Install from the binary you mean to keep
 
 The service records the **path of the binary you ran `install` from**. Install
@@ -222,8 +239,8 @@ a path that may not exist later.
 
 ### After upgrading
 
-Re-running `codeeagle service install` is safe and rewrites the file, so do
-that after moving the binary. Otherwise a restart is enough, since each sync is
+Re-running `codeeagle service install` is safe: it rewrites the file and
+restarts the worker onto it, so do that after moving the binary. Otherwise a restart is enough, since each sync is
 a fresh process:
 
 ```bash
@@ -331,6 +348,14 @@ re-run `codeeagle init` there.
 A sync holds an exclusive lock on the project's database while it runs, so
 `codeeagle query` and similar can fail while the worker is syncing. Wait for
 the sync to finish and try again.
+
+### Syncs fail with `a program it runs is not on PATH`
+
+A `$(...)` in the config ran a program the worker cannot find, usually
+`keyring`. The error lists the PATH that was searched. Re-run
+`codeeagle service install` from a terminal where `codeeagle sync` works, so the
+service picks up that shell's PATH (see
+[It runs with the PATH you installed it from](#it-runs-with-the-path-you-installed-it-from)).
 
 ### The service is installed but not running
 

@@ -12,6 +12,15 @@
 // deliberately stops rather than continue with an empty credential. Tying the
 // worker to the login session means the keyring is already unlocked by the
 // time it runs.
+//
+// Being started by the service manager also means not inheriting the login
+// shell's PATH, and a credential helper like `keyring` usually lives somewhere
+// only that PATH reaches, such as ~/.local/bin. So the PATH of the shell that
+// ran the install is written into the service. Relying on the session to
+// export its PATH to the service manager is a race: systemd starts
+// default.target units before a desktop session pushes its environment, a
+// running process never sees that environment change, and a console login
+// never pushes one at all.
 package service
 
 import (
@@ -41,6 +50,10 @@ type Config struct {
 	// UID is used to build launchd's domain target. Zero means the current
 	// user. For tests.
 	UID int
+	// Path is the PATH the worker, and every sync it starts, runs with.
+	// Empty means this process's PATH: the shell where `codeeagle sync`
+	// was shown to work is the one whose PATH the service should have.
+	Path string
 }
 
 // Plan is what an install would do, so it can be shown before it is done.
@@ -104,12 +117,41 @@ func (c *Config) resolve() error {
 	if c.UID == 0 {
 		c.UID = os.Getuid()
 	}
+	if c.Path == "" {
+		c.Path = os.Getenv("PATH")
+	}
+	c.Path = absolutePath(c.Path)
 	return nil
+}
+
+// absolutePath drops the entries of a PATH that are not absolute, keeping the
+// order and the first of any repeat. An empty or relative entry is searched
+// relative to the working directory, which for a service is not anywhere a
+// command should be found.
+func absolutePath(path string) string {
+	seen := make(map[string]bool)
+	var keep []string
+	for _, dir := range filepath.SplitList(path) {
+		if !filepath.IsAbs(dir) || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		keep = append(keep, dir)
+	}
+	return strings.Join(keep, string(filepath.ListSeparator))
 }
 
 // systemdPlan builds a systemd user unit.
 func systemdPlan(cfg Config) *Plan {
 	path := filepath.Join(cfg.Home, ".config", "systemd", "user", SystemdUnitName)
+
+	var env string
+	if cfg.Path != "" {
+		env = "# The PATH of the shell that installed this, which config values like\n" +
+			"# $(keyring get ...) need. Re-run `codeeagle service install` after\n" +
+			"# changing it.\n" +
+			"Environment=" + systemdQuote("PATH="+cfg.Path) + "\n"
+	}
 
 	// StartLimit* belong in [Unit], not [Service]. Put in the wrong section
 	// they are silently ignored, and a service that cannot start spins.
@@ -126,7 +168,7 @@ StartLimitBurst=5
 Type=simple
 ExecStart=%s
 WorkingDirectory=%s
-Restart=on-failure
+%sRestart=on-failure
 RestartSec=60
 # Indexing is background work: it should lose to anything interactive.
 Nice=10
@@ -136,15 +178,20 @@ IOSchedulingClass=idle
 # default.target, not graphical-session.target: this should run for a
 # console login too, and it stops when the user's last session ends.
 WantedBy=default.target
-`, shellJoin(append([]string{cfg.Binary}, cfg.Args...)), cfg.Home)
+`, shellJoin(append([]string{cfg.Binary}, cfg.Args...)), cfg.Home, env)
 
 	return &Plan{
 		Path:     path,
 		Contents: contents,
 		Platform: "systemd user unit",
+		// restart rather than `enable --now`, which leaves a running unit
+		// alone: a reinstall would rewrite the file while the old process
+		// carried on with the old binary and environment. restart also starts
+		// a unit that is not running.
 		Activate: [][]string{
 			{"systemctl", "--user", "daemon-reload"},
-			{"systemctl", "--user", "enable", "--now", SystemdUnitName},
+			{"systemctl", "--user", "enable", SystemdUnitName},
+			{"systemctl", "--user", "restart", SystemdUnitName},
 		},
 		Deactivate: [][]string{
 			{"systemctl", "--user", "disable", "--now", SystemdUnitName},
@@ -162,6 +209,12 @@ func launchdPlan(cfg Config) *Plan {
 		fmt.Fprintf(&args, "\n\t\t<string>%s</string>", xmlEscape(a))
 	}
 
+	var env string
+	if cfg.Path != "" {
+		env = fmt.Sprintf("\n\t<key>EnvironmentVariables</key>\n\t<dict>\n"+
+			"\t\t<key>PATH</key>\n\t\t<string>%s</string>\n\t</dict>", xmlEscape(cfg.Path))
+	}
+
 	// KeepAlive on SuccessfulExit=false restarts a crash but respects a
 	// clean exit, so stopping the worker by hand does not fight launchd.
 	contents := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
@@ -174,7 +227,7 @@ func launchdPlan(cfg Config) *Plan {
 	<array>%s
 	</array>
 	<key>WorkingDirectory</key>
-	<string>%s</string>
+	<string>%s</string>%s
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
@@ -192,7 +245,7 @@ func launchdPlan(cfg Config) *Plan {
 	<string>%s</string>
 </dict>
 </plist>
-`, LaunchdLabel, args.String(), xmlEscape(cfg.Home),
+`, LaunchdLabel, args.String(), xmlEscape(cfg.Home), env,
 		xmlEscape(filepath.Join(cfg.Home, "Library", "Logs", "codeeagle-worker.log")),
 		xmlEscape(filepath.Join(cfg.Home, "Library", "Logs", "codeeagle-worker.log")))
 
@@ -221,6 +274,13 @@ func shellJoin(args []string) string {
 		out = append(out, a)
 	}
 	return strings.Join(out, " ")
+}
+
+// systemdQuote quotes one Environment= assignment. Unlike ExecStart, an
+// Environment= value is subject to specifier expansion, so a literal % must
+// be doubled as well as quotes and backslashes escaped.
+func systemdQuote(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "%", "%%").Replace(s) + `"`
 }
 
 func xmlEscape(s string) string {

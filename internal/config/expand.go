@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -99,9 +100,26 @@ func runExpansion(command string) (string, error) {
 		if ctx.Err() == context.DeadlineExceeded {
 			return "", fmt.Errorf("command timed out after %s", expandCommandTimeout)
 		}
-		return "", fmt.Errorf("command failed: %w", err)
+		return "", commandError("command", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// commandError describes a command run through sh that failed.
+//
+// Exit status 127 is the shell failing to find a program, and almost always
+// means this process's PATH is not the one the command was tested under: a
+// service started at login gets the service manager's PATH, which need not
+// include ~/.local/bin or Homebrew. A bare exit code hides that, so say so and
+// name the PATH searched. The PATH is not a secret; the command's output,
+// which may be, is still never included.
+func commandError(what string, err error) error {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 127 {
+		return fmt.Errorf("%s failed: a program it runs is not on PATH (%s): %w",
+			what, os.Getenv("PATH"), err)
+	}
+	return fmt.Errorf("%s failed: %w", what, err)
 }
 
 // expandConfig walks a configuration and expands every string it holds.

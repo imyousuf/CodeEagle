@@ -59,7 +59,7 @@ func ResolveSecret(src SecretSource) (string, error) {
 		}
 		// The command's own output may contain the secret, so report only
 		// that it failed rather than echoing what it printed.
-		return "", fmt.Errorf("credential command failed: %w", err)
+		return "", commandError("credential command", err)
 	}
 
 	secret := strings.TrimSpace(string(out))

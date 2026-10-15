@@ -61,6 +61,22 @@ func TestExpandValueReportsCommandFailure(t *testing.T) {
 	}
 }
 
+// TestExpandValueNamesThePathForAMissingProgram covers exit status 127, the
+// shell failing to find a program. It is what a credential helper outside a
+// service's PATH looks like, and a bare exit code did not say so.
+func TestExpandValueNamesThePathForAMissingProgram(t *testing.T) {
+	t.Setenv("PATH", "/nonexistent-codeeagle-test/bin:/usr/bin:/bin")
+	_, err := expandValue("$(codeeagle-no-such-program get x)", "config.transcripts.api_key")
+	if err == nil {
+		t.Fatal("a missing program expanded without error")
+	}
+	for _, want := range []string{"not on PATH", "/nonexistent-codeeagle-test/bin", "config.transcripts.api_key"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
 // TestExpandValueKeepsSecretsOutOfErrors covers the one thing this code must
 // never do: a failure while resolving a credential must not quote it.
 func TestExpandValueKeepsSecretsOutOfErrors(t *testing.T) {

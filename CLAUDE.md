@@ -388,6 +388,15 @@ empty credential, so a boot-time service would fail on its first sync. Tying
 the worker to the login session sidesteps that, at the cost of not running
 while logged out -- which is the right trade for a machine someone uses.
 
+**With the PATH it was installed from.** Starting at login does not give a
+service the login shell's PATH. systemd starts default.target units before a
+desktop session pushes its environment, a running process never sees that
+environment change, and launchd agents get only the system directories. So
+`keyring` in `~/.local/bin` exits 127 and every sync fails, even though the
+same command works in a terminal. `service install` therefore writes the
+installing shell's PATH into the unit or plist rather than depending on that
+timing.
+
 ### 5. Multi-Language Support
 
 Language parsing and graph extraction:

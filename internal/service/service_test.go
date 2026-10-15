@@ -56,8 +56,16 @@ func TestSystemdActivationEnablesAndStarts(t *testing.T) {
 	if !strings.Contains(all, "daemon-reload") {
 		t.Error("no daemon-reload before enabling")
 	}
-	if !strings.Contains(all, "enable --now") {
-		t.Error("the unit is not enabled for login and started now")
+	if !strings.Contains(all, "enable "+SystemdUnitName) {
+		t.Error("the unit is not enabled for login")
+	}
+	// A reinstall must replace a running worker, or it keeps the binary and
+	// PATH it started with; `enable --now` does not touch a running unit.
+	if !strings.Contains(all, "restart "+SystemdUnitName) {
+		t.Error("a running worker is not restarted onto the new unit")
+	}
+	if strings.Index(all, "restart") < strings.Index(all, "daemon-reload") {
+		t.Error("restart precedes daemon-reload and would act on the stale unit")
 	}
 	if strings.Contains(all, "sudo") || strings.Contains(all, "--system") {
 		t.Errorf("activation leaves user scope: %s", all)
@@ -152,5 +160,92 @@ func TestBuildFillsInDefaults(t *testing.T) {
 	}
 	if !strings.Contains(p.Contents, "worker") {
 		t.Error("the default arguments do not run the worker")
+	}
+}
+
+// TestInstallTimePathReachesTheService covers the failure this exists for: a
+// unit started at login got the service manager's bare PATH, every
+// $(keyring get ...) in a config exited 127, and every sync failed while the
+// same command worked in a terminal.
+func TestInstallTimePathReachesTheService(t *testing.T) {
+	cfg := testConfig()
+	cfg.Path = "/home/u/.local/bin:/usr/bin"
+
+	unit := systemdPlan(cfg).Contents
+	if !strings.Contains(unit, `Environment="PATH=/home/u/.local/bin:/usr/bin"`) {
+		t.Errorf("unit does not carry the install-time PATH:\n%s", unit)
+	}
+	// Environment= is a [Service] directive; elsewhere it is ignored.
+	if strings.Index(unit, "Environment=") < strings.Index(unit, "[Service]") {
+		t.Error("Environment= is not in the [Service] section")
+	}
+
+	plist := launchdPlan(cfg).Contents
+	var anything any
+	if err := xml.Unmarshal([]byte(plist), &anything); err != nil {
+		t.Fatalf("plist with a PATH is malformed: %v", err)
+	}
+	want := "<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>PATH</key>\n" +
+		"\t\t<string>/home/u/.local/bin:/usr/bin</string>"
+	if !strings.Contains(plist, want) {
+		t.Errorf("plist does not carry the install-time PATH:\n%s", plist)
+	}
+}
+
+func TestEmptyPathIsLeftToTheServiceManager(t *testing.T) {
+	cfg := testConfig()
+	cfg.Path = ""
+
+	if unit := systemdPlan(cfg).Contents; strings.Contains(unit, "Environment=") {
+		t.Errorf("an empty PATH was written into the unit, hiding every command:\n%s", unit)
+	}
+	if plist := launchdPlan(cfg).Contents; strings.Contains(plist, "EnvironmentVariables") {
+		t.Errorf("an empty PATH was written into the plist:\n%s", plist)
+	}
+}
+
+// TestSystemdEnvironmentIsEscaped covers characters systemd treats specially
+// in an Environment= value: % starts a specifier, and quotes and backslashes
+// end or escape the quoted string.
+func TestSystemdEnvironmentIsEscaped(t *testing.T) {
+	cfg := testConfig()
+	cfg.Path = `/opt/100%/bin:/opt/a "b"\c`
+
+	unit := systemdPlan(cfg).Contents
+	if want := `Environment="PATH=/opt/100%%/bin:/opt/a \"b\"\\c"`; !strings.Contains(unit, want) {
+		t.Errorf("unit = \n%s\nwant it to contain %s", unit, want)
+	}
+}
+
+func TestAbsolutePathDropsWhatAServiceCannotUse(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{"unchanged", "/a:/b", "/a:/b"},
+		{"empty entries are the working directory", "/a::/b:", "/a:/b"},
+		{"relative entries", "/a:.:bin:/b", "/a:/b"},
+		{"first of a repeat wins", "/a:/b:/a", "/a:/b"},
+		{"nothing usable", ".:bin", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := absolutePath(tt.in); got != tt.want {
+				t.Errorf("absolutePath(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildDefaultsToThisProcessPath(t *testing.T) {
+	if !Supported() {
+		t.Skip("no installer for this platform")
+	}
+	t.Setenv("PATH", "/opt/helpers/bin:/usr/bin")
+	p, err := Build(Config{Home: "/home/u"})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if !strings.Contains(p.Contents, "/opt/helpers/bin:/usr/bin") {
+		t.Errorf("the service does not get the installing shell's PATH:\n%s", p.Contents)
 	}
 }
