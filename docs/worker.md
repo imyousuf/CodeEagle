@@ -349,6 +349,29 @@ A sync holds an exclusive lock on the project's database while it runs, so
 `codeeagle query` and similar can fail while the worker is syncing. Wait for
 the sync to finish and try again.
 
+### A sync never seems to finish, and memory climbs
+
+Look for a directory under a configured repository that is filling with
+files: a scratch area other tools write to, an unpacked archive, build output.
+The worker syncs again whenever something changes, and a change that lands
+during a sync is kept for the next one, so a directory that never goes quiet
+keeps the worker busy indefinitely. Every file in it is indexed too, and the
+graph grows with it -- 400,000 scratch files once became nine million nodes, two
+hundred million edges and a 41 GB database. Badger maps that database into
+memory, so the process looks as large as the files are.
+
+Stop the worker, exclude the directory, and remove what was indexed:
+
+```bash
+systemctl --user stop codeeagle-worker.service
+# add '**/Downloads/scratch/**' to watch.exclude in the project's config
+codeeagle prune --path ~/Downloads/scratch --dry-run   # count it
+codeeagle prune --path ~/Downloads/scratch
+```
+
+`prune` copies everything else into a fresh database and swaps it in, keeping
+the old one beside it as `graph.db.before-prune-<time>` until you delete it.
+
 ### Syncs fail with `a program it runs is not on PATH`
 
 A `$(...)` in the config ran a program the worker cannot find, usually

@@ -115,6 +115,7 @@ codeeagle query duplicates [--json]     # Find duplicate files by content hash
 
 codeeagle rag <query>                   # Semantic search over the knowledge graph
 codeeagle backpop [--all]               # Run linker phases on existing graph
+codeeagle prune --path <dir> [--dry-run] # Rebuild the graph without a directory indexed by mistake
 codeeagle metrics [service|file|func]   # Show code quality metrics
 codeeagle mcp serve                     # Start MCP server (stdio transport)
 

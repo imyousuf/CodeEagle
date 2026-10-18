@@ -79,6 +79,7 @@ func init() {
 	rootCmd.AddCommand(newHookCmd())
 	rootCmd.AddCommand(newBackpopPathsCmd())
 	rootCmd.AddCommand(newBackpopCmd())
+	rootCmd.AddCommand(newPruneCmd())
 	rootCmd.AddCommand(newMCPCmd())
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newUpdateCmd())

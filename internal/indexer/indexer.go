@@ -144,10 +144,17 @@ func (idx *Indexer) ChangedFiles() []string {
 // ensure unique identity across directories.
 // If no repo root matches, the path is returned as-is.
 func (idx *Indexer) toRelativePath(absPath string) string {
-	for _, root := range idx.repoRoots {
+	return GraphPath(idx.repoRoots, idx.nonGitRoots, absPath)
+}
+
+// GraphPath returns the path a file at absPath is recorded under in the graph,
+// given the configured repository roots and which of them are not git
+// repositories. A path outside every root is returned unchanged.
+func GraphPath(repoRoots []string, nonGitRoots map[string]bool, absPath string) string {
+	for _, root := range repoRoots {
 		rel, err := filepath.Rel(root, absPath)
 		if err == nil && !strings.HasPrefix(rel, "..") {
-			if idx.nonGitRoots[root] || len(idx.repoRoots) > 1 {
+			if nonGitRoots[root] || len(repoRoots) > 1 {
 				// A path is only an identity if it is unique, and a bare
 				// repository-relative one is not: two repositories both
 				// holding cmd/main.go produce the same path, so the same node
