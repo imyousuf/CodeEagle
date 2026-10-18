@@ -34,7 +34,11 @@ PACKAGES=./... ./pkg/jev/...
 # "file requires newer Go version goX.Y (application built with goX.Z)".
 # We therefore install a pinned version *from source* with the local toolchain
 # instead of relying on whatever prebuilt binary happens to be on PATH.
-GOLANGCI_LINT_VERSION?=v2.13.2
+# The release also fixes which x/tools reads that export data, and a Go patch
+# release can outrun it: Go 1.27.2's export data version 5 is unreadable by
+# v2.13.2 even when built with 1.27.2. Bump this when lint fails with "export
+# data version N is greater than maximum supported version".
+GOLANGCI_LINT_VERSION?=v2.15.0
 GOBIN_DIR:=$(shell go env GOBIN)
 ifeq ($(GOBIN_DIR),)
 GOBIN_DIR:=$(shell go env GOPATH)/bin
