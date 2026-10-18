@@ -453,3 +453,49 @@ func TestEventOpString(t *testing.T) {
 		})
 	}
 }
+
+// TestExcludeMatcherAppliesConfiguredPatterns covers the check prune makes
+// before deleting a directory: whether the configuration already excludes it.
+// A matcher built without loading its patterns matches nothing, and reported
+// a directory as not excluded right after it had been.
+func TestExcludeMatcherAppliesConfiguredPatterns(t *testing.T) {
+	m := NewExcludeMatcher([]string{"**/Downloads/mark/**"})
+	for _, path := range []string{"/home/u/Downloads/mark", "/home/u/Downloads/mark/a/b.txt"} {
+		if !m.Match(path) {
+			t.Errorf("Match(%q) = false, want the configured pattern to exclude it", path)
+		}
+	}
+	for _, path := range []string{"/home/u/Downloads/marketing/plan.txt", "/home/u/Documents/mark/x"} {
+		if m.Match(path) {
+			t.Errorf("Match(%q) = true, want it left alone", path)
+		}
+	}
+}
+
+// TestLoadPatternsDoesNotEnterExcludedDirectories covers the walk for
+// .gitignore files. It ignored configured excludes, so a scratch directory of
+// millions of files was crawled on every sync even once it was excluded, and
+// a .gitignore inside it could re-include what the configuration excluded.
+func TestLoadPatternsDoesNotEnterExcludedDirectories(t *testing.T) {
+	root := t.TempDir()
+	scratch := filepath.Join(root, "Downloads", "mark", "lane")
+	if err := os.MkdirAll(scratch, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Read, this negation would override the configured exclude for every
+	// .txt beside it.
+	if err := os.WriteFile(filepath.Join(scratch, ".gitignore"), []byte("!*.txt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewGitIgnoreMatcher([]string{root}, []string{"**/Downloads/mark/**"})
+	if err := m.LoadPatterns(); err != nil {
+		t.Fatal(err)
+	}
+	if !m.Match(filepath.Join(scratch, "notes.txt")) {
+		t.Error("a .gitignore inside an excluded directory was loaded and re-included its files")
+	}
+	if !m.Match(scratch) {
+		t.Error("the excluded directory is no longer excluded")
+	}
+}

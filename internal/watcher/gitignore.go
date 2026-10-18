@@ -30,6 +30,19 @@ func NewGitIgnoreMatcher(repoRoots []string, excludePatterns []string) *GitIgnor
 	}
 }
 
+// NewExcludeMatcher returns a matcher for configured exclude patterns alone,
+// without the .gitignore files under the repositories. Finding those means
+// walking every repository, which for a directory full of generated files is
+// the expensive part; this answers "does the configuration exclude this?"
+// without it.
+func NewExcludeMatcher(excludePatterns []string) *GitIgnoreMatcher {
+	m := &GitIgnoreMatcher{excludePatterns: excludePatterns}
+	for _, p := range excludePatterns {
+		m.rules = append(m.rules, parsePattern(p, ""))
+	}
+	return m
+}
+
 // LoadPatterns finds and parses .gitignore files in repo roots and subdirectories.
 // It also loads the excludePatterns from config.
 func (m *GitIgnoreMatcher) LoadPatterns() error {
@@ -40,7 +53,12 @@ func (m *GitIgnoreMatcher) LoadPatterns() error {
 		m.rules = append(m.rules, parsePattern(p, ""))
 	}
 
-	// Walk each repo root and load .gitignore files.
+	// Walk each repo root and load .gitignore files. A directory the
+	// configuration excludes is not entered: nothing under it is indexed, so
+	// its .gitignore files decide nothing, and a scratch directory of millions
+	// of generated files would otherwise be crawled on every sync and every
+	// watcher start just to look for them.
+	configured := append([]ignoreRule(nil), m.rules...)
 	for _, root := range m.repoRoots {
 		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
@@ -49,6 +67,9 @@ func (m *GitIgnoreMatcher) LoadPatterns() error {
 			if info.IsDir() {
 				base := info.Name()
 				if base == ".git" || base == "node_modules" || base == "vendor" {
+					return filepath.SkipDir
+				}
+				if path != root && matchesAny(configured, path) {
 					return filepath.SkipDir
 				}
 				return nil
@@ -73,6 +94,17 @@ func (m *GitIgnoreMatcher) LoadPatterns() error {
 func (m *GitIgnoreMatcher) Match(path string) bool {
 	matched := false
 	for _, rule := range m.rules {
+		if matchRule(rule, path) {
+			matched = !rule.negation
+		}
+	}
+	return matched
+}
+
+// matchesAny applies rules the way Match does, negations included.
+func matchesAny(rules []ignoreRule, path string) bool {
+	matched := false
+	for _, rule := range rules {
 		if matchRule(rule, path) {
 			matched = !rule.negation
 		}
