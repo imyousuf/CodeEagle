@@ -172,7 +172,7 @@ func TestRegistryLogging(t *testing.T) {
 	if logs[0] != "  -> tool: search_nodes" {
 		t.Errorf("expected start log, got %q", logs[0])
 	}
-	if logs[1] != "  <- tool search_nodes (ok)" {
+	if logs[1] != "  <- tool search_nodes (ok, 7 bytes)" {
 		t.Errorf("expected completion log, got %q", logs[1])
 	}
 }
@@ -197,7 +197,7 @@ func TestRegistryLoggingFailedTool(t *testing.T) {
 	if len(logs) != 2 {
 		t.Fatalf("expected 2 log entries, got %d: %v", len(logs), logs)
 	}
-	if logs[1] != "  <- tool failing_tool (failed)" {
+	if logs[1] != "  <- tool failing_tool (failed: error)" {
 		t.Errorf("expected failure log, got %q", logs[1])
 	}
 }

@@ -744,7 +744,7 @@ func TestPlannerVerboseToolLogging(t *testing.T) {
 		if strings.Contains(log, "-> tool: get_graph_overview") {
 			foundToolStart = true
 		}
-		if strings.Contains(log, "<- tool get_graph_overview (ok)") {
+		if strings.Contains(log, "<- tool get_graph_overview (ok") {
 			foundToolEnd = true
 		}
 	}

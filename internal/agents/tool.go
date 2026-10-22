@@ -2,7 +2,9 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/imyousuf/CodeEagle/pkg/llm"
@@ -84,14 +86,19 @@ func (r *Registry) Execute(ctx context.Context, name string, args map[string]any
 		return "", false, fmt.Errorf("unknown tool: %s", name)
 	}
 	if r.log != nil {
-		r.log("  -> tool: %s", name)
+		if len(args) == 0 {
+			r.log("  -> tool: %s", name)
+		} else {
+			a, _ := json.Marshal(args)
+			r.log("  -> tool: %s %s", name, clipLog(string(a)))
+		}
 	}
 	result, success := t.Execute(ctx, args)
 	if r.log != nil {
 		if success {
-			r.log("  <- tool %s (ok)", name)
+			r.log("  <- tool %s (ok, %d bytes)", name, len(result))
 		} else {
-			r.log("  <- tool %s (failed)", name)
+			r.log("  <- tool %s (failed: %s)", name, clipLog(result))
 		}
 	}
 	return result, success, nil
@@ -113,4 +120,13 @@ func ToLLMTools(tools []Tool) []llm.Tool {
 		defs[i] = ToLLMTool(t)
 	}
 	return defs
+}
+
+// clipLog keeps a logged value to one short line.
+func clipLog(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 200 {
+		return s[:200] + "…"
+	}
+	return s
 }
