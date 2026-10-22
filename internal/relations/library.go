@@ -133,12 +133,21 @@ func (l *Library) showSection(rel *Relation, e *Evidence, from int) (string, err
 	if sec == nil {
 		return "", fmt.Errorf("section %q of %s is gone", e.HeadingPath, path)
 	}
-	header := fmt.Sprintf("%s § %s", path, sec.HeadingPath)
 	note := ""
 	if e.SectionHash != "" && e.SectionHash != sec.Hash {
 		note = "\n(this section has changed since it was quoted)"
 	}
+	return l.renderSection(path, sec, note, from, e.ID), nil
+}
 
+// ShowSection prints a section as it is on disk now, bounded, continuing
+// from a line into a long one.
+func (l *Library) ShowSection(path string, sec *Section, from int) string {
+	return l.renderSection(path, sec, "", from, ShortID(sec.NodeID))
+}
+
+func (l *Library) renderSection(path string, sec *Section, note string, from int, id string) string {
+	header := fmt.Sprintf("%s § %s", path, sec.HeadingPath)
 	var lines []string
 	if l.Resolve != nil {
 		if abs := l.Resolve(path); abs != "" {
@@ -165,10 +174,44 @@ func (l *Library) showSection(rel *Relation, e *Evidence, from int) (string, err
 	}
 	more := ""
 	if rest := len(lines) - shown; rest > 0 {
-		more = fmt.Sprintf("\n… %d more lines: show %s --from %d", rest, e.ID, from+shown)
+		more = fmt.Sprintf("\n… %d more lines: show %s --from %d", rest, id, from+shown)
 	}
 	return fmt.Sprintf("%s (lines %d–%d)%s\n\n%s%s", header, sec.Line, sec.EndLine, note,
-		strings.TrimRight(b.String(), "\n"), more), nil
+		strings.TrimRight(b.String(), "\n"), more)
+}
+
+// maxOutlineSections bounds an outline.
+const maxOutlineSections = 40
+
+// Outline lists a document's sections, each with the ID show expands, so an
+// agent can read the part it needs rather than the file.
+func (l *Library) Outline(subj *Subject) string {
+	last := 0
+	for _, sec := range subj.Sections {
+		last = max(last, sec.EndLine)
+	}
+	lines := []string{fmt.Sprintf("%s: %s (%s, lines 1–%d)", subj.Path, subj.Title, plural(len(subj.Sections), "section"), last)}
+	for i, sec := range subj.Sections {
+		if i >= maxOutlineSections {
+			lines = append(lines, fmt.Sprintf("… %d more sections", len(subj.Sections)-i))
+			break
+		}
+		lines = append(lines, fmt.Sprintf("%s § %s (lines %d–%d)", ShortID(sec.NodeID), sec.HeadingPath, sec.Line, sec.EndLine))
+	}
+	lines = append(lines, "expand: show <id>")
+	return strings.Join(lines, "\n")
+}
+
+// SectionByID finds a section by its node ID.
+func (l *Library) SectionByID(id string) (*Subject, *Section) {
+	for _, subj := range l.Subjects {
+		for _, sec := range subj.Sections {
+			if sec.NodeID == id {
+				return subj, sec
+			}
+		}
+	}
+	return nil, nil
 }
 
 func (l *Library) showSaid(e *Evidence) (string, error) {

@@ -99,3 +99,26 @@ func TestShowFindsAQuoteItsAnchorMissed(t *testing.T) {
 		t.Errorf("show did not land on the quote:\n%s", out)
 	}
 }
+
+// TestOutlineLeadsToEachSection covers reading a document a part at a time:
+// its outline lists each section with an ID, and that section is shown from
+// the indexed text when the file cannot be read.
+func TestOutlineLeadsToEachSection(t *testing.T) {
+	subjects, _ := corpus()
+	retry := subjects[0]
+	retry.Sections[0].Line, retry.Sections[0].EndLine = 3, 9
+	retry.Sections[1].Line, retry.Sections[1].EndLine = 10, 14
+	lib := &Library{Subjects: map[string]*Subject{retry.Path: retry}}
+
+	out := lib.Outline(retry)
+	if !strings.Contains(out, ShortID("sec-jitter")+" § Retry budget design > Jitter (lines 10–14)") || !strings.Contains(out, "lines 1–14") {
+		t.Errorf("outline:\n%s", out)
+	}
+	subj, sec := lib.SectionByID("sec-jitter")
+	if sec == nil || subj != retry {
+		t.Fatal("section not found by its ID")
+	}
+	if got := lib.ShowSection(subj.Path, sec, 0); !strings.Contains(got, "Full jitter on every backoff.") {
+		t.Errorf("section shown as:\n%s", got)
+	}
+}

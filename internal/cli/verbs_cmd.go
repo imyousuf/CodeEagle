@@ -165,9 +165,9 @@ func verbTools(v *verbs) []agents.Tool {
 		},
 		&verbTool{
 			name: "show",
-			desc: "Expand an evidence ID from a brief to the exact source text: the document section or the meeting turns. Bounded.",
+			desc: "Expand an evidence ID from a brief to the exact source text: the document section or the meeting turns. A document or relation ID lists the document's sections, each with an ID to show. Bounded.",
 			params: map[string]any{
-				"id":   map[string]any{"type": "string", "description": "An evidence ID, or a node ID prefix."},
+				"id":   map[string]any{"type": "string", "description": "An evidence ID, a section, document or relation ID, or another node ID prefix."},
 				"from": map[string]any{"type": "integer", "description": "Skip this many lines into a long section."},
 			},
 			required: []string{"id"},

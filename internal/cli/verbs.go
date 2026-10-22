@@ -480,9 +480,19 @@ func (v *verbs) Show(ctx context.Context, arg string, from int) (string, error) 
 		return ambiguous(arg, nodes), nil
 	}
 	n := nodes[0]
-	if n.Type == graph.NodeRelation {
-		if rel := lib.Relations[n.Properties["subject_path"]]; rel != nil {
-			return lib.Brief(rel, relations.DefaultBriefBudget, time.Time{}, ""), nil
+	// A document, or a relation, is shown as its outline: the brief is what
+	// brief is for, and a whole file is what show exists to avoid.
+	switch n.Type {
+	case graph.NodeRelation:
+		if subj := lib.Subjects[n.Properties["subject_path"]]; subj != nil {
+			return lib.Outline(subj), nil
+		}
+	case graph.NodeDocument:
+		if subj, sec := lib.SectionByID(n.ID); sec != nil {
+			return lib.ShowSection(subj.Path, sec, from), nil
+		}
+		if subj := lib.Subjects[n.FilePath]; subj != nil && n.ID == subj.RootID {
+			return lib.Outline(subj), nil
 		}
 	}
 	where := n.FilePath
