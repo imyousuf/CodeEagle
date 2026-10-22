@@ -179,6 +179,13 @@ func TestSelectDefersOnlyWithinTheRelevanceCaps(t *testing.T) {
 	if len(prop.Candidates) != 1 || len(prop.Deferred) != 2 || prop.CutByCaps != 5 {
 		t.Errorf("selected %d, deferred %d, cut %d; want 1, 2 and 5", len(prop.Candidates), len(prop.Deferred), prop.CutByCaps)
 	}
+	statuses := map[string]int{}
+	for _, c := range cands {
+		statuses[c.Status]++
+	}
+	if statuses[StatusSelected] != 1 || statuses[StatusDeferred] != 2 || statuses[StatusCut] != 3 {
+		t.Errorf("statuses = %v", statuses)
+	}
 	seen := map[string]bool{prop.Candidates[0].Subject.Path: true}
 	for _, c := range prop.Deferred {
 		if seen[c.Subject.Path] {

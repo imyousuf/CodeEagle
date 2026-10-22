@@ -570,6 +570,104 @@ removed, order shuffled) for correctness, staleness and citation validity.
 Target: 5–10× fewer tokens than file reading at equal or better accuracy.
 Dated results go in this document and decide the `mcp.tools` default.
 
+## Results (2026-10-22)
+
+Measured on the experiment corpus: 460 tech specs, 744 meetings with 3,600
+topic segments (recordings to 2026-10-16). Personal files are not in it yet;
+that waits on an export. One repetition per arm; treat differences of a
+tenth in accuracy as noise.
+
+**Bulk relating.** `codeeagle relations` with the per-run cap lifted judged
+3,130 pairs in 451 decision-model requests (2.4M input tokens, 14 s) and
+accepted 303; briefs for the 165 documents with an accepted meeting take
+about 8 minutes four at a time with GLM-5.3-Flash (1.3M input, 0.2M output
+tokens).
+
+**Grounding.** A blind judge (Opus) read 60 sampled brief lines, 12 of each
+kind, beside their quotes:
+
+| judged against | supported | partly | unsupported |
+|---|---|---|---|
+| the quotes alone | 17% | 78% | 5% |
+| the passages around the quotes, as `show` prints them | 42-48% | 50-57% | 2% |
+
+"Partly" is mostly detail beyond the quoted words: a rationale, a number, a
+second meeting. What it should not include, and still does with
+GLM-5.3-Flash after the writing rules were tightened: a proposal written as
+a decision, a claim that something was never recorded, a follow-up called
+unassigned that someone took. A conflict is now shown in its two verified
+quotes rather than the model's paraphrase, which had put the meeting's
+position on the document's side; conflict and event dates now come from the
+evidence's meeting. With DeepSeek-V4.1-Flash writing instead
+(53 lines from 60 briefs): 57% supported, 42% partly, 2% unsupported, and
+3 unverified lines dropped in 60 briefs against GLM's 39 in 165, at about
+five times the cost per brief (about a cent). It is the better writer;
+where it is the transcripts model, briefs use it unless `relations.model`
+says otherwise.
+
+**Tokens to answer.** 20 questions (13 on where a spec stands, 2 on
+meetings, 3 on specs no meeting was judged to discuss, 2 the sources cannot
+answer), answered by Sonnet under `claude -p` in restricted mode with at most
+15 turns and $1, graded blind by Opus against references Opus drafted with
+every tool and a separate agent then checked against the sources (it
+corrected a material error in 7 of the 20 drafts; a person has not yet
+reviewed them). Medians per answer:
+
+| arm | accuracy | fully right | input tokens | turns | cost | hit the turn cap |
+|---|---|---|---|---|---|---|
+| grep (Read, Grep, Glob) | 0.42 | 5% | 382k | 15 | $0.41 | 3 |
+| existing MCP tools | 0.42 | 5% | 99k (3.9x less) | 8 | $0.15 | 0 |
+| find, brief, show | 0.50 | 15% | 81k (4.7x less) | 14 | $0.09 | 3 |
+| everything | 0.57 | 15% | 125k (3.0x less) | 9 | $0.15 | 0 |
+
+The first run of the verbs scored 0.30 and hit the turn cap on 11 of 20:
+`brief` on a meeting listed only the documents it discussed and `find` gave
+a meeting as a title, so agents probed with `show` until they ran out of
+turns. With a meeting's brief carrying its decisions, topics and follow-ups,
+`show` on a topic printing what was said, and `find` naming the part that
+matched, the verbs reached the numbers above.
+
+`mcp.tools` stays `all`: it is the most accurate, at a third of grep's
+tokens. `verbs` is the cheapest and still beats grep and the existing tools
+on accuracy, for clients that pay per tool definition. Accuracy is low
+across the board because the references synthesise several meetings and few
+answers get everything in 15 turns; the comparison between arms is the
+point. The two unanswerable questions were answered correctly by the verbs
+and by everything; grep spent its whole dollar searching for one of them
+and returned nothing.
+
+**Conflicts.** A blind judge read every conflict in the corpus's briefs,
+as its two verified quotes with the turns around the meeting's words. With
+the decision model asked whether the meeting "decided or stated" something
+incompatible: 14 conflicts, 8 real, 2 not, 4 unclear, mostly one person's
+proposal set against the document. Asked whether the meeting "decided or
+settled" it: 7 conflicts, 6 real, none wrong, 1 unclear on a garbled
+transcript. Some real conflicts now appear as events instead; a conflict
+sends a reader to fix a document, so precision wins.
+
+**Recall, end to end.** The checked references name the meetings that
+discussed each of 16 specs. Of 80 (spec, meeting date) pairs they name, the
+specs' relations held 16 (20%). The references include loosely related
+meetings, so this understates recall, but not by enough to excuse it.
+`relations --plan --doc` lists every candidate for one document and what
+became of it, and on the Python SDK spec it shows where the rest go: pairs
+labelled related during calibration at 0.88 were judged in the bulk run at
+0.66-0.78, below the gate, since a pair's probability moves with the other
+candidates judged beside it; and many named meetings were proposed but
+past the per-document cap of eight. The gate on the labelled pairs:
+
+| gate | precision | recall |
+|---|---|---|
+| 0.70 | 0.76 | 0.81 |
+| 0.75 | 0.78 | 0.78 |
+| 0.80 | 0.86 | 0.67 |
+| 0.85 | 0.93 | 0.52 |
+
+Agents answering with every tool make up for missing relations by searching
+meetings directly, which is part of why that arm leads.
+
+Not yet measured: stale-shown-as-current.
+
 ## Deferred
 
 - Document ↔ document relations (an issue in a tracker export and a spec).

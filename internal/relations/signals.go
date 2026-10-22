@@ -84,7 +84,19 @@ type Candidate struct {
 	Sections []*Section
 	Segments []*Segment
 	Score    float64
+	// Status is what Select did with the candidate: StatusSelected,
+	// StatusJudged, StatusUnsupported, StatusCut or StatusDeferred.
+	Status string
 }
+
+// What Select did with a candidate.
+const (
+	StatusSelected    = "selected"
+	StatusJudged      = "judged"
+	StatusUnsupported = "no meaning"
+	StatusCut         = "past the caps"
+	StatusDeferred    = "deferred"
+)
 
 // Key identifies the pair.
 func (c *Candidate) Key() string { return c.Subject.Path + "\x00" + c.Meeting.SessionID }
@@ -300,6 +312,7 @@ func (p *Proposer) SelectWithin(cands []*Candidate, judged func(*Candidate) bool
 	for _, c := range cands {
 		if c.Signals&SignalSaid == 0 && embedded[c.Subject] {
 			unsupported++
+			c.Status = StatusUnsupported
 			continue
 		}
 		kept = append(kept, c)
@@ -323,11 +336,13 @@ func (p *Proposer) SelectWithin(cands []*Candidate, judged func(*Candidate) bool
 	for _, c := range cands {
 		if judged != nil && judged(c) {
 			prop.AlreadyJudged++
+			c.Status = StatusJudged
 			continue
 		}
 		if (p.opts.MaxPerSubject > 0 && perSubject[c.Subject.Path] >= p.opts.MaxPerSubject) ||
 			(p.opts.MaxPerMeeting > 0 && perMeeting[c.Meeting.SessionID] >= p.opts.MaxPerMeeting) {
 			prop.CutByCaps++
+			c.Status = StatusCut
 			continue
 		}
 		// A deferred candidate still takes its place among the best few for
@@ -337,8 +352,10 @@ func (p *Proposer) SelectWithin(cands []*Candidate, judged func(*Candidate) bool
 		if maxPairs >= 0 && len(prop.Candidates) >= maxPairs {
 			prop.CutByCaps++
 			prop.Deferred = append(prop.Deferred, c)
+			c.Status = StatusDeferred
 			continue
 		}
+		c.Status = StatusSelected
 		prop.Candidates = append(prop.Candidates, c)
 	}
 	return prop

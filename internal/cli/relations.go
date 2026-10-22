@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -156,6 +157,8 @@ type relationsRun struct {
 	cands    []*relations.Candidate
 	prop     *relations.Proposal
 	hasVec   bool
+	// focused is set when the run is limited to one document or meeting.
+	focused bool
 }
 
 // proposeRelations loads the corpus from store and proposes candidates.
@@ -192,6 +195,7 @@ func proposeRelations(ctx context.Context, errOut io.Writer, cfg *config.Config,
 	return &relationsRun{
 		subjects: subjects, meetings: meetings, existing: existing, proposer: p,
 		cands: cands, prop: p.Select(cands, relations.JudgedBy(existing)), hasVec: vec != nil,
+		focused: o.doc != "" || o.meeting != "",
 	}, nil
 }
 
@@ -495,6 +499,33 @@ func printProposal(out io.Writer, run *relationsRun, top int) {
 	fmt.Fprintf(out, "Judging:   %d pairs in %d requests, ~%dk input tokens\n",
 		len(prop.Candidates), reqs, (tokens+999)/1000)
 
+	if run.focused {
+		// For one document or meeting, every candidate and what became of
+		// it: what was proposed and not judged is where recall is lost.
+		cands := append([]*relations.Candidate(nil), run.cands...)
+		sort.SliceStable(cands, func(i, j int) bool { return cands[i].Score > cands[j].Score })
+		fmt.Fprintln(out, "\nEvery candidate, best first:")
+		for i, c := range cands {
+			if i >= max(top, 1)*5 {
+				fmt.Fprintf(out, "  … %d more\n", len(cands)-i)
+				break
+			}
+			status := c.Status
+			if rel := run.existing[c.Subject.Path]; rel != nil {
+				if v := rel.Links[c.Meeting.SessionID]; v != nil {
+					verdict := "rejected"
+					if v.Accepted {
+						verdict = "accepted"
+					}
+					status = fmt.Sprintf("%s p=%.2f", verdict, v.P)
+				}
+			}
+			fmt.Fprintf(out, "  %.2f  %-22s %s  ↔  %s %s  [%s]\n", c.Score, status, c.Subject.Path,
+				c.Meeting.Date.Format("2006-01-02"), truncateText(c.Meeting.Title, 50),
+				strings.Join(c.Signals.Names(), ","))
+		}
+		return
+	}
 	if top > 0 && len(prop.Candidates) > 0 {
 		fmt.Fprintln(out, "\nBest candidates:")
 		for i, c := range prop.Candidates {
