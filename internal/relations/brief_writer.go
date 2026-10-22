@@ -147,6 +147,7 @@ func (w *BriefWriter) Update(ctx context.Context, rel *Relation, subj *Subject, 
 	rel.BriefModel = w.client.Model()
 	rel.BriefedAt = w.now().UTC()
 	rel.Revision++
+	rel.Stamp(rel.BriefedAt)
 	rep.Written = true
 	return rep, nil
 }

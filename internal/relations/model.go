@@ -35,6 +35,7 @@ const (
 	propBriefModel   = "brief_model"
 	propBriefedAt    = "briefed_at"
 	propRevision     = "revision"
+	propRevisions    = "revisions_json"
 	propRelationKind = "kind"
 )
 
@@ -64,6 +65,36 @@ type Relation struct {
 	// Revision increments with every new brief, so a reader can ask what
 	// changed since the one it last saw.
 	Revision int
+	// Revisions records when recent revisions were written, so "since
+	// revision N" can be turned into a time.
+	Revisions []RevisionStamp
+}
+
+// RevisionStamp is when one revision of a brief was written.
+type RevisionStamp struct {
+	Rev int       `json:"rev"`
+	At  time.Time `json:"at"`
+}
+
+// maxRevisionStamps bounds the revision history kept.
+const maxRevisionStamps = 20
+
+// Stamp records that the current revision was written at t.
+func (r *Relation) Stamp(t time.Time) {
+	r.Revisions = append(r.Revisions, RevisionStamp{Rev: r.Revision, At: t})
+	if len(r.Revisions) > maxRevisionStamps {
+		r.Revisions = r.Revisions[len(r.Revisions)-maxRevisionStamps:]
+	}
+}
+
+// RevisionTime returns when revision rev was written, if it is still known.
+func (r *Relation) RevisionTime(rev int) (time.Time, bool) {
+	for _, s := range r.Revisions {
+		if s.Rev == rev {
+			return s.At, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // SectionState is a section's hash and when that hash first appeared.
@@ -221,9 +252,10 @@ func (r *Relation) Node() (*graph.Node, error) {
 		propRevision:     strconv.Itoa(r.Revision),
 	}
 	for key, v := range map[string]any{
-		propSections: r.Sections,
-		propLinks:    r.Links,
-		propEvidence: r.Evidence,
+		propSections:  r.Sections,
+		propLinks:     r.Links,
+		propEvidence:  r.Evidence,
+		propRevisions: r.Revisions,
 	} {
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -282,6 +314,9 @@ func FromNode(n *graph.Node) (*Relation, error) {
 		return nil, err
 	}
 	if err := decode(propEvidence, &r.Evidence); err != nil {
+		return nil, err
+	}
+	if err := decode(propRevisions, &r.Revisions); err != nil {
 		return nil, err
 	}
 	if raw := n.Properties[propBrief]; raw != "" {

@@ -1,0 +1,201 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/imyousuf/CodeEagle/internal/agents"
+	"github.com/imyousuf/CodeEagle/internal/config"
+	"github.com/imyousuf/CodeEagle/internal/relations"
+)
+
+func newFindCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "find <words>",
+		Short: "Find documents and meetings, one line each, with IDs to brief or show",
+		Long: `Find the documents and meetings a query is about. Hits fold up to what can
+be acted on: a section to its document, a document to what is known about it,
+a segment or decision to its meeting. At most eight lines, each starting with
+an ID that brief and show accept.`,
+		Example: `  codeeagle find retry policy
+  codeeagle find "sticky board"`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := loadVerbs()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			out, err := v.Find(cmd.Context(), strings.Join(args, " "))
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), out)
+			return nil
+		},
+	}
+}
+
+func newBriefCmd() *cobra.Command {
+	var (
+		budget int
+		since  string
+	)
+	cmd := &cobra.Command{
+		Use:   "brief <id | words>",
+		Short: "Where a document stands: what holds now, what changed, what is open, with citations",
+		Long: `Print the brief of a document and the meetings that discussed it: a headline,
+what holds now, where the document and a later meeting disagree, what is
+unresolved, and freshness flags. Every line ends with the evidence IDs it
+rests on; show expands one.
+
+Give an ID from find, or words. Words that clearly name one document are
+briefed; words that match several list them instead.
+
+--budget caps the output in estimated tokens (default 400, at most 2000);
+lines are dropped in a fixed order to fit. --since adds what changed after a
+date, a time, a duration (7d) or a revision printed in the header (@r3), and
+puts it first.`,
+		Example: `  codeeagle brief 3fa9c2
+  codeeagle brief retry policy --budget 250
+  codeeagle brief 3fa9c2 --since @r4`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := loadVerbs()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			out, err := v.Brief(cmd.Context(), strings.Join(args, " "), budget, since)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), out)
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&budget, "budget", relations.DefaultBriefBudget, "most estimated tokens to print (max 2000)")
+	cmd.Flags().StringVar(&since, "since", "", "also show what changed after this: a date, RFC 3339 time, 7d/36h/2w, or @rN")
+	return cmd
+}
+
+func newShowCmd() *cobra.Command {
+	var from int
+	cmd := &cobra.Command{
+		Use:   "show <evidence-id | node-id-prefix>",
+		Short: "Expand a citation to its source text, bounded",
+		Long: `Show what an evidence ID from a brief rests on: a document quote as its
+section on disk now (at most 60 lines; --from continues a long one), noting
+if the section changed since it was quoted; a meeting quote as the turns
+around it, with speakers named. Given a node ID prefix instead, show prints
+that node. Never a whole file.`,
+		Example: `  codeeagle show 9c4d10
+  codeeagle show e1a2b3 --from 60`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			v, err := loadVerbs()
+			if err != nil {
+				return err
+			}
+			defer v.Close()
+			out, err := v.Show(cmd.Context(), args[0], from)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), out)
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&from, "from", 0, "skip this many lines into a long section")
+	return cmd
+}
+
+func loadVerbs() (*verbs, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	return newVerbs(cfg), nil
+}
+
+// verbTools exposes find, brief and show as agent and MCP tools. Their
+// descriptions are short on purpose: every tool definition is sent with
+// every request.
+func verbTools(v *verbs) []agents.Tool {
+	return []agents.Tool{
+		&verbTool{
+			name: "find",
+			desc: "Find documents and meetings about something. One line each, starting with an ID for brief or show. Start here.",
+			params: map[string]any{
+				"query": map[string]any{"type": "string", "description": "What to look for, in words."},
+			},
+			required: []string{"query"},
+			run: func(ctx context.Context, a map[string]any) (string, error) {
+				return v.Find(ctx, str(a, "query"))
+			},
+		},
+		&verbTool{
+			name: "brief",
+			desc: "Current state of a document and the meetings that discussed it: headline, what holds now, conflicts, open items, freshness. Every line cites evidence IDs for show.",
+			params: map[string]any{
+				"target": map[string]any{"type": "string", "description": "An ID from find, or words naming the document."},
+				"budget": map[string]any{"type": "integer", "description": "Most tokens to return (default 400, max 2000)."},
+				"since":  map[string]any{"type": "string", "description": "Also what changed after: a date, 7d, or @rN from a previous brief."},
+			},
+			required: []string{"target"},
+			run: func(ctx context.Context, a map[string]any) (string, error) {
+				return v.Brief(ctx, str(a, "target"), num(a, "budget"), str(a, "since"))
+			},
+		},
+		&verbTool{
+			name: "show",
+			desc: "Expand an evidence ID from a brief to the exact source text: the document section or the meeting turns. Bounded.",
+			params: map[string]any{
+				"id":   map[string]any{"type": "string", "description": "An evidence ID, or a node ID prefix."},
+				"from": map[string]any{"type": "integer", "description": "Skip this many lines into a long section."},
+			},
+			required: []string{"id"},
+			run: func(ctx context.Context, a map[string]any) (string, error) {
+				return v.Show(ctx, str(a, "id"), num(a, "from"))
+			},
+		},
+	}
+}
+
+type verbTool struct {
+	name, desc string
+	params     map[string]any
+	required   []string
+	run        func(context.Context, map[string]any) (string, error)
+}
+
+func (t *verbTool) Name() string        { return t.name }
+func (t *verbTool) Description() string { return t.desc }
+func (t *verbTool) Parameters() map[string]any {
+	return map[string]any{"type": "object", "properties": t.params, "required": t.required}
+}
+func (t *verbTool) Execute(ctx context.Context, args map[string]any) (string, bool) {
+	out, err := t.run(ctx, args)
+	if err != nil {
+		return err.Error(), false
+	}
+	return out, true
+}
+
+func str(a map[string]any, key string) string {
+	s, _ := a[key].(string)
+	return s
+}
+
+func num(a map[string]any, key string) int {
+	switch n := a[key].(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	}
+	return 0
+}

@@ -96,6 +96,14 @@ type RelationsConfig struct {
 	Model    string `mapstructure:"model" yaml:"model,omitempty"`
 }
 
+// MCPConfig holds MCP server settings.
+type MCPConfig struct {
+	// Tools chooses what the server exposes: "all" (the default) or "verbs",
+	// only find, brief and show. Every tool definition is sent with every
+	// request, so fewer tools cost an agent less on each turn.
+	Tools string `mapstructure:"tools" yaml:"tools,omitempty"`
+}
+
 // VectorConfig holds vector index maintenance settings.
 type VectorConfig struct {
 	// BackfillLimit caps how many nodes one sync embeds when bringing the
@@ -316,6 +324,8 @@ type Config struct {
 	// Relations contains configuration for discovering relations between
 	// documents and the meetings that discussed them.
 	Relations RelationsConfig `mapstructure:"relations" yaml:"relations,omitempty"`
+	// MCP contains MCP server configuration.
+	MCP MCPConfig `mapstructure:"mcp" yaml:"mcp,omitempty"`
 	// ConfigDir is the resolved .CodeEagle directory path (not persisted in YAML).
 	ConfigDir string `mapstructure:"-" yaml:"-"`
 	// ProjectConf is the parsed .CodeEagle.conf if found (not persisted).

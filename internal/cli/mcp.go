@@ -59,13 +59,22 @@ This command is typically invoked automatically by the Claude CLI via
 			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
 
 			registry := agents.NewRegistry()
-			for _, tool := range agents.NewPlannerTools(ctxBuilder) {
+			// find, brief and show open the graph themselves, and again when
+			// it changes, so what the worker writes during a session is seen.
+			v := newVerbs(cfg)
+			defer v.Close()
+			for _, tool := range verbTools(v) {
 				registry.Register(tool)
 			}
-			// Meeting tools appear only when meetings are indexed: a tool whose
-			// only possible answer is "nothing is indexed" wastes an agent's turns.
-			for _, tool := range agents.NewMeetingTools(context.Background(), store) {
-				registry.Register(tool)
+			if cfg.MCP.Tools != "verbs" {
+				for _, tool := range agents.NewPlannerTools(ctxBuilder) {
+					registry.Register(tool)
+				}
+				// Meeting tools appear only when meetings are indexed: a tool whose
+				// only possible answer is "nothing is indexed" wastes an agent's turns.
+				for _, tool := range agents.NewMeetingTools(context.Background(), store) {
+					registry.Register(tool)
+				}
 			}
 
 			// Set up tool call logging: to log file if --log is set, else to stderr if -v.
