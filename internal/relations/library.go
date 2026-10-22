@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -283,10 +284,80 @@ func readLines(path string, first, last int) []string {
 	return out
 }
 
-// MeetingBrief lists the documents a meeting was judged to discuss, with
-// their headlines.
-func (l *Library) MeetingBrief(m *Meeting) string {
+// Bounds on a meeting's brief.
+const (
+	maxMeetingSummary   = 500
+	maxPartSummary      = 180
+	maxMeetingQuote     = 200
+	maxTopicsInBrief    = 12
+	maxDecisionsInBrief = 8
+	maxActionsInBrief   = 8
+)
+
+// MeetingBrief is what a meeting settled, in a budget: its summary, the
+// decisions with their quotes, its topics with the IDs show expands to what
+// was said, its follow-ups, and the documents it was judged to discuss.
+// Without a store, while a sync holds the graph, it is the documents only.
+func (l *Library) MeetingBrief(ctx context.Context, m *Meeting, budget int) string {
+	if budget <= 0 {
+		budget = DefaultBriefBudget
+	}
+	budget = min(budget, MaxBriefBudget)
 	header := fmt.Sprintf("%s %s (%s)", m.Date.Format("2006-01-02"), m.Title, ShortID(m.NodeID))
+	parts := []*briefPart{}
+	summary := briefPart{keep: -1}
+	if m.Summary != "" {
+		summary.lines = []string{clip(m.Summary, maxMeetingSummary)}
+	}
+	decided := briefPart{title: "decided:", keep: 3}
+	topics := briefPart{title: "topics (show an ID for what was said):", keep: 4}
+	actions := briefPart{title: "follow-ups:", keep: 2}
+	if l.Store != nil {
+		children, _ := l.Store.GetNeighbors(ctx, m.NodeID, graph.EdgeContains, graph.Outgoing)
+		var segs []*graph.Node
+		for _, c := range children {
+			switch c.Type {
+			case graph.NodeTopicSegment:
+				segs = append(segs, c)
+			case graph.NodeDecision:
+				if len(decided.lines) >= maxDecisionsInBrief {
+					continue
+				}
+				line := "- " + clip(c.Properties[graph.PropSummary], maxPartSummary)
+				if q := c.Properties[graph.PropQuote]; q != "" {
+					line += fmt.Sprintf(" — %q", clip(q, maxMeetingQuote))
+					if c.Properties["quote_verified"] != "true" {
+						line += " (quote not found in the transcript)"
+					}
+				}
+				decided.lines = append(decided.lines, line+" ["+ShortID(c.ID)+"]")
+			case graph.NodeActionItem:
+				if len(actions.lines) >= maxActionsInBrief || strings.EqualFold(c.Properties["status"], "done") {
+					continue
+				}
+				who := c.Properties[graph.PropAssignee]
+				if who == "" {
+					who = "unassigned"
+				}
+				due := ""
+				if d := c.Properties[graph.PropDueDate]; d != "" {
+					due = ", due " + d
+				}
+				actions.lines = append(actions.lines, fmt.Sprintf("- %s (%s%s) [%s]",
+					clip(c.Properties[graph.PropSummary], maxPartSummary), who, due, ShortID(c.ID)))
+			}
+		}
+		sort.Slice(segs, func(i, j int) bool { return startOf(segs[i]) < startOf(segs[j]) })
+		for i, sg := range segs {
+			if i >= maxTopicsInBrief {
+				topics.lines = append(topics.lines, fmt.Sprintf("… %d more", len(segs)-i))
+				break
+			}
+			topics.lines = append(topics.lines, fmt.Sprintf("- %s %s–%s %s: %s", ShortID(sg.ID),
+				clock(startOf(sg)), clock(endOf(sg)), sg.Name, clip(sg.Properties[graph.PropSummary], maxPartSummary)))
+		}
+	}
+	docs := briefPart{title: "documents discussed:", keep: 2}
 	type hit struct {
 		rel *Relation
 		p   float64
@@ -297,19 +368,88 @@ func (l *Library) MeetingBrief(m *Meeting) string {
 			hits = append(hits, hit{r, v.P})
 		}
 	}
-	if len(hits) == 0 {
-		return header + "\nno document has been judged to be discussed in it"
-	}
 	sort.Slice(hits, func(i, j int) bool { return hits[i].p > hits[j].p })
-	lines := []string{header, "documents discussed:"}
 	for i, h := range hits {
 		if i >= maxDocsForAMeeting {
-			lines = append(lines, fmt.Sprintf("… %d more", len(hits)-i))
+			docs.lines = append(docs.lines, fmt.Sprintf("… %d more", len(hits)-i))
 			break
 		}
-		lines = append(lines, l.FinderLine(h.rel))
+		docs.lines = append(docs.lines, "- "+l.FinderLine(h.rel))
 	}
-	return strings.Join(lines, "\n")
+	parts = append(parts, &summary, &decided, &topics, &actions, &docs)
+	render := func() string {
+		out := []string{header}
+		for _, p := range parts {
+			if len(p.lines) == 0 {
+				continue
+			}
+			if p.title != "" {
+				out = append(out, p.title)
+			}
+			out = append(out, p.lines...)
+		}
+		if len(out) == 1 {
+			out = append(out, "nothing recorded about it yet")
+		}
+		return strings.Join(out, "\n")
+	}
+	for _, trim := range []struct {
+		p    *briefPart
+		keep int
+	}{{&docs, 2}, {&actions, 2}, {&topics, 4}, {&decided, 3}, {&docs, 0}, {&actions, 0}, {&topics, 2}} {
+		if EstimateTokens(render()) <= budget {
+			break
+		}
+		if len(trim.p.lines) > trim.keep {
+			trim.p.lines = trim.p.lines[:trim.keep]
+		}
+	}
+	return render()
+}
+
+func startOf(n *graph.Node) float64 {
+	v, _ := strconv.ParseFloat(n.Properties[graph.PropStartTime], 64)
+	return v
+}
+
+func endOf(n *graph.Node) float64 {
+	v, _ := strconv.ParseFloat(n.Properties[graph.PropEndTime], 64)
+	return v
+}
+
+// ShowSpan prints what was said in a meeting between two times, bounded,
+// from the given turn on, naming where to continue.
+func (l *Library) ShowSpan(m *Meeting, start, end float64, from int, id string) (string, error) {
+	header := fmt.Sprintf("%s %s (%s) %s–%s", m.Date.Format("2006-01-02"), m.Title, ShortID(m.NodeID), clock(start), clock(end))
+	if l.Transcripts == nil {
+		return header + "\n(the recording is not available)", nil
+	}
+	turns, err := l.Transcripts.Span(m, start, end)
+	if err != nil || len(turns) == 0 {
+		return header + "\n(the recording could not be read)", nil
+	}
+	if from > 0 && from < len(turns) {
+		turns = turns[from:]
+	}
+	var b strings.Builder
+	shown := 0
+	for _, t := range turns {
+		who := t.Speaker
+		if l.Speakers != nil {
+			who = l.Speakers.Name(m, t.Speaker)
+		}
+		line := fmt.Sprintf("%s %s: %s\n", clock(t.Start), who, strings.Join(strings.Fields(t.Text), " "))
+		if b.Len()+len(line) > maxShowChars {
+			break
+		}
+		b.WriteString(line)
+		shown++
+	}
+	more := ""
+	if rest := len(turns) - shown; rest > 0 {
+		more = fmt.Sprintf("\n… %d more turns: show %s --from %d", rest, id, from+shown)
+	}
+	return header + "\n\n" + strings.TrimRight(b.String(), "\n") + more, nil
 }
 
 // FinderLine is a relation in one line: its ID, document, headline, how many

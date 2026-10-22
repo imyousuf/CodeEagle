@@ -141,7 +141,7 @@ func verbTools(v *verbs) []agents.Tool {
 	return []agents.Tool{
 		&verbTool{
 			name: "find",
-			desc: "Find documents and meetings about something. One line each, starting with an ID for brief or show. Start here.",
+			desc: "Find documents and meetings about something: one line each with an ID for brief; meeting lines also name the matching topic or decision, with an ID for show. Start here.",
 			params: map[string]any{
 				"query": map[string]any{"type": "string", "description": "What to look for, in words."},
 			},
@@ -152,7 +152,7 @@ func verbTools(v *verbs) []agents.Tool {
 		},
 		&verbTool{
 			name: "brief",
-			desc: "Current state of a document and the meetings that discussed it: headline, what holds now, conflicts, open items, freshness. Every line cites evidence IDs for show.",
+			desc: "Where a document stands (headline, what holds now, conflicts, open items, freshness; lines cite evidence IDs), or a meeting's summary, decisions, topics and follow-ups.",
 			params: map[string]any{
 				"target": map[string]any{"type": "string", "description": "An ID from find, or words naming the document."},
 				"budget": map[string]any{"type": "integer", "description": "Most tokens to return (default 400, max 2000)."},
@@ -165,7 +165,7 @@ func verbTools(v *verbs) []agents.Tool {
 		},
 		&verbTool{
 			name: "show",
-			desc: "Expand an evidence ID from a brief to the exact source text: the document section or the meeting turns. A document or relation ID lists the document's sections, each with an ID to show. Bounded.",
+			desc: "Expand an ID to its source, bounded: evidence to the quoted section or turns; a topic to what was said; a document or relation to its sections, with IDs.",
 			params: map[string]any{
 				"id":   map[string]any{"type": "string", "description": "An evidence ID, a section, document or relation ID, or another node ID prefix."},
 				"from": map[string]any{"type": "integer", "description": "Skip this many lines into a long section."},

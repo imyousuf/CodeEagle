@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -240,8 +241,20 @@ func (v *verbs) findings(ctx context.Context, lib *relations.Library, query stri
 				if m == nil {
 					continue
 				}
-				key, f = "mtg:"+m.SessionID, finding{m: m,
-					line: fmt.Sprintf("%s mtg %s %s", relations.ShortID(m.NodeID), m.Date.Format("2006-01-02"), m.Title)}
+				line := fmt.Sprintf("%s mtg %s %s", relations.ShortID(m.NodeID), m.Date.Format("2006-01-02"), m.Title)
+				// The part that matched, so an agent can go straight to what
+				// was said rather than through the whole meeting.
+				switch n.Type {
+				case graph.NodeTopicSegment:
+					line += fmt.Sprintf(" · topic %s %q", relations.ShortID(n.ID), n.Name)
+				case graph.NodeDecision, graph.NodeActionItem:
+					what := "decided"
+					if n.Type == graph.NodeActionItem {
+						what = "follow-up"
+					}
+					line += fmt.Sprintf(" · %s %s %q", what, relations.ShortID(n.ID), clipFind(n.Properties[graph.PropSummary]))
+				}
+				key, f = "mtg:"+m.SessionID, finding{m: m, line: line}
 			}
 			if seen[key] {
 				continue
@@ -310,7 +323,7 @@ const clearMargin = 0.05
 // document or meeting, or words that clearly name one. When words match
 // several, it lists them instead, in the same call.
 func (v *verbs) Brief(ctx context.Context, arg string, budget int, since string) (string, error) {
-	return v.brief(ctx, arg, func(lib *relations.Library, rel *relations.Relation) (string, error) {
+	return v.brief(ctx, arg, budget, func(lib *relations.Library, rel *relations.Relation) (string, error) {
 		return v.renderBrief(lib, rel, budget, since)
 	})
 }
@@ -320,13 +333,13 @@ func (v *verbs) Brief(ctx context.Context, arg string, budget int, since string)
 // the document, and its freshness. Words that match several things, or a
 // meeting, still answer in text.
 func (v *verbs) BriefJSON(ctx context.Context, arg string) (string, error) {
-	return v.brief(ctx, arg, briefJSON)
+	return v.brief(ctx, arg, relations.DefaultBriefBudget, briefJSON)
 }
 
 // renderFunc turns a relation into what brief prints.
 type renderFunc func(lib *relations.Library, rel *relations.Relation) (string, error)
 
-func (v *verbs) brief(ctx context.Context, arg string, render renderFunc) (string, error) {
+func (v *verbs) brief(ctx context.Context, arg string, budget int, render renderFunc) (string, error) {
 	lib, done, err := v.begin(ctx)
 	if err != nil {
 		return "", err
@@ -334,7 +347,7 @@ func (v *verbs) brief(ctx context.Context, arg string, render renderFunc) (strin
 	defer done()
 	arg = strings.TrimSpace(arg)
 	if hexPrefix.MatchString(arg) {
-		if out, ok, err := v.briefByID(ctx, lib, arg, render); ok || err != nil {
+		if out, ok, err := v.briefByID(ctx, lib, arg, budget, render); ok || err != nil {
 			return out, err
 		}
 	}
@@ -351,7 +364,7 @@ func (v *verbs) brief(ctx context.Context, arg string, render renderFunc) (strin
 		case top.rel != nil:
 			return render(lib, top.rel)
 		case top.m != nil:
-			return lib.MeetingBrief(top.m), nil
+			return lib.MeetingBrief(ctx, top.m, budget), nil
 		}
 	}
 	lines := []string{"several things match; pass an ID to brief one:"}
@@ -371,7 +384,7 @@ func (v *verbs) renderBrief(lib *relations.Library, rel *relations.Relation, bud
 
 // briefByID briefs what an ID prefix names, reporting whether it named
 // anything.
-func (v *verbs) briefByID(ctx context.Context, lib *relations.Library, prefix string, render renderFunc) (string, bool, error) {
+func (v *verbs) briefByID(ctx context.Context, lib *relations.Library, prefix string, budget int, render renderFunc) (string, bool, error) {
 	if rel := lib.RelationByID(prefix); rel != nil {
 		out, err := render(lib, rel)
 		return out, true, err
@@ -396,7 +409,7 @@ func (v *verbs) briefByID(ctx context.Context, lib *relations.Library, prefix st
 		return fmt.Sprintf("%s: no meeting has been judged to discuss it", n.FilePath), true, nil
 	case graph.NodeMeeting, graph.NodeTopicSegment, graph.NodeDecision, graph.NodeActionItem:
 		if m := lib.Meetings[n.Properties[graph.PropMeetingID]]; m != nil {
-			return lib.MeetingBrief(m), true, nil
+			return lib.MeetingBrief(ctx, m, budget), true, nil
 		}
 	}
 	return fmt.Sprintf("%s is a %s; brief covers documents and meetings", n.Name, n.Type), true, nil
@@ -487,6 +500,19 @@ func (v *verbs) Show(ctx context.Context, arg string, from int) (string, error) 
 		if subj := lib.Subjects[n.Properties["subject_path"]]; subj != nil {
 			return lib.Outline(subj), nil
 		}
+	case graph.NodeTopicSegment:
+		if m := lib.Meetings[n.Properties[graph.PropMeetingID]]; m != nil {
+			start, _ := strconv.ParseFloat(n.Properties[graph.PropStartTime], 64)
+			end, _ := strconv.ParseFloat(n.Properties[graph.PropEndTime], 64)
+			return lib.ShowSpan(m, start, end, from, relations.ShortID(n.ID))
+		}
+	case graph.NodeDecision, graph.NodeActionItem:
+		if q := n.Properties[graph.PropQuote]; q != "" && lib.Meetings[n.Properties[graph.PropMeetingID]] != nil {
+			out, err := lib.ShowEvidence(nil, &relations.Evidence{
+				Kind: relations.EvidenceDecided, SessionID: n.Properties[graph.PropMeetingID], Quote: q,
+			}, from)
+			return n.Properties[graph.PropSummary] + "\n" + out, err
+		}
 	case graph.NodeDocument:
 		if subj, sec := lib.SectionByID(n.ID); sec != nil {
 			return lib.ShowSection(subj.Path, sec, from), nil
@@ -507,4 +533,13 @@ func (v *verbs) Show(ctx context.Context, arg string, from int) (string, error) 
 		text = text[:maxShowNodeChars] + "…"
 	}
 	return fmt.Sprintf("%s %s %s\n%s\n\n%s", relations.ShortID(n.ID), n.Type, n.Name, where, text), nil
+}
+
+// clipFind keeps a part named in a find line short.
+func clipFind(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 70 {
+		return s[:70] + "…"
+	}
+	return s
 }

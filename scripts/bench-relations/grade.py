@@ -39,7 +39,9 @@ Grade it:
 - correct: 2 if it agrees with the reference on every point that matters, 1 if \
 it is partly right or misses a key point, 0 if it is wrong, empty, or declines \
 when the reference has an answer. Extra detail the reference lacks is not an \
-error unless it contradicts the reference.
+error unless it contradicts the reference. Facts the reference marks as coming \
+from a meeting that is not in the index, or unindexed, are optional: an answer \
+is not marked down for leaving them out.
 - stale: true if it presents as current something the reference says was \
 superseded or changed.
 - contradictions: how many of its claims contradict the reference.

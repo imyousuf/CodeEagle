@@ -4,6 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 )
 
 func TestLocateQuoteFindsTheFewestTurns(t *testing.T) {
@@ -136,5 +139,50 @@ func TestConflictTakesItsMeetingsDate(t *testing.T) {
 	}
 	if len(rel.Brief.Conflicts) != 1 || rel.Brief.Conflicts[0].Date != "2026-10-14" {
 		t.Errorf("conflicts = %+v, want the meeting's date 2026-10-14", rel.Brief.Conflicts)
+	}
+}
+
+// TestMeetingBriefSaysWhatTheMeetingSettled covers brief on a meeting: its
+// decisions with quotes, its topics with IDs show expands, its follow-ups.
+func TestMeetingBriefSaysWhatTheMeetingSettled(t *testing.T) {
+	store, err := embedded.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	_, meetings := corpus()
+	m := meetings["s-plat"]
+	m.Summary = "The platform team agreed on retries."
+	nodes := []*graph.Node{
+		{ID: m.NodeID, Type: graph.NodeMeeting, Name: m.Title},
+		{ID: "seg-cap", Type: graph.NodeTopicSegment, Name: "Retry cap",
+			Properties: map[string]string{graph.PropStartTime: "10", graph.PropEndTime: "90", graph.PropSummary: "The cap goes to five."}},
+		{ID: "dec-1", Type: graph.NodeDecision, Name: "d",
+			Properties: map[string]string{graph.PropSummary: "Raise the retry cap to five", graph.PropQuote: "make the retry cap five", "quote_verified": "true"}},
+		{ID: "act-1", Type: graph.NodeActionItem, Name: "a",
+			Properties: map[string]string{graph.PropSummary: "Update the retry spec", graph.PropAssignee: "Ana"}},
+	}
+	for _, n := range nodes {
+		if err := store.AddNode(ctx, n); err != nil {
+			t.Fatal(err)
+		}
+		if n.ID != m.NodeID {
+			if err := store.AddEdge(ctx, &graph.Edge{ID: "c-" + n.ID, Type: graph.EdgeContains, SourceID: m.NodeID, TargetID: n.ID}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	lib := &Library{Store: store, Meetings: meetings, Relations: map[string]*Relation{}}
+	out := lib.MeetingBrief(ctx, m, 400)
+	for _, want := range []string{
+		"The platform team agreed on retries.",
+		`Raise the retry cap to five — "make the retry cap five"`,
+		ShortID("seg-cap") + " 00:10–01:30 Retry cap: The cap goes to five.",
+		"Update the retry spec (Ana)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("meeting brief lacks %q:\n%s", want, out)
+		}
 	}
 }
