@@ -2,6 +2,7 @@ package relations
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
@@ -70,6 +71,9 @@ func (f *FileTranscripts) turns(path string) ([]Turn, error) {
 	for _, t := range s.Turns() {
 		turns = append(turns, Turn{Speaker: t.Speaker, Text: t.Text, Start: t.StartTime, End: t.EndTime})
 	}
+	// A recording holds the microphone and the other side as separate
+	// tracks, so its turns are not in the order they were spoken.
+	sort.SliceStable(turns, func(i, j int) bool { return turns[i].Start < turns[j].Start })
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
