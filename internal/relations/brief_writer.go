@@ -17,7 +17,7 @@ import (
 
 // BriefVersion is bumped when what a brief is written from, or how, changes,
 // so existing briefs are written again.
-const BriefVersion = 2
+const BriefVersion = 3
 
 // BriefOptions bound brief writing.
 type BriefOptions struct {
@@ -454,9 +454,10 @@ func ground(r briefReply, snips []*snippet, relID string, speakers SpeakerNamer)
 		}
 	}
 	for _, c := range r.Conflicts {
-		docSnip := byLabel[c.Doc.Label]
+		docSnip, saidSnip := byLabel[c.Doc.Label], byLabel[c.Said.Label]
 		docID, saidID := verify(c.Doc), verify(c.Said)
-		if docID == "" || saidID == "" || docSnip == nil || docSnip.Kind != EvidenceDoc {
+		if docID == "" || saidID == "" || docSnip == nil || docSnip.Kind != EvidenceDoc ||
+			saidSnip == nil || saidSnip.Kind == EvidenceDoc {
 			dropped++
 			unverified = append(unverified, fmt.Sprintf("dropped conflict %q: doc %s / said %s did not both check out",
 				c.DiscussionSays, c.Doc.Label, c.Said.Label))
@@ -495,17 +496,13 @@ func anchor(s *snippet, quote string, speakers SpeakerNamer) Evidence {
 		e.SectionHash = s.sec.Hash
 	case s.meeting != nil:
 		e.SessionID = s.meeting.SessionID
-		for _, t := range s.turns {
-			if transcript.QuoteIn(t.Text, quote) {
-				e.Start, e.End = t.Start, t.End
-				e.Speaker = t.Speaker
-				if speakers != nil {
-					e.Speaker = speakers.Name(s.meeting, t.Speaker)
-				}
-				break
+		if i, j, ok := LocateQuote(s.turns, quote); ok {
+			e.Start, e.End = s.turns[i].Start, s.turns[j].End
+			e.Speaker = s.turns[i].Speaker
+			if speakers != nil {
+				e.Speaker = speakers.Name(s.meeting, s.turns[i].Speaker)
 			}
-		}
-		if e.Start == 0 && len(s.turns) > 0 {
+		} else if len(s.turns) > 0 {
 			e.Start, e.End = s.turns[0].Start, s.turns[len(s.turns)-1].End
 		}
 	}
@@ -528,11 +525,13 @@ func (w *BriefWriter) confirmConflicts(ctx context.Context, b *Brief, evidence [
 	for i, c := range b.Conflicts {
 		p := 0.0
 		if w.asker != nil {
+			// Only the two verbatim passages: the drafting model's summary of
+			// the change is a claim, and the decision model believes what its
+			// state asserts.
 			state := map[string]string{
-				"what_the_document_says":        quoteOf[c.DocCite],
-				"what_was_said_in_a_meeting":    quoteOf[c.SaidCite],
-				"date_of_the_meeting":           c.Date,
-				"summary_of_the_claimed_change": c.DiscussionSays,
+				"what_the_document_says":     quoteOf[c.DocCite],
+				"what_was_said_in_a_meeting": quoteOf[c.SaidCite],
+				"date_of_the_meeting":        c.Date,
 			}
 			name := fmt.Sprintf("contradicts_%d", i)
 			resp, err := w.asker.Ask(ctx, state, jev.Questions{

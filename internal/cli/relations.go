@@ -392,7 +392,6 @@ func writeRelationBriefs(ctx context.Context, out, errOut io.Writer, cfg *config
 		return err
 	}
 	defer client.Close()
-	relater := relations.NewRelater(store, nil, relations.RelaterOptions{})
 
 	bySubject := make(map[string]*relations.Subject, len(run.subjects))
 	for _, s := range run.subjects {
@@ -402,53 +401,30 @@ func writeRelationBriefs(ctx context.Context, out, errOut io.Writer, cfg *config
 	if limit <= 0 {
 		limit = 10
 	}
-	var written, pending, dropped, inTok, outTok, judgeReq int
-	for path, rel := range run.existing {
-		subj := bySubject[path]
-		if subj == nil || len(rel.Accepted()) == 0 {
-			continue
-		}
-		if written >= limit {
-			if relations.InputsHash(rel, subj, client.Model()) != rel.BriefInputsHash {
-				pending++
-			}
-			continue
-		}
-		rep, err := writer.Update(ctx, rel, subj, run.meetings)
-		inTok += rep.InputTokens
-		outTok += rep.OutputTokens
-		judgeReq += rep.JudgeRequests
-		if err != nil {
-			fmt.Fprintf(errOut, "Warning: %v\n", err)
-			continue
-		}
-		if !rep.Written {
-			continue
-		}
-		dropped += rep.Dropped
-		if verbose {
-			for _, u := range rep.Unverified {
+	br, err := relations.WriteBriefs(ctx, store, writer, run.existing, bySubject, run.meetings, limit, relations.DefaultBriefWorkers)
+	if verbose {
+		for path, lines := range br.Unverified {
+			for _, u := range lines {
 				fmt.Fprintf(errOut, "  unverified in %s: %s\n", path, u)
 			}
 		}
-		if err := relater.Write(ctx, rel, subj); err != nil {
-			return fmt.Errorf("store brief for %s: %w", path, err)
-		}
-		written++
 	}
-	fmt.Fprintf(out, "Briefs: %d written (%s, %dk in / %dk out tokens", written, client.Model(), (inTok+999)/1000, (outTok+999)/1000)
-	if judgeReq > 0 {
-		fmt.Fprintf(out, ", %d conflict checks", judgeReq)
+	fmt.Fprintf(out, "Briefs: %d written (%s, %dk in / %dk out tokens", br.Written, client.Model(), (br.TokensIn+999)/1000, (br.TokensOut+999)/1000)
+	if br.JudgeRequests > 0 {
+		fmt.Fprintf(out, ", %d conflict checks", br.JudgeRequests)
 	}
 	fmt.Fprint(out, ")")
-	if dropped > 0 {
-		fmt.Fprintf(out, " · %d unverified lines dropped", dropped)
+	if br.Dropped > 0 {
+		fmt.Fprintf(out, " · %d unverified lines dropped", br.Dropped)
 	}
-	if pending > 0 {
-		fmt.Fprintf(out, " · %d more pending, past relations.max_briefs_per_run", pending)
+	if br.Failed > 0 {
+		fmt.Fprintf(out, " · %d failed and will be retried", br.Failed)
+	}
+	if br.Pending > 0 {
+		fmt.Fprintf(out, " · %d more pending, past relations.max_briefs_per_run", br.Pending)
 	}
 	fmt.Fprintln(out)
-	return nil
+	return err
 }
 
 // newRelationBriefWriter builds the brief writer from configuration. The

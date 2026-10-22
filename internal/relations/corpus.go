@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
@@ -290,6 +291,7 @@ type SpeakerNamer interface {
 type StoreSpeakers struct {
 	store graph.Store
 	ctx   context.Context
+	mu    sync.Mutex
 	cache map[string]string
 }
 
@@ -301,17 +303,22 @@ func NewStoreSpeakers(ctx context.Context, store graph.Store) *StoreSpeakers {
 // Name returns who spoke under label in m, or the label itself.
 func (s *StoreSpeakers) Name(m *Meeting, label string) string {
 	id := graph.NewNodeID(string(graph.NodeSpeaker), m.FilePath, label)
-	if name, ok := s.cache[id]; ok {
+	s.mu.Lock()
+	name, ok := s.cache[id]
+	s.mu.Unlock()
+	if ok {
 		return name
 	}
-	name := label
+	name = label
 	for _, target := range outgoing(s.ctx, s.store, id, graph.EdgeIdentifiedAs) {
 		if p, err := s.store.GetNode(s.ctx, target); err == nil && p.Name != "" {
 			name = p.Name
 			break
 		}
 	}
+	s.mu.Lock()
 	s.cache[id] = name
+	s.mu.Unlock()
 	return name
 }
 

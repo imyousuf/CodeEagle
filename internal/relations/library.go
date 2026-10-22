@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -96,6 +97,7 @@ const (
 	maxShowChars        = 2500
 	maxShowSaidChars    = 1500
 	showContextSeconds  = 15
+	showTurnsBefore     = 2
 	maxDocsForAMeeting  = 8
 	maxHeadlineInFinder = 140
 )
@@ -179,8 +181,24 @@ func (l *Library) showSaid(e *Evidence) (string, error) {
 		return header + "\n" + e.Quote, nil
 	}
 	turns, err := l.Transcripts.Span(m, e.Start-showContextSeconds, e.End+showContextSeconds)
+	first, _, found := LocateQuote(turns, e.Quote)
+	if err == nil && !found {
+		// The anchor is only as good as the quote's match when the brief
+		// was written, and a decision's or follow-up's quote has no time at
+		// all; the recording itself says where the words are.
+		if all, err := l.Transcripts.Span(m, 0, math.MaxFloat64); err == nil {
+			if i, _, ok := LocateQuote(all, e.Quote); ok {
+				turns, first, found = all, i, true
+			}
+		}
+	}
 	if err != nil || len(turns) == 0 {
 		return header + "\n\"" + e.Quote + "\"\n(the recording could not be read)", nil
+	}
+	if found {
+		// Start a couple of turns before the quote, so it is never cut off
+		// by the bound on what is shown.
+		turns = turns[max(0, first-showTurnsBefore):]
 	}
 	var b strings.Builder
 	for _, t := range turns {

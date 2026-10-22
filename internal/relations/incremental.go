@@ -264,38 +264,15 @@ func incremental(ctx context.Context, store graph.Store, p *Proposer, subjects [
 		for _, s := range subjects {
 			by[s.Path] = s
 		}
-		relater := NewRelater(store, nil, RelaterOptions{})
-		paths := make([]string, 0, len(existing))
-		for path := range existing {
-			paths = append(paths, path)
-		}
-		sort.Strings(paths)
 		maxBriefs := o.MaxBriefs
 		if maxBriefs <= 0 {
 			maxBriefs = DefaultIncrementalOptions().MaxBriefs
 		}
-		for _, path := range paths {
-			rel, subj := existing[path], by[path]
-			if subj == nil || len(rel.Accepted()) == 0 {
-				continue
-			}
-			if rep.BriefsWritten >= maxBriefs {
-				if InputsHash(rel, subj, writer.client.Model()) != rel.BriefInputsHash {
-					rep.BriefsPending++
-				}
-				continue
-			}
-			br, err := writer.Update(ctx, rel, subj, meetings)
-			rep.BriefTokensIn += br.InputTokens
-			rep.BriefTokensOut += br.OutputTokens
-			if err != nil || !br.Written {
-				continue
-			}
-			rep.Dropped += br.Dropped
-			if err := relater.Write(ctx, rel, subj); err != nil {
-				return rep, fmt.Errorf("store brief for %s: %w", path, err)
-			}
-			rep.BriefsWritten++
+		br, err := WriteBriefs(ctx, store, writer, existing, by, meetings, maxBriefs, DefaultBriefWorkers)
+		rep.BriefsWritten, rep.BriefsPending, rep.Dropped = br.Written, br.Pending, br.Dropped
+		rep.BriefTokensIn, rep.BriefTokensOut = br.TokensIn, br.TokensOut
+		if err != nil {
+			return rep, err
 		}
 	}
 	return rep, nil

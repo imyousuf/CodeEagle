@@ -1,6 +1,7 @@
 package relations
 
 import (
+	"regexp"
 	"strings"
 	"sync"
 
@@ -90,4 +91,34 @@ func spokenText(turns []Turn, n int) string {
 		parts = append(parts, strings.Join(strings.Fields(t.Text), " "))
 	}
 	return excerpt(strings.Join(parts, " "), n)
+}
+
+// maxQuoteTurns bounds how many consecutive turns one quote may span.
+const maxQuoteTurns = 6
+
+// turnLabel matches the time and speaker a rendered transcript puts before
+// each turn, which a quote copied across turns carries with it.
+var turnLabel = regexp.MustCompile(`\d{2}:\d{2} [^:\n]{1,60}: `)
+
+// LocateQuote returns the first and last of the fewest consecutive turns
+// whose words hold quote, ignoring the time-and-speaker labels a rendered
+// transcript adds. Matching a turn at a time misses a quote that runs from
+// one speaker into the next.
+func LocateQuote(turns []Turn, quote string) (first, last int, ok bool) {
+	q := strings.TrimSpace(turnLabel.ReplaceAllString(quote, " "))
+	if q == "" {
+		return 0, 0, false
+	}
+	for w := 1; w <= maxQuoteTurns && w <= len(turns); w++ {
+		for i := 0; i+w <= len(turns); i++ {
+			parts := make([]string, w)
+			for k := range parts {
+				parts[k] = turns[i+k].Text
+			}
+			if transcript.QuoteIn(strings.Join(parts, " "), q) {
+				return i, i + w - 1, true
+			}
+		}
+	}
+	return 0, 0, false
 }

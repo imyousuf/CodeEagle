@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,12 +14,15 @@ import (
 
 // stubLLM replies with a fixed draft and counts calls.
 type stubLLM struct {
+	mu    sync.Mutex
 	reply string
 	calls int
 	last  string
 }
 
 func (s *stubLLM) Chat(_ context.Context, _ string, msgs []llm.Message) (*llm.Response, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.calls++
 	s.last = msgs[len(msgs)-1].Content
 	return &llm.Response{Content: s.reply, Usage: llm.TokenUsage{InputTokens: 1200, OutputTokens: 300}}, nil

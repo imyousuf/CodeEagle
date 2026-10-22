@@ -95,14 +95,29 @@ func Render(rel *Relation, o RenderOptions) string {
 	for _, l := range b.Current {
 		current.lines = append(current.lines, "- "+l.Text+cites(l.Cites))
 	}
+	// A conflict is shown in the two passages' own words where they are
+	// recorded. The drafting model's paraphrase of each side can attribute
+	// the meeting's position to the document and the reverse, and the
+	// contradiction check, being symmetric, cannot notice; the verified
+	// quotes cannot be swapped.
+	quoteOf := make(map[string]string, len(rel.Evidence))
+	for _, e := range rel.Evidence {
+		quoteOf[e.ID] = e.Quote
+	}
+	side := func(cite, paraphrase string) string {
+		if q := quoteOf[cite]; q != "" {
+			return "\"" + clip(q, maxConflictQuote) + "\""
+		}
+		return paraphrase
+	}
 	conflicts := briefPart{title: "conflicts:", keep: 2}
 	for _, c := range b.Conflicts {
 		date := ""
 		if c.Date != "" {
 			date = c.Date + " "
 		}
-		conflicts.lines = append(conflicts.lines,
-			fmt.Sprintf("- document: %s / %smeeting: %s%s", c.DocSays, date, c.DiscussionSays, cites([]string{c.DocCite, c.SaidCite})))
+		conflicts.lines = append(conflicts.lines, fmt.Sprintf("- document: %s / %smeeting: %s%s",
+			side(c.DocCite, c.DocSays), date, side(c.SaidCite, c.DiscussionSays), cites([]string{c.DocCite, c.SaidCite})))
 	}
 	unresolved := briefPart{title: "unresolved:", keep: 2}
 	for _, u := range b.Unresolved {
@@ -177,6 +192,20 @@ func Render(rel *Relation, o RenderOptions) string {
 		}
 	}
 	return render()
+}
+
+// maxConflictQuote bounds each side of a conflict as shown.
+const maxConflictQuote = 240
+
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := strings.LastIndex(s[:n], " ")
+	if cut < n/2 {
+		cut = n
+	}
+	return s[:cut] + "…"
 }
 
 func cites(ids []string) string {
