@@ -120,12 +120,15 @@ def main():
     ap.add_argument("--judge", default="opus")
     ap.add_argument("--seed", type=int, default=11)
     ap.add_argument("--concurrency", type=int, default=4)
+    ap.add_argument("--only-model", help="sample only briefs written by a model whose name contains this")
     ap.add_argument("--context", action="store_true",
                     help="show the judge the passage around each quote, as show prints it, not only the quote")
     args = ap.parse_args()
     bench = pathlib.Path(args.bench_dir)
 
     briefs = export(args, bench)
+    if args.only_model:
+        briefs = [b for b in briefs if args.only_model in (b.get("model") or "")]
     items = [it for b in briefs for it in lines_of(b)]
     rng = random.Random(args.seed)
     # Stratified: conflicts and headlines are few but matter most, so each
