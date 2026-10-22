@@ -233,6 +233,9 @@ var EmbeddableTypes = []graph.NodeType{
 	graph.NodeTopicSegment,
 	graph.NodeDecision,
 	graph.NodeActionItem,
+	// A relation's text is its brief, so an agent asking about a subject can
+	// land on what is known about it directly.
+	graph.NodeRelation,
 }
 
 // IsEmbeddable returns true if the node type should be considered for embedding.

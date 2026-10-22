@@ -56,6 +56,11 @@ const (
 	NodeDecision NodeType = "Decision"
 	// NodeActionItem is a follow-up/TODO arising from a meeting.
 	NodeActionItem NodeType = "ActionItem"
+
+	// NodeRelation holds what was discovered about one subject document: the
+	// meetings judged to discuss it, the evidence quoted from both, and a
+	// brief of where it stands. It lives in the relations scope.
+	NodeRelation NodeType = "Relation"
 )
 
 // Well-known property keys used for architectural classification.
@@ -192,6 +197,13 @@ const (
 	// is recorded, including those found unrelated, so a reader must always
 	// apply a probability threshold.
 	EdgeRelatedTo EdgeType = "RelatedTo"
+
+	// EdgeAbout links a Relation to the document it is about.
+	EdgeAbout EdgeType = "About"
+	// EdgeDiscussedIn links a Relation to a Meeting judged to discuss its
+	// subject, carrying the decision model's probability. Only accepted
+	// verdicts get an edge; rejected ones are kept on the Relation itself.
+	EdgeDiscussedIn EdgeType = "DiscussedIn"
 )
 
 // MeetingNodeTypes lists the node types produced by meeting transcript indexing.

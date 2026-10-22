@@ -65,6 +65,19 @@ type DocsConfig struct {
 	Faces FacesConfig `mapstructure:"faces" yaml:"faces,omitempty"`
 }
 
+// RelationsConfig holds settings for discovering relations between
+// documents and meetings. See docs/artifact-relations.md.
+type RelationsConfig struct {
+	// Exclude lists path patterns of documents that are never subjects.
+	Exclude []string `mapstructure:"exclude" yaml:"exclude,omitempty"`
+	// MaxPairsPerRun caps the candidates one run judges.
+	MaxPairsPerRun int `mapstructure:"max_pairs_per_run" yaml:"max_pairs_per_run,omitempty"`
+	// MaxCandidatesPerSubject caps the meetings proposed for one document.
+	MaxCandidatesPerSubject int `mapstructure:"max_candidates_per_subject" yaml:"max_candidates_per_subject,omitempty"`
+	// MaxCandidatesPerMeeting caps the documents proposed for one meeting.
+	MaxCandidatesPerMeeting int `mapstructure:"max_candidates_per_meeting" yaml:"max_candidates_per_meeting,omitempty"`
+}
+
 // VectorConfig holds vector index maintenance settings.
 type VectorConfig struct {
 	// BackfillLimit caps how many nodes one sync embeds when bringing the
@@ -282,6 +295,9 @@ type Config struct {
 	Transcripts TranscriptsConfig `mapstructure:"transcripts" yaml:"transcripts,omitempty"`
 	// Vector contains vector index maintenance configuration.
 	Vector VectorConfig `mapstructure:"vector" yaml:"vector,omitempty"`
+	// Relations contains configuration for discovering relations between
+	// documents and the meetings that discussed them.
+	Relations RelationsConfig `mapstructure:"relations" yaml:"relations,omitempty"`
 	// ConfigDir is the resolved .CodeEagle directory path (not persisted in YAML).
 	ConfigDir string `mapstructure:"-" yaml:"-"`
 	// ProjectConf is the parsed .CodeEagle.conf if found (not persisted).
@@ -618,6 +634,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("agents.auto_summarize", false)
 
 	v.SetDefault("vector.backfill_limit", 2000)
+	v.SetDefault("relations.max_pairs_per_run", 200)
+	v.SetDefault("relations.max_candidates_per_subject", 8)
+	v.SetDefault("relations.max_candidates_per_meeting", 8)
 	v.SetDefault("docs.max_image_resolution", 1024)
 	v.SetDefault("docs.context_window", 120000) // Must match docs.DefaultContextWindow
 	v.SetDefault("docs.exclude_extensions", []string{".lock", ".min.js", ".min.css", ".map", ".wasm", ".pb.go"})
