@@ -17,7 +17,8 @@ Last reviewed: 2026-09-20.
 | Agents, direct API | `anthropic` | `claude-sonnet-5` | `internal/llm/anthropic.go` |
 | Agents, on GCP | `vertex-ai` | `gemini-3.8-flash` | `internal/llm/vertexai.go` |
 | Meeting enrichment | `baseten` | `deepseek-ai/DeepSeek-V4.1-Flash` | `internal/config/config.go` |
-| Speaker adjudication, topic relating, search re-ranking | Jev | `jev-1.13.0` | `pkg/jev/client.go` |
+| Relation briefs | `transcripts.provider`, or `relations.provider` | as `transcripts.model`, or `relations.model` | `internal/cli/relations.go` |
+| Speaker adjudication, topic relating, search re-ranking, document relations, conflict checks | Jev | `jev-1.13.0` | `pkg/jev/client.go` |
 | Document and image description | `ollama` | `qwen3.5:9b` | `internal/docs/ollama.go` |
 | Document and image description, hosted | `baseten` | `zai-org/GLM-5.3-Flash` | `internal/docs/baseten.go` |
 | Document and image description, on GCP | `vertex-ai` | `gemini-3.8-flash` | `internal/docs/vertex.go` |
@@ -111,9 +112,10 @@ documents up to roughly 336 KB.
 ### Jev (`transcripts.jev_api_key`)
 
 Not a language model. It answers bounded questions with a **calibrated
-probability** rather than generating prose. Three jobs use it: speaker
-adjudication, topic relating, and search re-ranking. See `jev.md` for what it
-is and how it is used.
+probability** rather than generating prose. Five jobs use it: speaker
+adjudication, topic relating, search re-ranking, deciding which meetings
+discussed a document, and confirming that a meeting contradicts one. See
+`jev.md` for what it is and how it is used.
 
 | Version | Notes |
 |---|---|

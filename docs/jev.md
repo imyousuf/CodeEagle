@@ -48,8 +48,9 @@ work stays with a language model.
 
 ## What it does here
 
-Three jobs. All three are optional: without `transcripts.jev_api_key` the
-features degrade to their offline behaviour rather than failing.
+Five jobs. All are optional: without `transcripts.jev_api_key` the features
+degrade to their offline behaviour rather than failing, and relations, which
+cannot be decided any other way, are not discovered at all.
 
 ### 1. Speaker adjudication (`internal/transcript/adjudicate.go`)
 
@@ -84,6 +85,33 @@ demoted no correct first result.
 
 It **never adds a meeting the words did not reach**, so a wrong or unavailable
 judgment can only leave the order as word matching had it.
+
+### 4. Which meetings discussed a document (`internal/relations/judge.go`)
+
+Four signals propose document ↔ meeting pairs — what was said near a section
+in meaning, the document's title said aloud, a shared identifier, a shared
+topic — and Jev answers one yes/no per pair: does this part of the meeting
+discuss the work, design or decision the document describes, or change or
+question something in it, rather than share vocabulary or a broad area? The
+answer decides whether the pair joins the document's relation, and every
+verdict is kept, so no pair is asked twice while neither side changes. See
+`artifact-relations.md`.
+
+Measured 2026-10-22 on 160 hand-labelled pairs (27 related): area under the
+curve 0.97. At the default gate of 0.8, precision 0.86 and recall about 0.7;
+at 0.9, precision 1.00 and recall about 0.2. No gate reached 0.95 precision
+with useful recall, so 0.8 is a trade, not a guarantee. A second, stricter
+question did not separate better. Pairs proposed only by a name or an
+identifier held no related pair at all (0 of 32), so a pair must be near in
+meaning to be judged.
+
+### 5. Confirming a conflict (`internal/relations/brief_writer.go`)
+
+The language model that writes a relation's brief may say that a meeting
+contradicts the document. Jev is asked whether the two statements really
+conflict, and below `relations.conflict_gate` (0.7) the claim is shown as an
+event in the history rather than as a conflict. The 0.7 is provisional: it
+has not been calibrated on labelled conflicts.
 
 ---
 
