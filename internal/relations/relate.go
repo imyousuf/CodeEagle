@@ -85,6 +85,9 @@ func (r *Relater) Judge(ctx context.Context, cands []*Candidate, existing map[st
 		for _, seg := range c.Segments {
 			v.Ranges = append(v.Ranges, Range{Start: seg.Start, End: seg.End})
 		}
+		for _, sec := range c.Sections {
+			v.Sections = append(v.Sections, sectionKey(sec))
+		}
 		rel.Links[c.Meeting.SessionID] = v
 		stats.Judged++
 		if v.Accepted {

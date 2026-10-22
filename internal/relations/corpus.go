@@ -56,6 +56,16 @@ type Meeting struct {
 	Date         time.Time
 	Segments     []*Segment
 	Decisions    []*Decided
+	Actions      []*Action
+}
+
+// Action is a follow-up recorded in a meeting.
+type Action struct {
+	Text     string
+	Quote    string
+	Assignee string
+	Due      string
+	Status   string
 }
 
 // Segment is the part of a meeting about one topic.
@@ -246,10 +256,63 @@ func LoadMeetings(ctx context.Context, store graph.Store) (map[string]*Meeting, 
 			Topic: n.Properties["topic"],
 		})
 	}
+	acts, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeActionItem})
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range acts {
+		m, ok := meetings[n.Properties[graph.PropMeetingID]]
+		if !ok {
+			continue
+		}
+		m.Actions = append(m.Actions, &Action{
+			Text:     n.Properties[graph.PropSummary],
+			Quote:    n.Properties[graph.PropQuote],
+			Assignee: n.Properties[graph.PropAssignee],
+			Due:      n.Properties[graph.PropDueDate],
+			Status:   n.Properties[graph.PropStatus],
+		})
+	}
 	for _, m := range meetings {
 		sort.Slice(m.Segments, func(i, j int) bool { return m.Segments[i].Start < m.Segments[j].Start })
 	}
 	return meetings, nil
+}
+
+// SpeakerNamer names the speaker behind a recording's diarization label.
+type SpeakerNamer interface {
+	Name(m *Meeting, label string) string
+}
+
+// StoreSpeakers names speakers from the identities meeting indexing recorded.
+// A label nobody was identified behind keeps its label: a wrong name is worse
+// than none.
+type StoreSpeakers struct {
+	store graph.Store
+	ctx   context.Context
+	cache map[string]string
+}
+
+// NewStoreSpeakers names speakers from store.
+func NewStoreSpeakers(ctx context.Context, store graph.Store) *StoreSpeakers {
+	return &StoreSpeakers{store: store, ctx: ctx, cache: make(map[string]string)}
+}
+
+// Name returns who spoke under label in m, or the label itself.
+func (s *StoreSpeakers) Name(m *Meeting, label string) string {
+	id := graph.NewNodeID(string(graph.NodeSpeaker), m.FilePath, label)
+	if name, ok := s.cache[id]; ok {
+		return name
+	}
+	name := label
+	for _, target := range outgoing(s.ctx, s.store, id, graph.EdgeIdentifiedAs) {
+		if p, err := s.store.GetNode(s.ctx, target); err == nil && p.Name != "" {
+			name = p.Name
+			break
+		}
+	}
+	s.cache[id] = name
+	return name
 }
 
 // copiesAnotherFile reports whether the document is a duplicate of another

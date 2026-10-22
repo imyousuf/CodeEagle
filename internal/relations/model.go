@@ -76,14 +76,17 @@ type SectionState struct {
 // Rejected verdicts are kept: a pair is not asked again while neither the
 // document's matched sections nor the meeting's transcript has changed.
 type Verdict struct {
-	SessionID  string    `json:"session_id"`
-	MeetingID  string    `json:"meeting_id,omitempty"`
-	P          float64   `json:"p"`
-	Accepted   bool      `json:"accepted"`
-	Judge      string    `json:"judge"`
-	Signals    []string  `json:"signals,omitempty"`
-	Cosine     float64   `json:"cosine,omitempty"`
-	Ranges     []Range   `json:"ranges,omitempty"`
+	SessionID string   `json:"session_id"`
+	MeetingID string   `json:"meeting_id,omitempty"`
+	P         float64  `json:"p"`
+	Accepted  bool     `json:"accepted"`
+	Judge     string   `json:"judge"`
+	Signals   []string `json:"signals,omitempty"`
+	Cosine    float64  `json:"cosine,omitempty"`
+	Ranges    []Range  `json:"ranges,omitempty"`
+	// Sections are the document sections the pair was proposed on, by
+	// heading path: what the brief should read of the document first.
+	Sections   []string  `json:"sections,omitempty"`
 	SigDoc     string    `json:"sig_doc"`
 	SigMeeting string    `json:"sig_meeting"`
 	JudgedAt   time.Time `json:"judged_at"`

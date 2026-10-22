@@ -80,6 +80,20 @@ type RelationsConfig struct {
 	// is taken to discuss a document. Zero uses the package default, which
 	// is provisional until calibrated on labelled pairs.
 	Gate float64 `mapstructure:"gate" yaml:"gate,omitempty"`
+	// ConflictGate is the decision model's probability at or above which a
+	// disagreement between a document and a meeting is shown as a conflict.
+	ConflictGate float64 `mapstructure:"conflict_gate" yaml:"conflict_gate,omitempty"`
+	// MaxBriefsPerRun caps the briefs one run writes.
+	MaxBriefsPerRun int `mapstructure:"max_briefs_per_run" yaml:"max_briefs_per_run,omitempty"`
+	// MaxBriefInputTokens bounds what one brief is written from.
+	MaxBriefInputTokens int `mapstructure:"max_brief_input_tokens" yaml:"max_brief_input_tokens,omitempty"`
+	// Settle is how long a document must go unchanged before its brief is
+	// rewritten, e.g. "30m".
+	Settle string `mapstructure:"settle" yaml:"settle,omitempty"`
+	// Provider and Model choose the language model that writes briefs.
+	// Empty uses the transcripts provider and model.
+	Provider string `mapstructure:"provider" yaml:"provider,omitempty"`
+	Model    string `mapstructure:"model" yaml:"model,omitempty"`
 }
 
 // VectorConfig holds vector index maintenance settings.
@@ -641,6 +655,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("relations.max_pairs_per_run", 200)
 	v.SetDefault("relations.max_candidates_per_subject", 8)
 	v.SetDefault("relations.max_candidates_per_meeting", 8)
+	v.SetDefault("relations.max_briefs_per_run", 10)
+	v.SetDefault("relations.max_brief_input_tokens", 12000)
+	v.SetDefault("relations.settle", "30m")
 	v.SetDefault("docs.max_image_resolution", 1024)
 	v.SetDefault("docs.context_window", 120000) // Must match docs.DefaultContextWindow
 	v.SetDefault("docs.exclude_extensions", []string{".lock", ".min.js", ".min.css", ".map", ".wasm", ".pb.go"})

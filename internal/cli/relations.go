@@ -17,6 +17,7 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/relations"
 	"github.com/imyousuf/CodeEagle/internal/watcher"
 	"github.com/imyousuf/CodeEagle/pkg/jev"
+	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 
 func newRelationsCmd() *cobra.Command {
@@ -30,6 +31,7 @@ func newRelationsCmd() *cobra.Command {
 		limit      int
 		measure    string
 		target     float64
+		briefsOnly bool
 	)
 
 	cmd := &cobra.Command{
@@ -62,6 +64,7 @@ pairs judged in one run; the caps in relations.* bound them anyway.`,
 			}
 			o := relationsPlanOptions{
 				doc: doc, meeting: meeting, sampleOut: sampleOut, sampleSize: sampleSize, top: top, limit: limit,
+				briefsOnly: briefsOnly,
 			}
 			if measure != "" {
 				return runRelationsMeasure(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cfg, measure, target)
@@ -82,12 +85,14 @@ pairs judged in one run; the caps in relations.* bound them anyway.`,
 	cmd.Flags().IntVar(&limit, "limit", 0, "judge at most this many pairs (default: relations.max_pairs_per_run)")
 	cmd.Flags().StringVar(&measure, "measure", "", "judge a labelled sample (from --sample-out) and report how well the gate separates it; writes nothing to the graph")
 	cmd.Flags().Float64Var(&target, "target-precision", 0.95, "precision the suggested gate must reach, with --measure")
+	cmd.Flags().BoolVar(&briefsOnly, "briefs-only", false, "rewrite briefs whose inputs changed, without judging new pairs")
 	return cmd
 }
 
 type relationsPlanOptions struct {
 	doc, meeting, sampleOut string
 	sampleSize, top, limit  int
+	briefsOnly              bool
 }
 
 // relationOptions turns configuration into proposal bounds.
@@ -323,10 +328,13 @@ func runRelationsJudge(ctx context.Context, out, errOut io.Writer, cfg *config.C
 	if err != nil {
 		return err
 	}
+	if o.briefsOnly {
+		return writeRelationBriefs(ctx, out, errOut, cfg, store, run)
+	}
 	printProposal(out, run, 0)
 	if len(run.prop.Candidates) == 0 {
 		fmt.Fprintln(out, "\nNothing to judge.")
-		return nil
+		return writeRelationBriefs(ctx, out, errOut, cfg, store, run)
 	}
 
 	rel := relations.NewRelater(store, judge, relations.RelaterOptions{
@@ -345,7 +353,105 @@ func runRelationsJudge(ctx context.Context, out, errOut io.Writer, cfg *config.C
 	if j.Failed > 0 {
 		fmt.Fprintf(out, "%d pairs could not be judged and will be retried on a later run.\n", j.Failed)
 	}
+	return writeRelationBriefs(ctx, out, errOut, cfg, store, run)
+}
+
+// writeRelationBriefs rewrites the briefs of relations whose inputs changed,
+// up to relations.max_briefs_per_run, and stores them.
+func writeRelationBriefs(ctx context.Context, out, errOut io.Writer, cfg *config.Config, store *embedded.BranchStore, run *relationsRun) error {
+	client, err := relationBriefClient(cfg)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	var asker jev.Asker
+	if key := strings.TrimSpace(cfg.Transcripts.JevAPIKey); key != "" {
+		var jopts []jev.Option
+		if cfg.Transcripts.JevModel != "" {
+			jopts = append(jopts, jev.WithModel(cfg.Transcripts.JevModel))
+		}
+		if c, err := jev.New(key, jopts...); err == nil {
+			asker = c
+		}
+	}
+	opts := relations.DefaultBriefOptions()
+	if n := cfg.Relations.MaxBriefInputTokens; n > 0 {
+		opts.MaxInputChars = n * 4
+	}
+	if g := cfg.Relations.ConflictGate; g > 0 {
+		opts.ConflictGate = g
+	}
+	if d, err := time.ParseDuration(cfg.Relations.Settle); err == nil {
+		opts.Settle = d
+	}
+	writer := relations.NewBriefWriter(client, asker, relations.NewFileTranscripts(),
+		relations.NewStoreSpeakers(ctx, store), opts, nil)
+	relater := relations.NewRelater(store, nil, relations.RelaterOptions{})
+
+	bySubject := make(map[string]*relations.Subject, len(run.subjects))
+	for _, s := range run.subjects {
+		bySubject[s.Path] = s
+	}
+	limit := cfg.Relations.MaxBriefsPerRun
+	if limit <= 0 {
+		limit = 10
+	}
+	var written, pending, dropped, inTok, outTok, judgeReq int
+	for path, rel := range run.existing {
+		subj := bySubject[path]
+		if subj == nil || len(rel.Accepted()) == 0 {
+			continue
+		}
+		if written >= limit {
+			if relations.InputsHash(rel, subj, client.Model()) != rel.BriefInputsHash {
+				pending++
+			}
+			continue
+		}
+		rep, err := writer.Update(ctx, rel, subj, run.meetings)
+		inTok += rep.InputTokens
+		outTok += rep.OutputTokens
+		judgeReq += rep.JudgeRequests
+		if err != nil {
+			fmt.Fprintf(errOut, "Warning: %v\n", err)
+			continue
+		}
+		if !rep.Written {
+			continue
+		}
+		dropped += rep.Dropped
+		if err := relater.Write(ctx, rel, subj); err != nil {
+			return fmt.Errorf("store brief for %s: %w", path, err)
+		}
+		written++
+	}
+	fmt.Fprintf(out, "Briefs: %d written (%s, %dk in / %dk out tokens", written, client.Model(), (inTok+999)/1000, (outTok+999)/1000)
+	if judgeReq > 0 {
+		fmt.Fprintf(out, ", %d conflict checks", judgeReq)
+	}
+	fmt.Fprint(out, ")")
+	if dropped > 0 {
+		fmt.Fprintf(out, " · %d unverified lines dropped", dropped)
+	}
+	if pending > 0 {
+		fmt.Fprintf(out, " · %d more pending, past relations.max_briefs_per_run", pending)
+	}
+	fmt.Fprintln(out)
 	return nil
+}
+
+// relationBriefClient builds the language model that writes briefs: the
+// relations provider if one is set, else the transcripts one.
+func relationBriefClient(cfg *config.Config) (llm.Client, error) {
+	tc := cfg.Transcripts
+	if cfg.Relations.Provider != "" {
+		tc.Provider = cfg.Relations.Provider
+	}
+	if cfg.Relations.Model != "" {
+		tc.Model = cfg.Relations.Model
+	}
+	return newTranscriptClient(tc)
 }
 
 // printProposal reports what was proposed and what would be judged.
