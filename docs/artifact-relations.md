@@ -668,6 +668,65 @@ meetings directly, which is part of why that arm leads.
 
 Not yet measured: stale-shown-as-current.
 
+## Improvement research (2026-10-22)
+
+Where answers lose points, from the benchmark's blind grades, in every arm
+alike: meetings missed (about 9 answers in 20), the document's own content
+left out (5-12), a confident claim that no meeting discussed something
+(2-4), and a superseded document presented as current (1-2).
+
+Where relation recall is lost, for the 80 (spec, meeting) pairs the checked
+references name: 15 accepted, 28 rejected by the judge (14 of them at
+0.60-0.79), 22 proposed but past the per-document cap or not yet reached,
+5 proposed by title alone and set aside, 10 never proposed, several of
+which are dates of documents or commits rather than meetings.
+
+**Tested.** Labelled-set numbers are at gate 0.8 on the 160 pairs; the
+repeat noise there is about ±0.05. End-to-end is accepted pairs of the 80.
+
+| hypothesis | result |
+|---|---|
+| the judge's score moves with the pairs batched beside it | confirmed: calibration and bulk differ by 0.085 on average, up to 0.39; 16 of 25 related pairs cleared the gate once, 11 the other time |
+| one pair per request steadies it | precision 0.86 → 0.95, recall unchanged |
+| the judge sees a long segment's opening, not where the document comes up | confirmed: showing the stretch that shares the document's words raises recall 0.67 → 0.81-0.85 at precision 0.88 |
+| both, with 1,500 characters of speech | AUC 0.971 → 0.987; precision 0.89-0.96, recall 0.89 (two runs); about twice the decision-model tokens, under a dollar for the corpus |
+| deeper caps (8 → 30 per document and meeting) | end to end 15 → 17 with the old judge, 16 → 23 with the new; a blind check found 24 of 30 added relations related, against 6 of 10 the old configuration accepted |
+| also show the stretch of the whole meeting richest in the document's words | rejected: 841 → 600 accepted, 23 → 17 end to end |
+| weight the document's words by rarity within the meeting | no effect; not kept |
+| count progress reports, demos and shipping as discussion | no effect (21 against 23) |
+| keyword search finds the never-proposed meetings | the meeting index found none; the raw transcripts held 3 of the 10 |
+| the decision model can check a brief line against its passages | AUC 0.75 on 53 lines: keeping lines at 0.5 or above lifts the fully supported share 57% → 90% but drops 11 of 30 good lines; it caught the one unsupported line at 0.07. A flag or a reason to rewrite, not a filter |
+
+The labelled set overstates precision: a blind check put the old
+configuration's accepted relations at 6 of 10 against 0.86 on the labels.
+More labels, drawn from deep candidates too and by a second labeller, are
+needed before any gate is tuned to two decimals.
+
+**Not yet tested, in order of expected value:**
+
+1. Adopt one pair per request, the relevant stretch at 1,500 characters and
+   caps of 20-30 as defaults, and rerun the benchmark's verbs and
+   everything arms on the deeper graph.
+2. Say what is not confirmed instead of implying absence: a brief or `find`
+   line with no accepted meeting names the closest candidates below the gate
+   as unconfirmed, rather than "no meeting has been judged to discuss it".
+   19 of the 35 references the new judge rejects score 0.54-0.79.
+3. Breadth in one call: a compact timeline of the meetings about a subject,
+   one line each with the passage that matched. The verbs take a median 14
+   calls; everything gets breadth from `query_meetings` at about 35 KB a
+   call.
+4. The document's own state in its brief: status and date from front matter
+   and a two-line gist, since answers leave the document out.
+5. Document-to-document supersession (a redesign replacing a spec), judged
+   as a yes/no question, to stop superseded documents reading as current.
+6. Faithful briefs: DeepSeek writes 57% fully supported lines against
+   GLM's 42-48%; headlines are weakest at 25-33%. Flag lines the decision
+   model does not support, and build headlines from verified lines.
+7. Judge pairs proposed by title alone (5 of the 80) now that the judge is
+   steadier, checked first against the 32 such labelled pairs.
+8. CLI latency: expand credentials only when used (0.5 s of 2.3 s) and keep
+   a library snapshot keyed by the database's state (most of the rest).
+
 ## Deferred
 
 - Document ↔ document relations (an issue in a tracker export and a spec).
