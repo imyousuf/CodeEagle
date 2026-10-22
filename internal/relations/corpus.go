@@ -103,6 +103,13 @@ type SubjectFilter func(path string) bool
 // not a subject of discussion), duplicates of another file, and documents
 // under minSubjectText of text.
 func LoadSubjects(ctx context.Context, store graph.Store, keep SubjectFilter) ([]*Subject, error) {
+	return loadSubjects(ctx, store, keep, true)
+}
+
+// loadSubjects loads the documents, and for proposing also which ones copy
+// another file and the topics each was filed under: two edge lookups per
+// document that reading a brief has no use for.
+func loadSubjects(ctx context.Context, store graph.Store, keep SubjectFilter, forProposing bool) ([]*Subject, error) {
 	nodes, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeDocument, Language: markdownLanguage})
 	if err != nil {
 		return nil, err
@@ -158,14 +165,16 @@ func LoadSubjects(ctx context.Context, store graph.Store, keep SubjectFilter) ([
 		if s.TextLen < minSubjectText {
 			continue
 		}
-		if copiesAnotherFile(ctx, store, s) {
+		if forProposing && copiesAnotherFile(ctx, store, s) {
 			continue
 		}
 		if s.Title == "" {
 			s.Title = titleFromSections(s)
 		}
 		sort.Slice(s.Sections, func(i, j int) bool { return s.Sections[i].Line < s.Sections[j].Line })
-		s.Topics = outgoing(ctx, store, s.RootID, graph.EdgeHasTopic)
+		if forProposing {
+			s.Topics = outgoing(ctx, store, s.RootID, graph.EdgeHasTopic)
+		}
 		out = append(out, s)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
@@ -192,6 +201,16 @@ func titleFromSections(s *Subject) string {
 // LoadMeetings reads every recorded meeting with its segments and decisions,
 // keyed by session ID.
 func LoadMeetings(ctx context.Context, store graph.Store) (map[string]*Meeting, error) {
+	meetings, err := LoadMeetingHeaders(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+	return meetings, loadMeetingParts(ctx, store, meetings)
+}
+
+// LoadMeetingHeaders loads the meetings without their segments, decisions
+// and follow-ups: what reading a brief needs, at a fraction of the cost.
+func LoadMeetingHeaders(ctx context.Context, store graph.Store) (map[string]*Meeting, error) {
 	nodes, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeMeeting})
 	if err != nil {
 		return nil, err
@@ -217,10 +236,13 @@ func LoadMeetings(ctx context.Context, store graph.Store) (map[string]*Meeting, 
 			Date:         n.UpdatedAt,
 		}
 	}
+	return meetings, nil
+}
 
+func loadMeetingParts(ctx context.Context, store graph.Store, meetings map[string]*Meeting) error {
 	segs, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeTopicSegment})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for _, n := range segs {
 		m, ok := meetings[n.Properties[graph.PropMeetingID]]
@@ -244,7 +266,7 @@ func LoadMeetings(ctx context.Context, store graph.Store) (map[string]*Meeting, 
 
 	decs, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeDecision})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for _, n := range decs {
 		m, ok := meetings[n.Properties[graph.PropMeetingID]]
@@ -259,7 +281,7 @@ func LoadMeetings(ctx context.Context, store graph.Store) (map[string]*Meeting, 
 	}
 	acts, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeActionItem})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for _, n := range acts {
 		m, ok := meetings[n.Properties[graph.PropMeetingID]]
@@ -277,7 +299,7 @@ func LoadMeetings(ctx context.Context, store graph.Store) (map[string]*Meeting, 
 	for _, m := range meetings {
 		sort.Slice(m.Segments, func(i, j int) bool { return m.Segments[i].Start < m.Segments[j].Start })
 	}
-	return meetings, nil
+	return nil
 }
 
 // SpeakerNamer names the speaker behind a recording's diarization label.

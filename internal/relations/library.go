@@ -30,11 +30,11 @@ type Library struct {
 // LoadLibrary reads the corpus and the relations from store. resolve turns a
 // graph path into a file on disk, for showing a document's text.
 func LoadLibrary(ctx context.Context, store graph.Store, resolve func(string) string) (*Library, error) {
-	subjects, err := LoadSubjects(ctx, store, nil)
+	subjects, err := loadSubjects(ctx, store, nil, false)
 	if err != nil {
 		return nil, fmt.Errorf("load documents: %w", err)
 	}
-	meetings, err := LoadMeetings(ctx, store)
+	meetings, err := LoadMeetingHeaders(ctx, store)
 	if err != nil {
 		return nil, fmt.Errorf("load meetings: %w", err)
 	}
