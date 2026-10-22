@@ -41,8 +41,9 @@ an ID that brief and show accept.`,
 
 func newBriefCmd() *cobra.Command {
 	var (
-		budget int
-		since  string
+		budget  int
+		since   string
+		jsonOut bool
 	)
 	cmd := &cobra.Command{
 		Use:   "brief <id | words>",
@@ -58,7 +59,12 @@ briefed; words that match several list them instead.
 --budget caps the output in estimated tokens (default 400, at most 2000);
 lines are dropped in a fixed order to fit. --since adds what changed after a
 date, a time, a duration (7d) or a revision printed in the header (@r3), and
-puts it first.`,
+puts it first.
+
+--json prints the whole brief for a program instead: every line with the IDs
+of its evidence, each piece of evidence with its quote and where it is
+anchored, the meetings judged to discuss the document, and freshness.
+--budget and --since do not apply to it.`,
 		Example: `  codeeagle brief 3fa9c2
   codeeagle brief retry policy --budget 250
   codeeagle brief 3fa9c2 --since @r4`,
@@ -69,7 +75,13 @@ puts it first.`,
 				return err
 			}
 			defer v.Close()
-			out, err := v.Brief(cmd.Context(), strings.Join(args, " "), budget, since)
+			arg := strings.Join(args, " ")
+			var out string
+			if jsonOut {
+				out, err = v.BriefJSON(cmd.Context(), arg)
+			} else {
+				out, err = v.Brief(cmd.Context(), arg, budget, since)
+			}
 			if err != nil {
 				return err
 			}
@@ -79,6 +91,7 @@ puts it first.`,
 	}
 	cmd.Flags().IntVar(&budget, "budget", relations.DefaultBriefBudget, "most estimated tokens to print (max 2000)")
 	cmd.Flags().StringVar(&since, "since", "", "also show what changed after this: a date, RFC 3339 time, 7d/36h/2w, or @rN")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the whole brief and its evidence as JSON")
 	return cmd
 }
 

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -88,5 +89,46 @@ func TestVerbsHoldNoLockBetweenCalls(t *testing.T) {
 	}
 	if _, err := v.Find(ctx, "retry"); !errors.Is(err, embedded.ErrBusy) {
 		t.Errorf("while a writer held the graph, Find err = %v, want ErrBusy", err)
+	}
+}
+
+// TestBriefJSONCarriesTheEvidence covers brief --json: a program gets each
+// line with the evidence it cites, and the quotes.
+func TestBriefJSONCarriesTheEvidence(t *testing.T) {
+	cfg := &config.Config{Graph: config.GraphConfig{DBPath: t.TempDir()}}
+	ctx := context.Background()
+	w, _, err := openBranchStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel := relations.New("docs/retry.md")
+	rel.Brief = &relations.Brief{Headline: relations.Line{Text: "retry cap raised to five", Cites: []string{"abc123"}}}
+	rel.Evidence = []relations.Evidence{{ID: "abc123", Kind: relations.EvidenceSaid, SessionID: "s1", Quote: "make the cap five"}}
+	node, err := rel.Node()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.View(embedded.RelationScope, []string{embedded.RelationScope}).AddNode(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	v := newVerbs(cfg)
+	defer v.Close()
+	out, err := v.BriefJSON(ctx, relations.ShortID(relations.RelationID("docs/retry.md")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Subject  string
+		Brief    relations.Brief
+		Evidence []relations.Evidence
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("not JSON: %v\n%s", err, out)
+	}
+	if got.Subject != "docs/retry.md" || got.Brief.Headline.Cites[0] != "abc123" ||
+		len(got.Evidence) != 1 || got.Evidence[0].Quote != "make the cap five" {
+		t.Errorf("brief --json = %s", out)
 	}
 }

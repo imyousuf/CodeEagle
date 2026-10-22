@@ -2,10 +2,12 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -308,6 +310,23 @@ const clearMargin = 0.05
 // document or meeting, or words that clearly name one. When words match
 // several, it lists them instead, in the same call.
 func (v *verbs) Brief(ctx context.Context, arg string, budget int, since string) (string, error) {
+	return v.brief(ctx, arg, func(lib *relations.Library, rel *relations.Relation) (string, error) {
+		return v.renderBrief(lib, rel, budget, since)
+	})
+}
+
+// BriefJSON is Brief for a program: the relation's whole brief, the evidence
+// each line cites with its quote and anchor, the meetings judged to discuss
+// the document, and its freshness. Words that match several things, or a
+// meeting, still answer in text.
+func (v *verbs) BriefJSON(ctx context.Context, arg string) (string, error) {
+	return v.brief(ctx, arg, briefJSON)
+}
+
+// renderFunc turns a relation into what brief prints.
+type renderFunc func(lib *relations.Library, rel *relations.Relation) (string, error)
+
+func (v *verbs) brief(ctx context.Context, arg string, render renderFunc) (string, error) {
 	lib, done, err := v.begin(ctx)
 	if err != nil {
 		return "", err
@@ -315,7 +334,7 @@ func (v *verbs) Brief(ctx context.Context, arg string, budget int, since string)
 	defer done()
 	arg = strings.TrimSpace(arg)
 	if hexPrefix.MatchString(arg) {
-		if out, ok, err := v.briefByID(ctx, lib, arg, budget, since); ok || err != nil {
+		if out, ok, err := v.briefByID(ctx, lib, arg, render); ok || err != nil {
 			return out, err
 		}
 	}
@@ -330,7 +349,7 @@ func (v *verbs) Brief(ctx context.Context, arg string, budget int, since string)
 	if len(fs) == 1 || top.score-fs[1].score >= clearMargin {
 		switch {
 		case top.rel != nil:
-			return v.renderBrief(lib, top.rel, budget, since)
+			return render(lib, top.rel)
 		case top.m != nil:
 			return lib.MeetingBrief(top.m), nil
 		}
@@ -352,9 +371,9 @@ func (v *verbs) renderBrief(lib *relations.Library, rel *relations.Relation, bud
 
 // briefByID briefs what an ID prefix names, reporting whether it named
 // anything.
-func (v *verbs) briefByID(ctx context.Context, lib *relations.Library, prefix string, budget int, since string) (string, bool, error) {
+func (v *verbs) briefByID(ctx context.Context, lib *relations.Library, prefix string, render renderFunc) (string, bool, error) {
 	if rel := lib.RelationByID(prefix); rel != nil {
-		out, err := v.renderBrief(lib, rel, budget, since)
+		out, err := render(lib, rel)
 		return out, true, err
 	}
 	if v.store == nil {
@@ -371,7 +390,7 @@ func (v *verbs) briefByID(ctx context.Context, lib *relations.Library, prefix st
 	switch n.Type {
 	case graph.NodeDocument, graph.NodeAIGuideline:
 		if rel := lib.Relations[n.FilePath]; rel != nil {
-			out, err := v.renderBrief(lib, rel, budget, since)
+			out, err := render(lib, rel)
 			return out, true, err
 		}
 		return fmt.Sprintf("%s: no meeting has been judged to discuss it", n.FilePath), true, nil
@@ -381,6 +400,43 @@ func (v *verbs) briefByID(ctx context.Context, lib *relations.Library, prefix st
 		}
 	}
 	return fmt.Sprintf("%s is a %s; brief covers documents and meetings", n.Name, n.Type), true, nil
+}
+
+// briefJSON is a relation as a program reads it.
+func briefJSON(lib *relations.Library, rel *relations.Relation) (string, error) {
+	type meeting struct {
+		Session string  `json:"session_id"`
+		ID      string  `json:"id"`
+		Date    string  `json:"date"`
+		Title   string  `json:"title"`
+		P       float64 `json:"p"`
+	}
+	out := struct {
+		ID        string               `json:"id"`
+		Subject   string               `json:"subject"`
+		Revision  int                  `json:"revision"`
+		BriefedAt time.Time            `json:"briefed_at,omitzero"`
+		Model     string               `json:"model,omitempty"`
+		Fresh     []string             `json:"fresh,omitempty"`
+		Meetings  []meeting            `json:"meetings"`
+		Brief     *relations.Brief     `json:"brief"`
+		Evidence  []relations.Evidence `json:"evidence"`
+	}{
+		ID: relations.ShortID(relations.RelationID(rel.SubjectPath)), Subject: rel.SubjectPath,
+		Revision: rel.Revision, BriefedAt: rel.BriefedAt, Model: rel.BriefModel,
+		Fresh: relations.Freshness(rel, lib.Subjects[rel.SubjectPath], lib.Meetings),
+		Brief: rel.Brief, Evidence: rel.Evidence,
+	}
+	for _, vd := range rel.Accepted() {
+		m := meeting{Session: vd.SessionID, P: vd.P}
+		if mt := lib.Meetings[vd.SessionID]; mt != nil {
+			m.ID, m.Date, m.Title = relations.ShortID(mt.NodeID), mt.Date.Format("2006-01-02"), mt.Title
+		}
+		out.Meetings = append(out.Meetings, m)
+	}
+	sort.Slice(out.Meetings, func(i, j int) bool { return out.Meetings[i].Date > out.Meetings[j].Date })
+	b, err := json.MarshalIndent(out, "", "  ")
+	return string(b), err
 }
 
 func ambiguous(prefix string, nodes []*graph.Node) string {
