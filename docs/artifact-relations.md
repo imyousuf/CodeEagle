@@ -78,12 +78,41 @@ From the topic-relatedness work (2026-09-20, 91 hand-labelled topic pairs;
 - **Exact vector search is cheap** below 250k vectors (0.14–0.26 s over 51k);
   `rag`'s wall time is index load and keyword scan, not search.
 
-**To measure again before anything runs automatically:** the gate for
-document ↔ discussion pairs. The 0.6 above was measured on topic labels; a
-document section and a meeting segment are longer, differently shaped
-inputs. The gate ships provisional and is recalibrated on a labelled set
-(see Measurement) for precision ≥ 0.95 before the automatic path is turned
-on, because a wrong relation corrupts every brief built on it.
+**Measured for document ↔ discussion pairs (2026-10-22).** The gate was
+recalibrated before anything ran automatically, on 160 candidate pairs from
+the experiment corpus (460 tech specs, 744 meetings), stratified by signal
+and similarity and labelled blind to any score (27 related, 133 unrelated;
+nine labels spot-checked by hand, all agreed):
+
+| gate | admitted | precision | recall |
+|---|---|---|---|
+| 0.6 | 41–42 | 0.61–0.62 | 0.93–0.96 |
+| 0.7 | 29 | 0.76 | 0.81 |
+| **0.8** | **21–22** | **0.86** | **0.67–0.70** |
+| 0.9 | 4–6 | 1.00 | 0.15–0.22 |
+
+(Two runs; the spread is the decision model's own drift between identical
+requests.) The judge ranks these pairs better than it ranked topics (AUC
+0.97), but its probabilities sit higher: the topic gate of 0.6 would have
+admitted a wrong relation four times in ten. No gate reaches precision
+0.95 without losing three quarters of the real relations, so the default
+is **0.8**: precision 0.86, recall about two thirds. The pairs still wrongly
+admitted are neighbouring subjects (a server spec and a meeting about the
+same product's tokens; a directory spec and a meeting about publishing to
+it), which are also where the labels were least certain. Raising
+`relations.gate` to 0.9 trades most of the recall for precision.
+
+A second yes/no question, whether what was said is about the specific
+thing the document specifies rather than a neighbour of it, was measured
+alongside and did not help: alone it reached the same precision at the
+same recall (0.86 at 0.70), and combining the two added nothing. It is not
+asked.
+
+One proposal signal was measured to propose nothing useful: of the 32
+pairs proposed by a name or an identifier alone, with nothing near in
+meaning, none was related. Where a document's sections have vectors, a
+pair now needs the meaning signal; name, identifiers and topics only add to
+its rank. They still propose for a document with no vectors yet.
 
 ## Document substrate changes (prerequisites)
 
@@ -436,7 +465,7 @@ Token estimates use bytes / 3.5 until calibrated against measured usage.
 ```yaml
 relations:
   # enabled: false            # unset = on when transcripts.jev_api_key is set
-  gate: 0.6                   # provisional until recalibrated (Measurement)
+  gate: 0.8                   # measured 2026-10-22: precision 0.86, recall ~0.7
   conflict_gate: 0.7
   max_pairs_per_run: 200
   max_candidates_per_subject: 8

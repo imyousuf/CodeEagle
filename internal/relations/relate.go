@@ -8,10 +8,16 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/graph"
 )
 
-// DefaultGate is the probability at or above which a verdict is accepted. It
-// is the gate measured on topic pairs, and stays provisional until it is
-// recalibrated on labelled document and meeting pairs (see the spec).
-const DefaultGate = 0.6
+// DefaultGate is the probability at or above which a verdict is accepted.
+//
+// Measured 2026-10-22 on 160 labelled document and meeting pairs (27
+// related): the judge ranks them well (AUC 0.97), but the 0.6 measured on
+// topic labels admitted wrong pairs four times in ten. At 0.8 precision was
+// 0.86 and recall 0.67 to 0.70 across two runs; no gate reached 0.95 without
+// recall falling below a quarter. The pairs still wrongly admitted are
+// neighbouring subjects (a server spec and a meeting about the same
+// product's tokens), where the labels themselves were the least certain.
+const DefaultGate = 0.8
 
 // Relater judges candidates and records the verdicts.
 type Relater struct {

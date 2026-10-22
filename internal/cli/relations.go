@@ -471,7 +471,8 @@ func printProposal(out io.Writer, run *relationsRun, top int) {
 		}
 	}
 	fmt.Fprintf(out, "Proposed:  %d candidates (%s)\n", prop.Proposed, signalCounts(prop.BySignal))
-	fmt.Fprintf(out, "Set aside: %d already judged, %d cut by caps\n", prop.AlreadyJudged, prop.CutByCaps)
+	fmt.Fprintf(out, "Set aside: %d with no support in meaning, %d already judged, %d cut by caps\n",
+		prop.Unsupported, prop.AlreadyJudged, prop.CutByCaps)
 	reqs, tokens := relations.EstimateJudging(prop.Candidates)
 	fmt.Fprintf(out, "Judging:   %d pairs in %d requests, ~%dk input tokens\n",
 		len(prop.Candidates), reqs, (tokens+999)/1000)

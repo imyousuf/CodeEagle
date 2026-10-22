@@ -125,6 +125,9 @@ type Proposal struct {
 	// AlreadyJudged counts candidates set aside because the pair was judged
 	// under the same signatures.
 	AlreadyJudged int
+	// Unsupported counts candidates set aside because nothing near in
+	// meaning proposed them, though the document has vectors.
+	Unsupported int
 	// CutByCaps counts candidates set aside by the per-subject, per-meeting
 	// or per-run caps.
 	CutByCaps int
@@ -234,8 +237,28 @@ func (p *Proposer) All() []*Candidate {
 
 // Select scores candidates, sets aside pairs already judged, and applies the
 // caps, best first.
+//
+// A pair that nothing near in meaning proposed is set aside when the
+// document's sections have vectors: on 160 labelled pairs, the 32 proposed
+// by a name or an identifier alone held no related pair at all. Without
+// vectors those signals are all there is, so they still propose.
 func (p *Proposer) Select(cands []*Candidate, judged func(*Candidate) bool) *Proposal {
-	prop := &Proposal{Proposed: len(cands), BySignal: make(map[string]int)}
+	p.prepare()
+	embedded := make(map[*Subject]bool)
+	for _, sv := range p.secVecs {
+		embedded[sv.subj] = true
+	}
+	kept := cands[:0]
+	unsupported := 0
+	for _, c := range cands {
+		if c.Signals&SignalSaid == 0 && embedded[c.Subject] {
+			unsupported++
+			continue
+		}
+		kept = append(kept, c)
+	}
+	prop := &Proposal{Proposed: len(cands), BySignal: make(map[string]int), Unsupported: unsupported}
+	cands = kept
 	for _, c := range cands {
 		c.Score = score(c)
 		for _, n := range c.Signals.Names() {
