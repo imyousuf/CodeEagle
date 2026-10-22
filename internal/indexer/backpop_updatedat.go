@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
@@ -148,14 +149,29 @@ func loadIndexedFileState(ctx context.Context, store graph.Store) indexedFileSta
 // resolveAbsPath finds the absolute path for a relative file path by checking
 // each repo root. Returns empty string if the file doesn't exist under any root.
 func resolveAbsPath(relPath string, repoRoots []string) string {
-	// If the path is already absolute, use it directly.
+	return ResolveAbsPath(relPath, repoRoots)
+}
+
+// ResolveAbsPath turns a path as the graph records it back into a file on
+// disk, or "" if it is under no root. A path under a root that is not a git
+// repository, or under one of several roots, starts with the root's own name
+// ("Downloads/notes.md" for /home/u/Downloads), so it is resolved against the
+// root's parent; joined to the root itself it names a file that does not
+// exist, which silently hid every such file from the backfills.
+func ResolveAbsPath(relPath string, repoRoots []string) string {
 	if filepath.IsAbs(relPath) {
 		return relPath
 	}
+	clean := filepath.Clean(relPath)
 	for _, root := range repoRoots {
-		abs := filepath.Join(root, relPath)
-		if _, err := os.Stat(abs); err == nil {
-			return abs
+		candidates := []string{filepath.Join(root, clean)}
+		if first, _, ok := strings.Cut(filepath.ToSlash(clean), "/"); ok && first == filepath.Base(root) {
+			candidates = append([]string{filepath.Join(filepath.Dir(root), clean)}, candidates...)
+		}
+		for _, abs := range candidates {
+			if _, err := os.Stat(abs); err == nil {
+				return abs
+			}
 		}
 	}
 	return ""

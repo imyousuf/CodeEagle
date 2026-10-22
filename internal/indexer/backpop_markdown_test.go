@@ -213,3 +213,65 @@ func TestBackfillRewritesOnlyTheWriteScope(t *testing.T) {
 		t.Errorf("%d default-branch nodes were copied into the feature scope", len(nodes))
 	}
 }
+
+// TestResolveAbsPathFindsFilesUnderANamedRoot covers the paths a non-git
+// root records, which start with the root's own name. Joined to the root
+// they name a file that does not exist, which hid every such file from the
+// backfills.
+func TestResolveAbsPathFindsFilesUnderANamedRoot(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "Downloads")
+	if err := os.MkdirAll(filepath.Join(root, "specs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(root, "specs", "retry.md")
+	if err := os.WriteFile(file, []byte("# x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"Downloads/specs/retry.md", "specs/retry.md"} {
+		if got := ResolveAbsPath(rel, []string{root}); got != file {
+			t.Errorf("ResolveAbsPath(%q) = %q, want %q", rel, got, file)
+		}
+	}
+	if got := ResolveAbsPath("Downloads/missing.md", []string{root}); got != "" {
+		t.Errorf("a missing file resolved to %q", got)
+	}
+}
+
+// TestBackfillReachesMarkdownUnderANamedRoot is the backfill over the same
+// path shape: indexed with the root's name in front, as the home project's
+// Documents and Downloads are.
+func TestBackfillReachesMarkdownUnderANamedRoot(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "Documents")
+	path := writeDoc(t, root)
+	store, err := embedded.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	named := func(sectionText bool) *Indexer {
+		registry := parser.NewRegistry()
+		registry.Register(markdown.NewParser(markdown.WithSectionText(sectionText)))
+		return NewIndexer(IndexerConfig{
+			GraphStore: store, ParserRegistry: registry, RepoRoots: []string{root},
+			NonGitRoots:   map[string]bool{root: true},
+			WatcherConfig: &watcher.WatcherConfig{Paths: []string{root}},
+			Logger:        func(string, ...any) {},
+		})
+	}
+	if err := named(false).IndexFileWithTimestamp(ctx, path, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	n, err := BackpopMarkdownSections(ctx, named(true), []string{root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("re-parsed %d files under a named root, want 1", n)
+	}
+	if s := sectionNamed(t, store, "Retry policy"); s == nil || s.DocComment == "" {
+		t.Error("the section under a named root did not gain its text")
+	}
+}
