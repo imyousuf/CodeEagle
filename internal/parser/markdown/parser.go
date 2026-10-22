@@ -28,6 +28,11 @@ func WithSectionText(on bool) Option {
 	return func(p *MarkdownParser) { p.sectionText = on }
 }
 
+// StoresSectionText reports whether sections carry their own text, so a
+// caller can tell whether nodes indexed before it did need bringing up to
+// date.
+func (p *MarkdownParser) StoresSectionText() bool { return p.sectionText }
+
 // NewParser creates a new Markdown parser.
 func NewParser(opts ...Option) *MarkdownParser {
 	p := &MarkdownParser{sectionText: true}

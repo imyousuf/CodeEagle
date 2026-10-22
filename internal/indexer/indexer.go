@@ -213,6 +213,24 @@ func (idx *Indexer) IndexFileWithTimestamp(ctx context.Context, filePath string,
 // This avoids redundant file reads and hash computations when the caller
 // has already read the file (e.g., during sync with duplicate detection).
 func (idx *Indexer) IndexFileWithContent(ctx context.Context, filePath string, content []byte, contentHash string, updatedAt time.Time) error {
+	return idx.indexContent(ctx, filePath, content, contentHash, updatedAt, true)
+}
+
+// reindexQuietly re-parses a file already in the graph without reporting it
+// as changed. A changed file sets off summarization, the linker and the
+// enrichment queue; re-parsing every file of a kind to pick up a new parser
+// field must not, or one upgrade becomes a sync over the whole corpus.
+// updatedAt is the node's existing timestamp, so a file that really did
+// change since is still found by the next walk.
+func (idx *Indexer) reindexQuietly(ctx context.Context, filePath string, updatedAt time.Time) error {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("read file %s: %w", filePath, err)
+	}
+	return idx.indexContent(ctx, filePath, content, computeContentHash(content), updatedAt, false)
+}
+
+func (idx *Indexer) indexContent(ctx context.Context, filePath string, content []byte, contentHash string, updatedAt time.Time, record bool) error {
 	p, ok := idx.registry.ParserForFile(filePath)
 	if !ok {
 		return nil // no parser for this file
@@ -319,11 +337,13 @@ func (idx *Indexer) IndexFileWithContent(ctx context.Context, filePath string, c
 		}
 	}
 
-	idx.mu.Lock()
-	idx.filesIndexed++
-	idx.lastIndex = time.Now()
-	idx.changedFiles[relPath] = struct{}{}
-	idx.mu.Unlock()
+	if record {
+		idx.mu.Lock()
+		idx.filesIndexed++
+		idx.lastIndex = time.Now()
+		idx.changedFiles[relPath] = struct{}{}
+		idx.mu.Unlock()
+	}
 
 	if idx.verbose {
 		idx.log("  -> %d nodes, %d edges", len(result.Nodes), len(result.Edges))

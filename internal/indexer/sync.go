@@ -68,6 +68,20 @@ func SyncFiles(ctx context.Context, idx *Indexer, paths []string, configDir stri
 		}
 	}
 
+	// Bring markdown indexed before sections carried their text up to date.
+	if bs := state.GetBranchState(branch); bs.MarkdownSectionsVersion < MarkdownSectionsVersion && idx.storesMarkdownText() {
+		count, err := BackpopMarkdownSections(ctx, idx, paths)
+		if err != nil {
+			idx.log("Warning: markdown sections backfill: %v", err)
+		} else {
+			if count > 0 {
+				idx.log("Backfilled section text for %d markdown files", count)
+			}
+			bs.MarkdownSectionsVersion = MarkdownSectionsVersion
+			_ = state.Save(statePath)
+		}
+	}
+
 	for _, repoPath := range paths {
 		if IsGitRepo(repoPath) {
 			if err := syncGitRepo(ctx, idx, repoPath, state, full, branch); err != nil {
