@@ -78,20 +78,18 @@ func newWriter(llmc llm.Client, asker jev.Asker, now time.Time) *BriefWriter {
 // the snippet it is filed under, and a line with no such quote is dropped.
 func TestBriefKeepsOnlyWhatItsQuotesSupport(t *testing.T) {
 	rel, subj, meetings := briefFixture()
+	sup := func(label, quote string) []map[string]any {
+		return []map[string]any{{"label": label, "quote": quote}}
+	}
 	stub := &stubLLM{reply: draft(t, map[string]any{
-		"headline": map[string]any{"text": "Retry cap raised to five", "cites": []string{"M1"}},
+		"headline": map[string]any{"text": "Retry cap raised to five", "support": sup("M1", "make the retry cap five")},
 		"current": []map[string]any{
-			{"text": "Clients retry at most three times per the document", "cites": []string{"D1"}},
-			{"text": "An invented claim", "cites": []string{"M1x"}},
-			{"text": "A misfiled quote", "cites": []string{"D2"}},
+			{"text": "Clients retry at most three times per the document", "support": sup("D1", "Clients retry at most three times")},
+			{"text": "An invented claim", "support": sup("M1x", "something nobody said")},
+			// In the meeting, not in the Jitter section it is filed under.
+			{"text": "A misfiled quote", "support": sup("D2", "make the retry cap five")},
 		},
 		"events": []map[string]any{}, "unresolved": []map[string]any{}, "conflicts": []map[string]any{},
-		"quotes": []map[string]any{
-			{"label": "M1", "quote": "make the retry cap five"},
-			{"label": "D1", "quote": "Clients retry at most three times"},
-			// In the meeting, not in the Jitter section it is filed under.
-			{"label": "D2", "quote": "make the retry cap five"},
-		},
 	})}
 	rep, err := newWriter(stub, nil, day).Update(context.Background(), rel, subj, meetings)
 	if err != nil {
@@ -130,9 +128,8 @@ func TestBriefKeepsOnlyWhatItsQuotesSupport(t *testing.T) {
 func TestBriefIsNotRewrittenWhenNothingChanged(t *testing.T) {
 	rel, subj, meetings := briefFixture()
 	stub := &stubLLM{reply: draft(t, map[string]any{
-		"headline": map[string]any{"text": "cap raised", "cites": []string{"M1"}},
+		"headline": map[string]any{"text": "cap raised", "support": []map[string]any{{"label": "M1", "quote": "retry cap five"}}},
 		"current":  []any{}, "events": []any{}, "unresolved": []any{}, "conflicts": []any{},
-		"quotes": []map[string]any{{"label": "M1", "quote": "retry cap five"}},
 	})}
 	w := newWriter(stub, nil, day)
 	if _, err := w.Update(context.Background(), rel, subj, meetings); err != nil {
@@ -164,16 +161,14 @@ func TestBriefWaitsForTheDocumentToSettle(t *testing.T) {
 
 func conflictDraft(t *testing.T) string {
 	return draft(t, map[string]any{
-		"headline": map[string]any{"text": "cap is five now", "cites": []string{"M1"}},
-		"current":  []any{}, "events": []any{}, "unresolved": []any{},
+		"headline": map[string]any{"text": "cap is five now",
+			"support": []map[string]any{{"label": "M1", "quote": "make the retry cap five"}}},
+		"current": []any{}, "events": []any{}, "unresolved": []any{},
 		"conflicts": []map[string]any{{
 			"doc_says": "three retries", "discussion_says": "the cap is five", "date": "2026-10-14",
-			"doc_cite": "D1", "said_cite": "M1",
+			"doc":  map[string]any{"label": "D1", "quote": "at most three times"},
+			"said": map[string]any{"label": "M1", "quote": "make the retry cap five"},
 		}},
-		"quotes": []map[string]any{
-			{"label": "M1", "quote": "make the retry cap five"},
-			{"label": "D1", "quote": "at most three times"},
-		},
 	})
 }
 

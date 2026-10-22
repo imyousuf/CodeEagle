@@ -421,6 +421,11 @@ func writeRelationBriefs(ctx context.Context, out, errOut io.Writer, cfg *config
 			continue
 		}
 		dropped += rep.Dropped
+		if verbose {
+			for _, u := range rep.Unverified {
+				fmt.Fprintf(errOut, "  unverified in %s: %s\n", path, u)
+			}
+		}
 		if err := relater.Write(ctx, rel, subj); err != nil {
 			return fmt.Errorf("store brief for %s: %w", path, err)
 		}

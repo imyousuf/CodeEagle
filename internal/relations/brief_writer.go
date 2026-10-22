@@ -17,7 +17,7 @@ import (
 
 // BriefVersion is bumped when what a brief is written from, or how, changes,
 // so existing briefs are written again.
-const BriefVersion = 1
+const BriefVersion = 2
 
 // BriefOptions bound brief writing.
 type BriefOptions struct {
@@ -72,11 +72,14 @@ func NewBriefWriter(client llm.Client, asker jev.Asker, transcripts Transcripts,
 
 // BriefReport is what writing one brief did and cost.
 type BriefReport struct {
-	Written          bool
-	Reason           string
-	InputTokens      int
-	OutputTokens     int
-	Dropped          int
+	Written      bool
+	Reason       string
+	InputTokens  int
+	OutputTokens int
+	Dropped      int
+	// Unverified describes each quote that failed its check, for looking
+	// at why lines were dropped.
+	Unverified       []string
 	ConflictsKept    int
 	ConflictsDemoted int
 	JudgeRequests    int
@@ -127,8 +130,9 @@ func (w *BriefWriter) Update(ctx context.Context, rel *Relation, subj *Subject, 
 		return rep, fmt.Errorf("write brief for %s: %w", subj.Path, err)
 	}
 
-	brief, evidence, dropped := ground(out, snips, RelationID(rel.SubjectPath), w.speakers)
+	brief, evidence, dropped, unverified := ground(out, snips, RelationID(rel.SubjectPath), w.speakers)
 	rep.Dropped = dropped
+	rep.Unverified = unverified
 	if brief.Headline.Text == "" {
 		rep.Reason = "nothing in the draft could be verified"
 		return rep, nil
@@ -292,40 +296,64 @@ Write:
 - conflicts: only where the document says one thing and a later meeting decided or stated something different. Leave it empty otherwise. Never present vocabulary differences as conflicts.
 
 Rules:
-- Every line cites the snippet labels it rests on, and for every label you cite you add an entry to quotes with words copied exactly from that snippet. Copy, do not paraphrase: quotes are checked character for character, and a line whose quotes do not check out is removed.
+- Every line carries its support: one or more entries, each a snippet label and words copied exactly from that snippet. Copy, do not paraphrase or tidy: quotes are checked character for character against the snippet named beside them, and a line none of whose quotes check out is removed. A conflict's doc support must quote a D snippet and its said support a meeting snippet.
 - Say only what the snippets support. If they do not say something, leave it out. An empty field is better than a guess.
 - Use names as the snippets give them. Do not add surnames, titles or roles.
 - Dates are YYYY-MM-DD, taken from the snippets.`
 
-// briefReply is the model's draft.
+// support is one citation in the draft: a snippet label and words copied
+// from that snippet.
+type support struct {
+	Label string `json:"label"`
+	Quote string `json:"quote"`
+}
+
+// briefReply is the model's draft. Every line carries its own support, so a
+// line cannot cite a snippet without quoting it.
 type briefReply struct {
-	Headline   Line       `json:"headline"`
-	Current    []Line     `json:"current"`
-	Events     []Event    `json:"events"`
-	Unresolved []Open     `json:"unresolved"`
-	Conflicts  []Conflict `json:"conflicts"`
-	Quotes     []struct {
-		Label string `json:"label"`
-		Quote string `json:"quote"`
-	} `json:"quotes"`
+	Headline struct {
+		Text    string    `json:"text"`
+		Support []support `json:"support"`
+	} `json:"headline"`
+	Current []struct {
+		Text    string    `json:"text"`
+		Support []support `json:"support"`
+	} `json:"current"`
+	Events []struct {
+		Date    string    `json:"date"`
+		Text    string    `json:"text"`
+		Support []support `json:"support"`
+	} `json:"events"`
+	Unresolved []struct {
+		Text    string    `json:"text"`
+		Raised  string    `json:"raised"`
+		Support []support `json:"support"`
+	} `json:"unresolved"`
+	Conflicts []struct {
+		DocSays        string  `json:"doc_says"`
+		DiscussionSays string  `json:"discussion_says"`
+		Date           string  `json:"date"`
+		Doc            support `json:"doc"`
+		Said           support `json:"said"`
+	} `json:"conflicts"`
 }
 
 var briefSchema = func() *llm.JSONSchema {
 	str := map[string]any{"type": "string"}
-	cites := map[string]any{"type": "array", "items": str}
-	line := llmjson.Object(map[string]any{"text": str, "cites": cites})
+	sup := llmjson.Object(map[string]any{"label": str, "quote": str})
+	sups := map[string]any{"type": "array", "items": sup}
+	line := llmjson.Object(map[string]any{"text": str, "support": sups})
 	return &llm.JSONSchema{
 		Name:   "relation_brief",
 		Strict: true,
 		Schema: llmjson.Object(map[string]any{
 			"headline":   line,
 			"current":    map[string]any{"type": "array", "items": line},
-			"events":     map[string]any{"type": "array", "items": llmjson.Object(map[string]any{"date": str, "text": str, "cites": cites})},
-			"unresolved": map[string]any{"type": "array", "items": llmjson.Object(map[string]any{"text": str, "raised": str, "cites": cites})},
+			"events":     map[string]any{"type": "array", "items": llmjson.Object(map[string]any{"date": str, "text": str, "support": sups})},
+			"unresolved": map[string]any{"type": "array", "items": llmjson.Object(map[string]any{"text": str, "raised": str, "support": sups})},
 			"conflicts": map[string]any{"type": "array", "items": llmjson.Object(map[string]any{
-				"doc_says": str, "discussion_says": str, "date": str, "doc_cite": str, "said_cite": str,
+				"doc_says": str, "discussion_says": str, "date": str, "doc": sup, "said": sup,
 			})},
-			"quotes": map[string]any{"type": "array", "items": llmjson.Object(map[string]any{"label": str, "quote": str})},
 		}),
 	}
 }()
@@ -349,68 +377,88 @@ func (w *BriefWriter) userPrompt(rel *Relation, subj *Subject, snips []*snippet)
 }
 
 // ground keeps only what the snippets support. A quote counts only if it is
-// in the snippet it is filed under; a line counts only if one of its labels
-// has such a quote. What survives is re-cited by evidence ID.
-func ground(r briefReply, snips []*snippet, relID string, speakers SpeakerNamer) (*Brief, []Evidence, int) {
+// in the snippet named beside it; a line counts only if one of its quotes
+// does. What survives is re-cited by evidence ID.
+func ground(r briefReply, snips []*snippet, relID string, speakers SpeakerNamer) (*Brief, []Evidence, int, []string) {
 	byLabel := make(map[string]*snippet, len(snips))
 	for _, s := range snips {
 		byLabel[s.Label] = s
 	}
-	evidenceFor := make(map[string]string) // label -> evidence ID
-	var evidence []Evidence
-	for _, q := range r.Quotes {
-		s := byLabel[q.Label]
-		if s == nil || evidenceFor[q.Label] != "" || !transcript.QuoteIn(s.Text, q.Quote) {
-			continue
+	var (
+		evidence   []Evidence
+		idOf       = make(map[string]string) // label + quote -> evidence ID
+		unverified []string
+		dropped    int
+	)
+	// verify returns the evidence ID for a quote, or "" if it does not
+	// check out against its own snippet.
+	verify := func(sp support) string {
+		key := sp.Label + "\x00" + strings.Join(strings.Fields(strings.ToLower(sp.Quote)), " ")
+		if id, ok := idOf[key]; ok {
+			return id
 		}
-		e := anchor(s, q.Quote, speakers)
-		e.ID = EvidenceID(relID, e)
-		evidenceFor[q.Label] = e.ID
-		evidence = append(evidence, e)
+		s := byLabel[sp.Label]
+		switch {
+		case s == nil:
+			unverified = append(unverified, fmt.Sprintf("%s: no such snippet: %q", sp.Label, sp.Quote))
+		case !transcript.QuoteIn(s.Text, sp.Quote):
+			unverified = append(unverified, fmt.Sprintf("%s: not in the snippet: %q", sp.Label, sp.Quote))
+		default:
+			e := anchor(s, sp.Quote, speakers)
+			e.ID = EvidenceID(relID, e)
+			idOf[key] = e.ID
+			if !containsEvidence(evidence, e.ID) {
+				evidence = append(evidence, e)
+			}
+			return e.ID
+		}
+		idOf[key] = ""
+		return ""
 	}
-
-	dropped := 0
-	recite := func(labels []string) []string {
+	cite := func(text string, sups []support) []string {
 		var ids []string
-		for _, l := range labels {
-			if id := evidenceFor[l]; id != "" && !contains(ids, id) {
+		for _, sp := range sups {
+			if id := verify(sp); id != "" && !contains(ids, id) {
 				ids = append(ids, id)
 			}
 		}
+		if len(ids) == 0 && text != "" {
+			dropped++
+			var labels []string
+			for _, sp := range sups {
+				labels = append(labels, sp.Label)
+			}
+			unverified = append(unverified, fmt.Sprintf("dropped %q: no verified quote among %v", text, labels))
+		}
 		return ids
 	}
+
 	b := &Brief{}
-	if ids := recite(r.Headline.Cites); len(ids) > 0 && r.Headline.Text != "" {
+	if ids := cite(r.Headline.Text, r.Headline.Support); len(ids) > 0 {
 		b.Headline = Line{Text: r.Headline.Text, Cites: ids}
-	} else if r.Headline.Text != "" {
-		dropped++
 	}
 	for _, l := range r.Current {
-		if ids := recite(l.Cites); len(ids) > 0 {
+		if ids := cite(l.Text, l.Support); len(ids) > 0 {
 			b.Current = append(b.Current, Line{Text: l.Text, Cites: ids})
-		} else {
-			dropped++
 		}
 	}
 	for _, e := range r.Events {
-		if ids := recite(e.Cites); len(ids) > 0 {
+		if ids := cite(e.Text, e.Support); len(ids) > 0 {
 			b.Events = append(b.Events, Event{Date: e.Date, Text: e.Text, Cites: ids})
-		} else {
-			dropped++
 		}
 	}
 	for _, u := range r.Unresolved {
-		if ids := recite(u.Cites); len(ids) > 0 {
+		if ids := cite(u.Text, u.Support); len(ids) > 0 {
 			b.Unresolved = append(b.Unresolved, Open{Text: u.Text, Raised: u.Raised, Cites: ids})
-		} else {
-			dropped++
 		}
 	}
 	for _, c := range r.Conflicts {
-		docID, saidID := evidenceFor[c.DocCite], evidenceFor[c.SaidCite]
-		docSnip := byLabel[c.DocCite]
+		docSnip := byLabel[c.Doc.Label]
+		docID, saidID := verify(c.Doc), verify(c.Said)
 		if docID == "" || saidID == "" || docSnip == nil || docSnip.Kind != EvidenceDoc {
 			dropped++
+			unverified = append(unverified, fmt.Sprintf("dropped conflict %q: doc %s / said %s did not both check out",
+				c.DiscussionSays, c.Doc.Label, c.Said.Label))
 			continue
 		}
 		b.Conflicts = append(b.Conflicts, Conflict{
@@ -423,7 +471,16 @@ func ground(r briefReply, snips []*snippet, relID string, speakers SpeakerNamer)
 		b.Headline, b.Current = b.Current[0], b.Current[1:]
 	}
 	b.Dropped = dropped
-	return b, evidence, dropped
+	return b, evidence, dropped, unverified
+}
+
+func containsEvidence(list []Evidence, id string) bool {
+	for _, e := range list {
+		if e.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // anchor turns a verified quote into evidence anchored to its source.
