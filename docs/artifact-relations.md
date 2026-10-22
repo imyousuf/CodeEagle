@@ -119,6 +119,14 @@ stops storing section text and so stops embedding it, keeping the structural
 fields). `rag` starts returning markdown sections, which
 is the point, but saved queries should be re-run before and after.
 
+The documents linker is kept away from markdown. It links a document to any
+code entity whose name of three letters or more appears in its text as a
+bare substring, so over every markdown section it would link prose to code on
+coincidences of spelling ("new" in "renewal") and multiply its own cost.
+Markdown had no text for it to read before, so excluding it keeps that phase
+exactly as it was; linking prose to code is deferred to matching built for
+prose (see Deferred).
+
 ### Backfill without a runaway
 
 Existing markdown is re-parsed once by a backpop step gated on a
@@ -139,8 +147,15 @@ to vector search until `vectorindex --force`. After this change:
 - each sync backfills missing vectors and drops vectors of deleted nodes, up
   to `vector.backfill_limit` (default 2000) so a large gap closes over
   several runs instead of in one;
-- the meetings pipeline embeds the meetings it writes, best-effort; if the
-  vector store is locked it skips, and the next sync's backfill catches up.
+- after a meetings run, the meeting nodes the index lacks are embedded,
+  best-effort; if the vector store is locked or does not exist yet it skips,
+  and the next sync's backfill catches up. It never removes vectors: a store
+  that sees only the meetings scope would take every other vector for a
+  deleted node's.
+
+The reconcile runs over a view of the graph that includes the meetings and
+relations scopes as well as the branch. A code sync's own store reads only
+branches, and through it every meeting vector would look stale.
 
 `EmbeddableTextVersion` does not change: markdown was never embedded, so no
 existing vector's text changes.
