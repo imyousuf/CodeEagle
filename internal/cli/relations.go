@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -26,6 +28,8 @@ func newRelationsCmd() *cobra.Command {
 		sampleSize int
 		top        int
 		limit      int
+		measure    string
+		target     float64
 	)
 
 	cmd := &cobra.Command{
@@ -59,6 +63,9 @@ pairs judged in one run; the caps in relations.* bound them anyway.`,
 			o := relationsPlanOptions{
 				doc: doc, meeting: meeting, sampleOut: sampleOut, sampleSize: sampleSize, top: top, limit: limit,
 			}
+			if measure != "" {
+				return runRelationsMeasure(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cfg, measure, target)
+			}
 			if plan {
 				return runRelationsPlan(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cfg, o)
 			}
@@ -73,6 +80,8 @@ pairs judged in one run; the caps in relations.* bound them anyway.`,
 	cmd.Flags().IntVar(&sampleSize, "sample-size", 200, "how many candidates --sample-out writes")
 	cmd.Flags().IntVar(&top, "top", 10, "how many of the best candidates to list")
 	cmd.Flags().IntVar(&limit, "limit", 0, "judge at most this many pairs (default: relations.max_pairs_per_run)")
+	cmd.Flags().StringVar(&measure, "measure", "", "judge a labelled sample (from --sample-out) and report how well the gate separates it; writes nothing to the graph")
+	cmd.Flags().Float64Var(&target, "target-precision", 0.95, "precision the suggested gate must reach, with --measure")
 	return cmd
 }
 
@@ -191,11 +200,11 @@ func runRelationsPlan(ctx context.Context, out, errOut io.Writer, cfg *config.Co
 	return nil
 }
 
-// runRelationsJudge proposes, judges and records verdicts.
-func runRelationsJudge(ctx context.Context, out, errOut io.Writer, cfg *config.Config, o relationsPlanOptions) error {
+// newRelationJudge builds the decision-model judge, or explains why it cannot.
+func newRelationJudge(cfg *config.Config) (*relations.Judge, error) {
 	key := strings.TrimSpace(cfg.Transcripts.JevAPIKey)
 	if key == "" {
-		return fmt.Errorf("judging needs a decision model: set transcripts.jev_api_key (a relation is never asserted on similarity alone)")
+		return nil, fmt.Errorf("judging needs a decision model: set transcripts.jev_api_key (a relation is never asserted on similarity alone)")
 	}
 	var jopts []jev.Option
 	if cfg.Transcripts.JevModel != "" {
@@ -203,7 +212,101 @@ func runRelationsJudge(ctx context.Context, out, errOut io.Writer, cfg *config.C
 	}
 	client, err := jev.New(key, jopts...)
 	if err != nil {
-		return fmt.Errorf("decision model: %w", err)
+		return nil, fmt.Errorf("decision model: %w", err)
+	}
+	return relations.NewJudge(client, relations.NewFileTranscripts()), nil
+}
+
+// runRelationsMeasure judges a labelled sample and reports how well the
+// probabilities separate related pairs from unrelated ones.
+func runRelationsMeasure(ctx context.Context, out, errOut io.Writer, cfg *config.Config, labelsPath string, target float64) error {
+	judge, err := newRelationJudge(cfg)
+	if err != nil {
+		return err
+	}
+	labelled, err := relations.ReadLabels(labelsPath)
+	if err != nil {
+		return err
+	}
+	if len(labelled) == 0 {
+		return fmt.Errorf("%s has no pairs labelled related or unrelated", labelsPath)
+	}
+	store, _, err := openReadOnlyBranchStore(cfg)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	subjects, err := relations.LoadSubjects(ctx, store, nil)
+	if err != nil {
+		return err
+	}
+	meetings, err := relations.LoadMeetings(ctx, store)
+	if err != nil {
+		return err
+	}
+	cands, labels, missing := relations.Rebuild(labelled, subjects, meetings)
+	if missing > 0 {
+		fmt.Fprintf(errOut, "Note: %d labelled pairs are no longer in the corpus and were skipped.\n", missing)
+	}
+	judgments, report, err := judge.Judge(ctx, cands)
+	if err != nil {
+		return fmt.Errorf("judge the sample: %w", err)
+	}
+	byKey := make(map[string]float64, len(judgments))
+	for _, jd := range judgments {
+		byKey[jd.Candidate.Key()] = jd.P
+	}
+	probs := make([]float64, len(cands))
+	for i, c := range cands {
+		probs[i] = byKey[c.Key()]
+	}
+
+	cal := relations.Calibrate(probs, labels, target)
+	fmt.Fprintf(out, "Pairs: %d (%d related) · judged with %s · %d requests, %dk input tokens\n",
+		cal.Pairs, cal.Related, report.Model, report.Requests, (report.InputTokens+999)/1000)
+	fmt.Fprintf(out, "AUC:   %.3f\n\n", cal.AUC)
+	fmt.Fprintln(out, "gate  admitted  precision  recall")
+	for _, b := range cal.Buckets {
+		fmt.Fprintf(out, " %.1f  %8d  %9.2f  %6.2f\n", b.Gate, b.Admitted, b.Precision, b.Recall)
+	}
+	if cal.Gate > 0 {
+		fmt.Fprintf(out, "\nLowest gate with precision ≥ %.2f: %.1f (set relations.gate)\n", target, cal.Gate)
+	} else {
+		fmt.Fprintf(out, "\nNo gate reaches precision %.2f on this sample.\n", target)
+	}
+
+	scored := strings.TrimSuffix(labelsPath, ".jsonl") + ".scored.jsonl"
+	if err := writeScored(scored, cands, probs, labels); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Per-pair probabilities: %s\n", scored)
+	return nil
+}
+
+// writeScored writes each judged pair with its label and probability.
+func writeScored(path string, cands []*relations.Candidate, probs []float64, labels []bool) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	for i, c := range cands {
+		if err := enc.Encode(map[string]any{
+			"subject_path": c.Subject.Path, "session_id": c.Meeting.SessionID,
+			"related": labels[i], "p": probs[i], "signals": c.Signals.Names(), "cosine": c.Cosine,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// runRelationsJudge proposes, judges and records verdicts.
+func runRelationsJudge(ctx context.Context, out, errOut io.Writer, cfg *config.Config, o relationsPlanOptions) error {
+	judge, err := newRelationJudge(cfg)
+	if err != nil {
+		return err
 	}
 
 	base, branch, err := openBranchStore(cfg)
@@ -226,7 +329,7 @@ func runRelationsJudge(ctx context.Context, out, errOut io.Writer, cfg *config.C
 		return nil
 	}
 
-	rel := relations.NewRelater(store, relations.NewJudge(client, relations.NewFileTranscripts()), relations.RelaterOptions{
+	rel := relations.NewRelater(store, judge, relations.RelaterOptions{
 		Gate: cfg.Relations.Gate,
 		Log:  func(f string, a ...any) { fmt.Fprintf(errOut, f+"\n", a...) },
 	})
