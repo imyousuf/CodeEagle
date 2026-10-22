@@ -65,6 +65,14 @@ type DocsConfig struct {
 	Faces FacesConfig `mapstructure:"faces" yaml:"faces,omitempty"`
 }
 
+// VectorConfig holds vector index maintenance settings.
+type VectorConfig struct {
+	// BackfillLimit caps how many nodes one sync embeds when bringing the
+	// index up to date with the graph, so a large gap closes over several
+	// runs instead of one. Zero or less means no limit.
+	BackfillLimit int `mapstructure:"backfill_limit" yaml:"backfill_limit,omitempty"`
+}
+
 // MarkdownSectionText reports whether markdown sections carry their text.
 func (d DocsConfig) MarkdownSectionText() bool {
 	return d.MarkdownSections == nil || *d.MarkdownSections
@@ -272,6 +280,8 @@ type Config struct {
 	Queue QueueConfig `mapstructure:"queue" yaml:"queue,omitempty"`
 	// Transcripts contains meeting transcript indexing configuration.
 	Transcripts TranscriptsConfig `mapstructure:"transcripts" yaml:"transcripts,omitempty"`
+	// Vector contains vector index maintenance configuration.
+	Vector VectorConfig `mapstructure:"vector" yaml:"vector,omitempty"`
 	// ConfigDir is the resolved .CodeEagle directory path (not persisted in YAML).
 	ConfigDir string `mapstructure:"-" yaml:"-"`
 	// ProjectConf is the parsed .CodeEagle.conf if found (not persisted).
@@ -607,6 +617,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("agents.model", "")
 	v.SetDefault("agents.auto_summarize", false)
 
+	v.SetDefault("vector.backfill_limit", 2000)
 	v.SetDefault("docs.max_image_resolution", 1024)
 	v.SetDefault("docs.context_window", 120000) // Must match docs.DefaultContextWindow
 	v.SetDefault("docs.exclude_extensions", []string{".lock", ".min.js", ".min.css", ".map", ".wasm", ".pb.go"})

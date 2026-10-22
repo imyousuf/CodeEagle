@@ -179,3 +179,41 @@ func TestRescopeRejectsBadArguments(t *testing.T) {
 		t.Errorf("same-scope move reported %d keys", res.Keys)
 	}
 }
+
+// TestViewSharesTheHandleWithItsOwnScopes covers the store view used when one
+// process must write one scope while reading others: Badger allows a single
+// writer per directory, so a second store cannot simply be opened.
+func TestViewSharesTheHandleWithItsOwnScopes(t *testing.T) {
+	base, err := NewBranchStore(t.TempDir(), "main", []string{"main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer base.Close()
+	ctx := context.Background()
+
+	if err := base.AddNode(ctx, &graph.Node{ID: "code", Type: graph.NodeFunction, Name: "Retry"}); err != nil {
+		t.Fatal(err)
+	}
+	rel := base.View(RelationScope, []string{"main", RelationScope})
+	if err := rel.AddNode(ctx, &graph.Node{ID: "rel", Type: graph.NodeDocument, Name: "relation"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := rel.GetNode(ctx, "code"); err != nil {
+		t.Errorf("the view cannot read the branch it was given: %v", err)
+	}
+	if _, err := base.GetNode(ctx, "rel"); err == nil {
+		t.Error("a node written through the view landed in the base store's scope")
+	}
+	if _, err := base.WithReadScopes(RelationScope).GetNode(ctx, "rel"); err != nil {
+		t.Errorf("WithReadScopes does not read the extra scope: %v", err)
+	}
+
+	// Closing a view must leave the base store usable.
+	if err := rel.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.GetNode(ctx, "code"); err != nil {
+		t.Errorf("closing a view closed the shared handle: %v", err)
+	}
+}

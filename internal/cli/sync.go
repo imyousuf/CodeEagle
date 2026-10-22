@@ -215,13 +215,14 @@ func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, v
 	if verboseMode {
 		logFn("[vector] Detecting embedding provider...")
 	}
-	vs, vecErr := openVectorStore(cfg, store, currentBranch, logFn)
+	vecGraph := vectorGraphView(store)
+	vs, vecErr := openVectorStore(cfg, vecGraph, currentBranch, logFn)
 	if vecErr != nil {
 		warnFn("Warning: vector store: %v", vecErr)
 	}
 	if vs != nil {
 		defer vs.Close()
-		if err := syncVectorIndex(vs, cfg, full, logFn); err != nil {
+		if err := syncVectorIndex(vs, cfg, full, vecGraph, idx.ChangedFiles(), logFn); err != nil {
 			warnFn("Warning: vector indexing failed: %v", err)
 		}
 	}

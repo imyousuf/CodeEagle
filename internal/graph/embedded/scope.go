@@ -30,6 +30,12 @@ import (
 // legal git branch name, so it can never collide with a real one.
 const MeetingScope = "@meetings"
 
+// RelationScope is the key scope discovered relations are stored under. Like
+// meetings they are not branch data: what was said about a document does not
+// change when a branch is checked out. Kept apart from the meetings scope so
+// re-indexing a meeting, or moving the meetings scope, never touches them.
+const RelationScope = "@relations"
+
 // ReservedScopePrefix marks a scope that is ours rather than a git branch.
 //
 // The leading "@" is what makes such a name illegal as a git branch, which is

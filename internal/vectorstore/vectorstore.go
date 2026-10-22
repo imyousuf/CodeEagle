@@ -142,13 +142,8 @@ func newVectorStore(graphDB graph.Store, embedder embedding.Provider, branch, id
 		return nil, fmt.Errorf("open vector db: %w", err)
 	}
 
-	g := hnsw.NewGraph[string]()
-	g.M = hnswM
-	g.EfSearch = hnswEf
-	g.Distance = hnsw.CosineDistance
-
 	return &VectorStore{
-		idx:      g,
+		idx:      newGraph(),
 		vecDB:    db,
 		graphDB:  graphDB,
 		embedder: embedder,
@@ -342,6 +337,62 @@ func (vs *VectorStore) StaleInLastSearch() int {
 // embeddable nodes the graph has that the index does not. Both are why a
 // search comes back thin, and neither is visible from a search.
 func (vs *VectorStore) Staleness(ctx context.Context) (stale, missing int, err error) {
+	staleIDs, missingNodes, err := vs.gaps(ctx, nil)
+	return len(staleIDs), len(missingNodes), err
+}
+
+// Reconcile closes the gap between the index and the graph in place: it drops
+// the vectors of nodes the graph no longer has and embeds up to limit
+// embeddable nodes it lacks, most recently updated first. Zero means no limit.
+//
+// Until now only a full rebuild embedded anything, so a document indexed after
+// the last rebuild was invisible to search by meaning. Reconciling on every
+// sync keeps the index current without a rebuild, and the limit keeps one sync
+// from embedding a whole corpus: a large gap closes over several runs.
+//
+// The graph store must read every scope whose nodes are in the index (the
+// branch, meetings, relations), or their vectors look stale and are dropped.
+func (vs *VectorStore) Reconcile(ctx context.Context, limit int) (added, removed int, err error) {
+	staleIDs, missing, err := vs.gaps(ctx, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	vs.mu.Lock()
+	for _, id := range staleIDs {
+		vs.removeNodeVectors(id)
+	}
+	vs.mu.Unlock()
+	if limit > 0 && len(missing) > limit {
+		missing = missing[:limit]
+	}
+	if err := vs.IndexNodes(ctx, missing); err != nil {
+		return 0, len(staleIDs), err
+	}
+	return len(missing), len(staleIDs), nil
+}
+
+// EmbedMissing embeds up to limit nodes of the given types that the index
+// lacks, and removes nothing. It is for a store that sees only part of the
+// graph, such as the meetings scope alone: anything it cannot see would look
+// stale to it, so it must not judge staleness.
+func (vs *VectorStore) EmbedMissing(ctx context.Context, limit int, types ...graph.NodeType) (int, error) {
+	_, missing, err := vs.gaps(ctx, types)
+	if err != nil {
+		return 0, err
+	}
+	if limit > 0 && len(missing) > limit {
+		missing = missing[:limit]
+	}
+	if err := vs.IndexNodes(ctx, missing); err != nil {
+		return 0, err
+	}
+	return len(missing), nil
+}
+
+// gaps lists the indexed node IDs the graph no longer has, and the embeddable
+// nodes of the given types (all embeddable types when none are given) the
+// index lacks, most recently updated first.
+func (vs *VectorStore) gaps(ctx context.Context, types []graph.NodeType) (stale []string, missing []*graph.Node, err error) {
 	vs.mu.RLock()
 	defer vs.mu.RUnlock()
 
@@ -359,26 +410,37 @@ func (vs *VectorStore) Staleness(ctx context.Context) (stale, missing int, err e
 		return nil
 	})
 	if err != nil {
-		return 0, 0, fmt.Errorf("scan chunks: %w", err)
+		return nil, nil, fmt.Errorf("scan chunks: %w", err)
 	}
 
+	if len(types) == 0 {
+		types = EmbeddableTypes
+	}
 	present := make(map[string]bool)
-	for _, typ := range EmbeddableTypes {
+	for _, typ := range types {
 		nodes, err := vs.graphDB.QueryNodes(ctx, graph.NodeFilter{Type: typ})
 		if err != nil {
-			return 0, 0, err
+			return nil, nil, err
 		}
 		for _, n := range nodes {
 			present[n.ID] = true
-			if EmbeddableText(n) != "" && !indexed[n.ID] {
-				missing++
+			if !indexed[n.ID] && IsEmbeddable(n.Type) && EmbeddableText(n) != "" {
+				missing = append(missing, n)
 			}
 		}
 	}
-	for id := range indexed {
-		if !present[id] {
-			stale++
+	sort.SliceStable(missing, func(i, j int) bool {
+		return missing[i].UpdatedAt.After(missing[j].UpdatedAt)
+	})
+	// Staleness is only judged over every embeddable type: with a subset,
+	// nodes of the other types are absent from present, not from the graph.
+	if len(types) == len(EmbeddableTypes) {
+		for id := range indexed {
+			if !present[id] {
+				stale = append(stale, id)
+			}
 		}
+		sort.Strings(stale)
 	}
 	return stale, missing, nil
 }
@@ -539,11 +601,7 @@ func (vs *VectorStore) RemoveNode(_ context.Context, nodeID string) error {
 // Rebuild performs a full reindex from the graph store.
 func (vs *VectorStore) Rebuild(ctx context.Context) error {
 	vs.mu.Lock()
-	// Create a fresh HNSW graph.
-	vs.idx = hnsw.NewGraph[string]()
-	vs.idx.M = hnswM
-	vs.idx.EfSearch = hnswEf
-	vs.idx.Distance = hnsw.CosineDistance
+	vs.idx = newGraph()
 	vs.mu.Unlock()
 
 	// Record that a rebuild started, before the first deletion and durably,
@@ -656,10 +714,7 @@ func (vs *VectorStore) Load() (bool, error) {
 	}
 	defer f.Close()
 
-	g := hnsw.NewGraph[string]()
-	g.M = hnswM
-	g.EfSearch = hnswEf
-	g.Distance = hnsw.CosineDistance
+	g := newGraph()
 	if err := g.Import(bufio.NewReader(f)); err != nil {
 		return false, fmt.Errorf("import vec.idx: %w", err)
 	}
@@ -793,9 +848,26 @@ func (vs *VectorStore) removeNodeVectors(nodeID string) {
 		}
 	}
 
+	// coder/hnsw v0.6.1 panics on the next Add once Delete has emptied the
+	// graph, which happens whenever the only node is re-embedded, or a
+	// reconcile drops every vector before adding new ones. An empty graph
+	// holds nothing worth keeping, so it is replaced with a fresh one.
+	if vs.idx.Len() == 0 {
+		vs.idx = newGraph()
+	}
+
 	// Remove chunk entries from BadgerDB.
 	prefix := []byte(prefixChunk + nodeID + ":")
 	vs.deleteByPrefix(prefix)
+}
+
+// newGraph returns an empty vector graph with the index's settings.
+func newGraph() *hnsw.Graph[string] {
+	g := hnsw.NewGraph[string]()
+	g.M = hnswM
+	g.EfSearch = hnswEf
+	g.Distance = hnsw.CosineDistance
+	return g
 }
 
 func (vs *VectorStore) getChunkText(nodeID string, chunkIdx int) string {

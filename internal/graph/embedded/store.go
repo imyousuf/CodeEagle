@@ -33,6 +33,29 @@ type BranchStore struct {
 	// path is where this database lives, so an operation taking another
 	// database as an argument can tell whether it is the same one.
 	path string
+	// borrowed marks a view over another store's handle, which that store
+	// owns and closes.
+	borrowed bool
+}
+
+// View returns a store over the same database with its own write scope and
+// read path. It shares this store's handle, because Badger allows one writer
+// per directory and a second store cannot be opened in the same process. The
+// view's Close does nothing; closing the original closes both.
+func (s *BranchStore) View(write string, reads []string) *BranchStore {
+	return &BranchStore{
+		db:           s.db,
+		writeBranch:  write,
+		readBranches: append([]string(nil), reads...),
+		path:         s.path,
+		borrowed:     true,
+	}
+}
+
+// WithReadScopes returns a view that writes where this store does and also
+// reads the given scopes, after its own.
+func (s *BranchStore) WithReadScopes(extra ...string) *BranchStore {
+	return s.View(s.writeBranch, appendScopes(append([]string(nil), s.readBranches...), extra...))
 }
 
 // NewBranchStore opens (or creates) a BadgerDB-backed graph store at dbPath with
@@ -611,6 +634,9 @@ func (s *BranchStore) Stats(_ context.Context) (*graph.GraphStats, error) {
 }
 
 func (s *BranchStore) Close() error {
+	if s.borrowed {
+		return nil
+	}
 	return s.db.Close()
 }
 
