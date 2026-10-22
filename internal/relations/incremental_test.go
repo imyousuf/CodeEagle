@@ -251,3 +251,24 @@ func TestSelectFairlyGivesEachSideItsShare(t *testing.T) {
 		t.Errorf("selected %d (%d for the meeting), deferred %d; want 4 (2), 2", len(prop.Candidates), fromMeetings, len(prop.Deferred))
 	}
 }
+
+// TestIncrementalForgetsWhatLeftTheCorpus covers deleted documents: their
+// entries leave the record rather than accumulating in it forever.
+func TestIncrementalForgetsWhatLeftTheCorpus(t *testing.T) {
+	store, base, vec := incrementalStores(t)
+	indexMarkdown(t, base, "docs/other.md", strings.Replace(retryDoc, "# Retry budget design", "# Other design", 1), nil)
+	vec[graph.NewNodeID(string(graph.NodeDocument), "docs/other.md", "section:Limits")] = []float32{0, 1, 0}
+	asker := &scriptedAsker{p: map[string]float64{"Retry cap": 0.9}}
+	runIncremental(t, store, vec, asker, briefStub(), DefaultOptions())
+	if err := base.DeleteByFile(context.Background(), "docs/retry.md"); err != nil {
+		t.Fatal(err)
+	}
+	runIncremental(t, store, vec, asker, briefStub(), DefaultOptions())
+	state, err := LoadScanState(context.Background(), store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := state.Subjects["docs/retry.md"]; ok {
+		t.Error("a deleted document stayed in the record")
+	}
+}

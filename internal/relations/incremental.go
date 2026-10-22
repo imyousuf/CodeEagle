@@ -239,6 +239,21 @@ func incremental(ctx context.Context, store graph.Store, p *Proposer, subjects [
 			state.Meetings[m.SessionID] = meetingSig(m)
 		}
 	}
+	// What has left the corpus leaves the record too.
+	live := make(map[string]bool, len(subjects))
+	for _, s := range subjects {
+		live[s.Path] = true
+	}
+	for path := range state.Subjects {
+		if !live[path] {
+			delete(state.Subjects, path)
+		}
+	}
+	for session := range state.Meetings {
+		if meetings[session] == nil {
+			delete(state.Meetings, session)
+		}
+	}
 	if err := state.Save(ctx, store); err != nil {
 		return rep, fmt.Errorf("save relation scan state: %w", err)
 	}
