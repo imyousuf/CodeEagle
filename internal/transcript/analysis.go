@@ -206,8 +206,15 @@ func stringsContainsFold(haystack, needle string) bool {
 // the session, ignoring whitespace and case. A quote that fails this check was
 // invented, and anything resting on it should be treated as unverified.
 func QuoteInTranscript(s *Session, quote string) bool {
+	return QuoteIn(s.Transcript(), quote)
+}
+
+// QuoteIn reports whether quote appears in text, ignoring whitespace and
+// case. An empty quote never does: an empty string is in everything, and a
+// claim citing nothing is not supported by anything.
+func QuoteIn(text, quote string) bool {
 	if strings.TrimSpace(quote) == "" {
 		return false
 	}
-	return stringsContainsFold(collapseSpace(s.Transcript()), collapseSpace(quote))
+	return stringsContainsFold(collapseSpace(text), collapseSpace(quote))
 }

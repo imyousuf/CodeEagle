@@ -217,3 +217,41 @@ func TestViewSharesTheHandleWithItsOwnScopes(t *testing.T) {
 		t.Errorf("closing a view closed the shared handle: %v", err)
 	}
 }
+
+// TestResolvePrefixFindsNodesByShortID covers referring to a node by the
+// first few characters of its ID, which agents need to keep their output
+// short: unique prefixes resolve, ambiguous ones return every match, and
+// prefixes too short to be useful are refused.
+func TestResolvePrefixFindsNodesByShortID(t *testing.T) {
+	store, err := NewBranchStore(t.TempDir(), "main", []string{"main", RelationScope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	for _, id := range []string{"abcd1111", "abcd2222", "beef0000"} {
+		if err := store.AddNode(ctx, &graph.Node{ID: id, Type: graph.NodeFunction, Name: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.View(RelationScope, []string{RelationScope}).AddNode(ctx,
+		&graph.Node{ID: "cafe9999", Type: graph.NodeDocument, Name: "rel"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := store.ResolvePrefix(ctx, "beef", 10); err != nil || len(got) != 1 || got[0].ID != "beef0000" {
+		t.Errorf("unique prefix: %v, %v", got, err)
+	}
+	if got, _ := store.ResolvePrefix(ctx, "ABCD", 10); len(got) != 2 {
+		t.Errorf("ambiguous prefix returned %d matches, want 2 (case-insensitive)", len(got))
+	}
+	if got, _ := store.ResolvePrefix(ctx, "cafe", 10); len(got) != 1 {
+		t.Errorf("a node in another read scope was not found: %v", got)
+	}
+	if got, _ := store.ResolvePrefix(ctx, "abcd", 1); len(got) != 1 {
+		t.Errorf("limit not honoured: %d results", len(got))
+	}
+	if _, err := store.ResolvePrefix(ctx, "abc", 10); err == nil {
+		t.Error("a three-character prefix was accepted")
+	}
+}

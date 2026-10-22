@@ -80,7 +80,7 @@ func openOneFederated(
 	}
 
 	store, err := embedded.NewReadOnlyBranchStore(dbPath, "default",
-		[]string{"default", embedded.MeetingScope})
+		[]string{"default", embedded.MeetingScope, embedded.RelationScope})
 	if err != nil {
 		return nil, fmt.Errorf("open graph: %w", err)
 	}

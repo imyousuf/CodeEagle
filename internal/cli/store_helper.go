@@ -12,13 +12,14 @@ import (
 // whichever branch is checked out: semantic search, the agents, and `query`
 // all benefit from reaching what was said as well as what was written. Writes
 // still go to the current branch, so indexing code cannot disturb them.
+// Discovered relations are read the same way, for the same reason.
 func openBranchStore(cfg *config.Config) (*embedded.BranchStore, string, error) {
-	return embedded.OpenReadWriteWithScopes(cfg, repoPaths(cfg), dbPath, embedded.MeetingScope)
+	return embedded.OpenReadWriteWithScopes(cfg, repoPaths(cfg), dbPath, embedded.MeetingScope, embedded.RelationScope)
 }
 
 // openReadOnlyBranchStore opens a read-only BranchStore for concurrent access.
 func openReadOnlyBranchStore(cfg *config.Config) (*embedded.BranchStore, string, error) {
-	return embedded.OpenReadOnlyWithScopes(cfg, repoPaths(cfg), dbPath, embedded.MeetingScope)
+	return embedded.OpenReadOnlyWithScopes(cfg, repoPaths(cfg), dbPath, embedded.MeetingScope, embedded.RelationScope)
 }
 
 // repoPaths extracts repository paths from config.
