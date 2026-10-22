@@ -167,9 +167,10 @@ func embedMissingMeetings(cfg *config.Config, store *embedded.BranchStore, branc
 	fmt.Fprintf(out, "\nEmbedded %d meeting nodes for search by meaning.\n", n)
 }
 
-// openReadOnlyVectorStore opens the vector store with a bypassed lock guard,
-// allowing concurrent access from multiple processes. Use for commands that
-// only query the vector index (rag, agent, app).
+// openReadOnlyVectorStore opens the vector store for reading. Readers share
+// the database, but a writer cannot open it while any reader has it open, so
+// a reader that lives long should Detach once the index is loaded. Use for
+// commands that only query the vector index (rag, agent, app).
 func openReadOnlyVectorStore(cfg *config.Config, store *embedded.BranchStore, branch string, logFn func(string, ...any)) (*vectorstore.VectorStore, error) {
 	if cfg.ConfigDir == "" {
 		return nil, nil

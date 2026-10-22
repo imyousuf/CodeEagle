@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -18,20 +19,26 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/vectorstore"
 )
 
-// verbs serves find, brief and show, for the commands and for MCP. It opens
-// the graph read-only, and opens it again when the database has changed: a
-// read-only handle is a snapshot, and a long-running MCP server would
-// otherwise never see what the worker writes.
+// verbs serves find, brief and show, for the commands and for MCP.
+//
+// A call holds the graph open only while it runs. A read-only Badger handle
+// takes a shared lock that keeps every writer out while it is open, so a
+// handle kept for an agent's whole session would stop the worker syncing
+// until the session ended, and the briefs could never be brought up to date
+// under it. The library over the graph is kept between calls and reloaded
+// when the database has changed; the vector index is loaded once and
+// detached from its database for the same reason.
 type verbs struct {
 	cfg *config.Config
 
 	mu      sync.Mutex
-	store   *embedded.BranchStore
-	branch  string
 	stamp   time.Time
 	lib     *relations.Library
 	vs      *vectorstore.VectorStore
 	vsTried bool
+	// store is open for the duration of a call, and nil between calls or
+	// when a sync holds the database.
+	store *embedded.BranchStore
 }
 
 func newVerbs(cfg *config.Config) *verbs { return &verbs{cfg: cfg} }
@@ -40,20 +47,11 @@ func newVerbs(cfg *config.Config) *verbs { return &verbs{cfg: cfg} }
 func (v *verbs) Close() {
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	v.closeLocked()
-}
-
-func (v *verbs) closeLocked() {
 	if v.vs != nil {
 		v.vs.Close()
 		v.vs = nil
 	}
-	if v.store != nil {
-		v.store.Close()
-		v.store = nil
-	}
 	v.lib = nil
-	v.vsTried = false
 }
 
 // dbStamp is the newest modification time of any file in the database
@@ -73,52 +71,87 @@ func (v *verbs) dbStamp() time.Time {
 	return newest
 }
 
-// open makes sure the store, and the library over it, reflect the database
-// as it is now.
-func (v *verbs) open(ctx context.Context) (*relations.Library, error) {
+// begin opens the graph for one call and brings the library up to date with
+// it. The returned function closes the graph again. Calls are serialized.
+//
+// When a sync holds the database, the call goes ahead on the library last
+// read, with no store: briefs and evidence can still be shown, a little
+// behind, but nothing can be searched.
+func (v *verbs) begin(ctx context.Context) (*relations.Library, func(), error) {
 	v.mu.Lock()
-	defer v.mu.Unlock()
-	stamp := v.dbStamp()
-	if v.store != nil && !stamp.After(v.stamp) {
-		return v.lib, nil
-	}
-	v.closeLocked()
-	store, branch, err := openReadOnlyBranchStore(v.cfg)
+	var branch string
+	store, err := embedded.OpenWaiting(func() (*embedded.BranchStore, error) {
+		s, b, err := openReadOnlyBranchStore(v.cfg)
+		branch = b
+		return s, err
+	})
 	if err != nil {
-		return nil, err
+		if errors.Is(err, embedded.ErrBusy) && v.lib != nil {
+			v.lib.Speakers = nil
+			return v.lib, v.mu.Unlock, nil
+		}
+		v.mu.Unlock()
+		return nil, nil, err
 	}
-	roots := repoPaths(v.cfg)
-	lib, err := relations.LoadLibrary(ctx, store, func(p string) string { return indexer.ResolveAbsPath(p, roots) })
-	if err != nil {
+	release := func() {
+		v.store = nil
+		if v.lib != nil {
+			v.lib.Store, v.lib.Speakers = nil, nil
+		}
 		store.Close()
-		return nil, err
+		v.mu.Unlock()
 	}
-	v.store, v.branch, v.stamp, v.lib = store, branch, stamp, lib
-	return lib, nil
+	if stamp := v.dbStamp(); v.lib == nil || stamp.After(v.stamp) {
+		roots := repoPaths(v.cfg)
+		lib, err := relations.LoadLibrary(ctx, store, func(p string) string { return indexer.ResolveAbsPath(p, roots) })
+		if err != nil {
+			release()
+			return nil, nil, err
+		}
+		v.lib, v.stamp = lib, stamp
+	}
+	v.store = store
+	v.lib.Store = store
+	v.lib.Speakers = relations.NewStoreSpeakers(ctx, store)
+	v.attachVectors(store, branch)
+	return v.lib, release, nil
 }
 
-// vectors opens the vector index once, lazily. Nil means none is available
-// and searches fall back to keywords.
-func (v *verbs) vectors() search.VectorSearcher {
-	v.mu.Lock()
-	defer v.mu.Unlock()
+// attachVectors loads the vector index on first use, detached from its
+// database, and points it at this call's graph.
+func (v *verbs) attachVectors(store *embedded.BranchStore, branch string) {
+	if v.vs != nil {
+		v.vs.UseGraph(store)
+		return
+	}
 	if v.vsTried {
-		if v.vs == nil {
-			return noVectors{}
-		}
-		return v.vs
+		return
+	}
+	vs, err := openReadOnlyVectorStore(v.cfg, store, branch, nil)
+	if embedded.IsLocked(err) {
+		return // the worker is writing vectors; try again next call
 	}
 	v.vsTried = true
-	vs, err := openReadOnlyVectorStore(v.cfg, v.store, v.branch, nil)
 	if err != nil || vs == nil {
-		return noVectors{}
+		return
 	}
 	if loaded, err := vs.Load(); err != nil || !loaded {
 		vs.Close()
-		return noVectors{}
+		return
+	}
+	if err := vs.Detach(); err != nil {
+		vs.Close()
+		return
 	}
 	v.vs = vs
-	return vs
+}
+
+// vectors is the index to search during a call, or none.
+func (v *verbs) vectors() search.VectorSearcher {
+	if v.vs == nil {
+		return noVectors{}
+	}
+	return v.vs
 }
 
 // noVectors searches nothing, leaving hybrid search to its keyword half.
@@ -161,10 +194,9 @@ type finding struct {
 // findings searches and folds hits up to what an agent can act on: a section
 // to its document, a document to its relation, a segment, decision or
 // follow-up to its meeting.
-func (v *verbs) findings(ctx context.Context, query string) ([]finding, error) {
-	lib, err := v.open(ctx)
-	if err != nil {
-		return nil, err
+func (v *verbs) findings(ctx context.Context, lib *relations.Library, query string) ([]finding, error) {
+	if v.store == nil {
+		return nil, embedded.ErrBusy
 	}
 	vec := v.vectors()
 	docs, err := search.Hybrid(ctx, v.store, vec, query, search.HybridOptions{Limit: 20, Types: findDocTypes})
@@ -247,7 +279,12 @@ func (v *verbs) findings(ctx context.Context, query string) ([]finding, error) {
 
 // Find renders the folded hits for a query, one line each.
 func (v *verbs) Find(ctx context.Context, query string) (string, error) {
-	fs, err := v.findings(ctx, query)
+	lib, done, err := v.begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer done()
+	fs, err := v.findings(ctx, lib, query)
 	if err != nil {
 		return "", err
 	}
@@ -271,17 +308,18 @@ const clearMargin = 0.05
 // document or meeting, or words that clearly name one. When words match
 // several, it lists them instead, in the same call.
 func (v *verbs) Brief(ctx context.Context, arg string, budget int, since string) (string, error) {
-	lib, err := v.open(ctx)
+	lib, done, err := v.begin(ctx)
 	if err != nil {
 		return "", err
 	}
+	defer done()
 	arg = strings.TrimSpace(arg)
 	if hexPrefix.MatchString(arg) {
 		if out, ok, err := v.briefByID(ctx, lib, arg, budget, since); ok || err != nil {
 			return out, err
 		}
 	}
-	fs, err := v.findings(ctx, arg)
+	fs, err := v.findings(ctx, lib, arg)
 	if err != nil {
 		return "", err
 	}
@@ -318,6 +356,9 @@ func (v *verbs) briefByID(ctx context.Context, lib *relations.Library, prefix st
 	if rel := lib.RelationByID(prefix); rel != nil {
 		out, err := v.renderBrief(lib, rel, budget, since)
 		return out, true, err
+	}
+	if v.store == nil {
+		return "", false, nil
 	}
 	nodes, err := v.store.ResolvePrefix(ctx, prefix, 10)
 	if err != nil || len(nodes) == 0 {
@@ -356,16 +397,20 @@ const maxShowNodeChars = 1500
 // Show expands an evidence ID, or a node ID prefix, to its source text,
 // bounded so it never costs a whole file.
 func (v *verbs) Show(ctx context.Context, arg string, from int) (string, error) {
-	lib, err := v.open(ctx)
+	lib, done, err := v.begin(ctx)
 	if err != nil {
 		return "", err
 	}
+	defer done()
 	arg = strings.TrimSpace(arg)
 	if rel, e := lib.Evidence(arg); e != nil {
 		return lib.ShowEvidence(rel, e, from)
 	}
 	if !hexPrefix.MatchString(arg) {
 		return "", fmt.Errorf("show takes an evidence ID or a node ID prefix (at least %d hex characters)", embedded.MinIDPrefix)
+	}
+	if v.store == nil {
+		return "", embedded.ErrBusy
 	}
 	nodes, err := v.store.ResolvePrefix(ctx, arg, 10)
 	if err != nil {

@@ -1,6 +1,15 @@
 package cli
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/imyousuf/CodeEagle/internal/config"
+	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
+	"github.com/imyousuf/CodeEagle/internal/relations"
+)
 
 // TestVerbToolsAreSmallAndComplete covers the MCP surface: three tools,
 // each with a required argument, and descriptions short enough that adding
@@ -37,5 +46,47 @@ func TestVerbArgumentsAreReadLeniently(t *testing.T) {
 	}
 	if num(args, "budget") != 250 || num(args, "from") != 3 || num(args, "missing") != 0 {
 		t.Error("numeric arguments, which JSON delivers as float64")
+	}
+}
+
+// TestVerbsHoldNoLockBetweenCalls covers the verbs under MCP while the worker
+// syncs: between calls the graph is free for a writer, and while a writer
+// holds it a brief is still answered from what was last read.
+func TestVerbsHoldNoLockBetweenCalls(t *testing.T) {
+	cfg := &config.Config{Graph: config.GraphConfig{DBPath: t.TempDir()}}
+	ctx := context.Background()
+	w, _, err := openBranchStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel := relations.New("docs/retry.md")
+	rel.Brief = &relations.Brief{Headline: relations.Line{Text: "retry cap raised to five"}}
+	node, err := rel.Node()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.View(embedded.RelationScope, []string{embedded.RelationScope}).AddNode(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	v := newVerbs(cfg)
+	defer v.Close()
+	id := relations.ShortID(relations.RelationID("docs/retry.md"))
+	out, err := v.Brief(ctx, id, 400, "")
+	if err != nil || !strings.Contains(out, "retry cap raised to five") {
+		t.Fatalf("Brief = %q, %v", out, err)
+	}
+
+	w, _, err = openBranchStore(cfg)
+	if err != nil {
+		t.Fatalf("a writer could not open the graph after a brief: %v", err)
+	}
+	defer w.Close()
+	if out, err := v.Brief(ctx, id, 400, ""); err != nil || !strings.Contains(out, "retry cap raised to five") {
+		t.Errorf("while a writer held the graph, Brief = %q, %v; want the last brief read", out, err)
+	}
+	if _, err := v.Find(ctx, "retry"); !errors.Is(err, embedded.ErrBusy) {
+		t.Errorf("while a writer held the graph, Find err = %v, want ErrBusy", err)
 	}
 }

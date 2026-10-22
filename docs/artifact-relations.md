@@ -490,11 +490,21 @@ a whole file.
 ### MCP
 
 Three tools with short descriptions (every tool definition is sent with
-every request, so fewer tools is itself a saving). The vector index loads
-once, lazily. A long-lived MCP server holds a read-only snapshot, so the
-store is reopened when the database's manifest changes; otherwise briefs
-refreshed by the worker would stay invisible for the session.
-`mcp.tools: verbs` exposes only the three verbs.
+every request, so fewer tools is itself a saving). `mcp.tools: verbs`, or
+`mcp serve --tools verbs`, exposes only the three.
+
+No tool holds the graph open between calls. A read-only Badger handle takes
+a shared directory lock, and a writer an exclusive one, so a handle kept for
+an agent's session would stop the worker syncing until the session ended,
+and no brief could be refreshed under it. (The original design reopened the
+store when the database changed; it could never have triggered, since the
+worker could not write while the server held the store.) The verbs open the
+graph for each call and keep the library over it until the database
+changes; the other tools share a handle that closes after half a second
+idle. The vector index is loaded once and its database closed, keeping the
+key list in memory. While a sync holds the database, a call waits up to 3 s
+and then `brief` and `show` answer from what was last read, while `find`
+reports that the index is busy.
 
 Token estimates use bytes / 3.5 until calibrated against measured usage.
 

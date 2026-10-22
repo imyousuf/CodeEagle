@@ -64,6 +64,9 @@ type VectorStore struct {
 	// stale counts the vectors the last search skipped because their
 	// nodes had left the graph.
 	stale int
+	// detachedKeys lists the indexed chunk keys once the vector database
+	// has been closed by Detach.
+	detachedKeys []string
 }
 
 // Embedder returns the provider this store embeds with.
@@ -266,32 +269,23 @@ func (vs *VectorStore) exactSearch(queryVec []float32, k int) ([]hnsw.Node[strin
 	qn = math.Sqrt(qn)
 
 	var cands []candidate
-	err := vs.vecDB.View(func(txn *badger.Txn) error {
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false
-		opts.Prefix = []byte(prefixChunk)
-		it := txn.NewIterator(opts)
-		defer it.Close()
-		for it.Seek(opts.Prefix); it.Valid(); it.Next() {
-			key := strings.TrimPrefix(string(it.Item().Key()), prefixChunk)
-			vec, ok := vs.idx.Lookup(key)
-			if !ok || len(vec) != len(queryVec) {
-				continue
-			}
-			// One pass for the dot product and the vector's norm; the
-			// query's norm is fixed.
-			var dot, vn float64
-			for i, x := range vec {
-				dot += float64(x) * float64(queryVec[i])
-				vn += float64(x) * float64(x)
-			}
-			dist := float32(1)
-			if vn > 0 && qn > 0 {
-				dist = float32(1 - dot/(math.Sqrt(vn)*qn))
-			}
-			cands = append(cands, candidate{key: key, vec: vec, dist: dist})
+	err := vs.eachChunkKey(func(key string) {
+		vec, ok := vs.idx.Lookup(key)
+		if !ok || len(vec) != len(queryVec) {
+			return
 		}
-		return nil
+		// One pass for the dot product and the vector's norm; the query's
+		// norm is fixed.
+		var dot, vn float64
+		for i, x := range vec {
+			dot += float64(x) * float64(queryVec[i])
+			vn += float64(x) * float64(x)
+		}
+		dist := float32(1)
+		if vn > 0 && qn > 0 {
+			dist = float32(1 - dot/(math.Sqrt(vn)*qn))
+		}
+		cands = append(cands, candidate{key: key, vec: vec, dist: dist})
 	})
 	if err != nil {
 		return nil, err
@@ -760,6 +754,56 @@ func (vs *VectorStore) Close() error {
 	return nil
 }
 
+// eachChunkKey calls fn with every key the index holds: from the chunk
+// entries, or from the list kept when the store was detached.
+func (vs *VectorStore) eachChunkKey(fn func(key string)) error {
+	if vs.vecDB == nil {
+		for _, key := range vs.detachedKeys {
+			fn(key)
+		}
+		return nil
+	}
+	return vs.vecDB.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		opts.Prefix = []byte(prefixChunk)
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		for it.Seek(opts.Prefix); it.Valid(); it.Next() {
+			fn(strings.TrimPrefix(string(it.Item().Key()), prefixChunk))
+		}
+		return nil
+	})
+}
+
+// Detach closes the vector database once the index is loaded, so a reader
+// that keeps the index for a long session holds no lock on it: a read-only
+// Badger handle takes a shared lock that keeps every writer out while it is
+// open. A detached store still searches, without chunk text; it cannot embed
+// or save.
+func (vs *VectorStore) Detach() error {
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+	if vs.vecDB == nil {
+		return nil
+	}
+	var keys []string
+	if err := vs.eachChunkKey(func(key string) { keys = append(keys, key) }); err != nil {
+		return fmt.Errorf("list indexed chunks: %w", err)
+	}
+	err := vs.vecDB.Close()
+	vs.vecDB, vs.detachedKeys = nil, keys
+	return err
+}
+
+// UseGraph changes the graph store that search resolves nodes against, for a
+// reader that opens the graph for each request rather than holding it.
+func (vs *VectorStore) UseGraph(g graph.Store) {
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+	vs.graphDB = g
+}
+
 // Meta returns the current index metadata (may be nil if not yet loaded/built).
 func (vs *VectorStore) Meta() *VectorIndexMeta {
 	vs.mu.RLock()
@@ -871,6 +915,9 @@ func newGraph() *hnsw.Graph[string] {
 }
 
 func (vs *VectorStore) getChunkText(nodeID string, chunkIdx int) string {
+	if vs.vecDB == nil {
+		return ""
+	}
 	key := []byte(prefixChunk + chunkKey(nodeID, chunkIdx))
 	var text string
 	_ = vs.vecDB.View(func(txn *badger.Txn) error {
