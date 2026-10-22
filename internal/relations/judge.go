@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/imyousuf/CodeEagle/internal/search"
 	"github.com/imyousuf/CodeEagle/pkg/jev"
 )
 
@@ -53,12 +54,37 @@ const (
 type Judge struct {
 	asker       jev.Asker
 	transcripts Transcripts
+	opts        JudgeOptions
+}
+
+// JudgeOptions tune what the decision model is shown. The zero value is the
+// measured default.
+type JudgeOptions struct {
+	// BatchSize is how many pairs about one document share a request.
+	BatchSize int
+	// RelevantWords shows the stretch of a segment whose words overlap most
+	// with the document's, rather than the segment's opening.
+	RelevantWords bool
+	// SpokenChars bounds the speakers' own words shown per segment.
+	SpokenChars int
 }
 
 // NewJudge builds a judge. transcripts may be nil, in which case the judge
 // sees segment summaries without the speakers' own words.
 func NewJudge(asker jev.Asker, transcripts Transcripts) *Judge {
-	return &Judge{asker: asker, transcripts: transcripts}
+	return NewJudgeWithOptions(asker, transcripts, JudgeOptions{})
+}
+
+// NewJudgeWithOptions builds a judge that shows the decision model what opts
+// say.
+func NewJudgeWithOptions(asker jev.Asker, transcripts Transcripts, opts JudgeOptions) *Judge {
+	if opts.BatchSize <= 0 {
+		opts.BatchSize = maxJudgePairs
+	}
+	if opts.SpokenChars <= 0 {
+		opts.SpokenChars = maxSpokenChars
+	}
+	return &Judge{asker: asker, transcripts: transcripts, opts: opts}
 }
 
 // docCard is what the model sees of the document. Field names say exactly
@@ -127,8 +153,8 @@ func (j *Judge) Judge(ctx context.Context, cands []*Candidate) ([]Judgment, Judg
 	var batches [][]*Candidate
 	for _, path := range order {
 		group := bySubject[path]
-		for start := 0; start < len(group); start += maxJudgePairs {
-			batches = append(batches, group[start:min(start+maxJudgePairs, len(group))])
+		for start := 0; start < len(group); start += j.opts.BatchSize {
+			batches = append(batches, group[start:min(start+j.opts.BatchSize, len(group))])
 		}
 	}
 
@@ -235,6 +261,10 @@ func (j *Judge) buildState(batch []*Candidate) (*judgeState, jev.Questions) {
 		}
 	}
 
+	var terms map[string]bool
+	if j.opts.RelevantWords {
+		terms = documentTerms(batch)
+	}
 	segID := make(map[*Segment]string)
 	questions := make(jev.Questions, len(batch))
 	for i, c := range batch {
@@ -248,7 +278,7 @@ func (j *Judge) buildState(batch []*Candidate) (*judgeState, jev.Questions) {
 			if !ok {
 				id = fmt.Sprintf("s%d", len(segID))
 				segID[seg] = id
-				st.Segments = append(st.Segments, j.segmentCard(id, seg))
+				st.Segments = append(st.Segments, j.segmentCard(id, seg, terms))
 			}
 			card.Segments = append(card.Segments, id)
 		}
@@ -265,7 +295,7 @@ func (j *Judge) buildState(batch []*Candidate) (*judgeState, jev.Questions) {
 	return st, questions
 }
 
-func (j *Judge) segmentCard(id string, seg *Segment) segmentCard {
+func (j *Judge) segmentCard(id string, seg *Segment, terms map[string]bool) segmentCard {
 	m := seg.Meeting()
 	card := segmentCard{
 		ID:          id,
@@ -276,7 +306,10 @@ func (j *Judge) segmentCard(id string, seg *Segment) segmentCard {
 	}
 	if j.transcripts != nil && seg.End > seg.Start {
 		if turns, err := j.transcripts.Span(m, seg.Start, seg.End); err == nil {
-			card.SpokenWords = spokenText(turns, maxSpokenChars)
+			if terms != nil {
+				turns = relevantStretch(turns, terms, j.opts.SpokenChars)
+			}
+			card.SpokenWords = spokenText(turns, j.opts.SpokenChars)
 		}
 	}
 	for _, d := range m.Decisions {
@@ -286,4 +319,52 @@ func (j *Judge) segmentCard(id string, seg *Segment) segmentCard {
 		}
 	}
 	return card
+}
+
+// documentTerms are the words of a document's title, and of the headings and
+// text of the sections a batch of pairs rests on.
+func documentTerms(batch []*Candidate) map[string]bool {
+	terms := make(map[string]bool)
+	add := func(text string) {
+		for _, t := range search.QueryTerms(text) {
+			terms[t] = true
+		}
+	}
+	add(batch[0].Subject.Title)
+	for _, c := range batch {
+		for _, sec := range c.Sections {
+			add(sec.HeadingPath)
+			add(excerpt(sec.Text, maxDocExcerptChars))
+		}
+	}
+	return terms
+}
+
+// relevantStretch returns the run of consecutive turns, within about n
+// characters, that holds the most distinct document terms: the part of a
+// long segment where the document comes up, rather than its opening.
+func relevantStretch(turns []Turn, terms map[string]bool, n int) []Turn {
+	bestStart, bestEnd, best := 0, 0, 0
+	for i := range turns {
+		seen := make(map[string]bool)
+		size := 0
+		for k := i; k < len(turns); k++ {
+			size += len(turns[k].Text) + 1
+			if size > n && k > i {
+				break
+			}
+			for _, t := range search.QueryTerms(turns[k].Text) {
+				if terms[t] {
+					seen[t] = true
+				}
+			}
+			if len(seen) > best {
+				best, bestStart, bestEnd = len(seen), i, k
+			}
+		}
+	}
+	if best == 0 {
+		return turns
+	}
+	return turns[bestStart : bestEnd+1]
 }

@@ -34,6 +34,8 @@ func newRelationsCmd() *cobra.Command {
 		target     float64
 		briefsOnly bool
 		reset      bool
+		jopts      relations.JudgeOptions
+		scoredOut  string
 	)
 
 	cmd := &cobra.Command{
@@ -70,13 +72,13 @@ again, so the next runs pay to rebuild what was there.`,
 			}
 			o := relationsPlanOptions{
 				doc: doc, meeting: meeting, sampleOut: sampleOut, sampleSize: sampleSize, top: top, limit: limit,
-				briefsOnly: briefsOnly,
+				briefsOnly: briefsOnly, judge: jopts,
 			}
 			if reset {
 				return runRelationsReset(cmd.OutOrStdout(), cfg)
 			}
 			if measure != "" {
-				return runRelationsMeasure(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cfg, measure, target)
+				return runRelationsMeasure(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cfg, measure, target, jopts, scoredOut)
 			}
 			if plan {
 				return runRelationsPlan(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cfg, o)
@@ -96,6 +98,14 @@ again, so the next runs pay to rebuild what was there.`,
 	cmd.Flags().Float64Var(&target, "target-precision", 0.95, "precision the suggested gate must reach, with --measure")
 	cmd.Flags().BoolVar(&briefsOnly, "briefs-only", false, "rewrite briefs whose inputs changed, without judging new pairs")
 	cmd.Flags().BoolVar(&reset, "reset", false, "delete every relation, verdict and brief")
+	// Experiments on what the judge is shown, measured with --measure.
+	cmd.Flags().IntVar(&jopts.BatchSize, "judge-batch", 0, "with --measure: pairs per decision-model request")
+	cmd.Flags().BoolVar(&jopts.RelevantWords, "judge-relevant", false, "with --measure: show the part of a segment that shares the document's words")
+	cmd.Flags().IntVar(&jopts.SpokenChars, "judge-spoken", 0, "with --measure: characters of the speakers' words shown per segment")
+	cmd.Flags().StringVar(&scoredOut, "scored-out", "", "with --measure: where to write per-pair probabilities")
+	for _, f := range []string{"judge-batch", "judge-relevant", "judge-spoken", "scored-out"} {
+		_ = cmd.Flags().MarkHidden(f)
+	}
 	return cmd
 }
 
@@ -121,6 +131,7 @@ func runRelationsReset(out io.Writer, cfg *config.Config) error {
 type relationsPlanOptions struct {
 	doc, meeting, sampleOut string
 	sampleSize, top, limit  int
+	judge                   relations.JudgeOptions
 	briefsOnly              bool
 }
 
@@ -239,6 +250,10 @@ func runRelationsPlan(ctx context.Context, out, errOut io.Writer, cfg *config.Co
 
 // newRelationJudge builds the decision-model judge, or explains why it cannot.
 func newRelationJudge(cfg *config.Config) (*relations.Judge, error) {
+	return newRelationJudgeWith(cfg, relations.JudgeOptions{})
+}
+
+func newRelationJudgeWith(cfg *config.Config, opts relations.JudgeOptions) (*relations.Judge, error) {
 	key := strings.TrimSpace(cfg.Transcripts.JevAPIKey)
 	if key == "" {
 		return nil, fmt.Errorf("judging needs a decision model: set transcripts.jev_api_key (a relation is never asserted on similarity alone)")
@@ -251,13 +266,14 @@ func newRelationJudge(cfg *config.Config) (*relations.Judge, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decision model: %w", err)
 	}
-	return relations.NewJudge(client, relations.NewFileTranscripts()), nil
+	return relations.NewJudgeWithOptions(client, relations.NewFileTranscripts(), opts), nil
 }
 
 // runRelationsMeasure judges a labelled sample and reports how well the
 // probabilities separate related pairs from unrelated ones.
-func runRelationsMeasure(ctx context.Context, out, errOut io.Writer, cfg *config.Config, labelsPath string, target float64) error {
-	judge, err := newRelationJudge(cfg)
+func runRelationsMeasure(ctx context.Context, out, errOut io.Writer, cfg *config.Config, labelsPath string, target float64,
+	jopts relations.JudgeOptions, scoredOut string) error {
+	judge, err := newRelationJudgeWith(cfg, jopts)
 	if err != nil {
 		return err
 	}
@@ -313,6 +329,9 @@ func runRelationsMeasure(ctx context.Context, out, errOut io.Writer, cfg *config
 	}
 
 	scored := strings.TrimSuffix(labelsPath, ".jsonl") + ".scored.jsonl"
+	if scoredOut != "" {
+		scored = scoredOut
+	}
 	if err := writeScored(scored, cands, probs, labels); err != nil {
 		return err
 	}
@@ -341,7 +360,7 @@ func writeScored(path string, cands []*relations.Candidate, probs []float64, lab
 
 // runRelationsJudge proposes, judges and records verdicts.
 func runRelationsJudge(ctx context.Context, out, errOut io.Writer, cfg *config.Config, o relationsPlanOptions) error {
-	judge, err := newRelationJudge(cfg)
+	judge, err := newRelationJudgeWith(cfg, o.judge)
 	if err != nil {
 		return err
 	}

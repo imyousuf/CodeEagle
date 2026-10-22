@@ -247,3 +247,24 @@ func TestObserveRecordsWhenEachSectionChanged(t *testing.T) {
 		t.Errorf("an unchanged section's first-seen time moved to %v", got)
 	}
 }
+
+// TestRelevantStretchFindsWhereTheDocumentComesUp covers what the judge is
+// shown of a long segment: the part sharing the document's words, not the
+// opening.
+func TestRelevantStretchFindsWhereTheDocumentComesUp(t *testing.T) {
+	turns := []Turn{
+		{Text: "Morning everyone, can you hear me?"},
+		{Text: "Let's go through the mobile app first, the home screen and channels."},
+		{Text: "Next, the desktop app can attach local files and read the local file system."},
+		{Text: "The filesystem tool provider relays tool calls over the websocket."},
+		{Text: "Okay, moving on to the code node."},
+	}
+	terms := map[string]bool{"desktop": true, "filesystem": true, "local": true, "websocket": true, "provider": true}
+	got := relevantStretch(turns, terms, 160)
+	if len(got) == 0 || got[0].Text != turns[2].Text {
+		t.Errorf("stretch starts at %q, want the desktop turn", got[0].Text)
+	}
+	if none := relevantStretch(turns, map[string]bool{"payroll": true}, 160); len(none) != len(turns) {
+		t.Errorf("with no shared words the segment is returned whole, got %d turns", len(none))
+	}
+}
