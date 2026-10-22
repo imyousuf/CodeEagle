@@ -122,3 +122,19 @@ func TestOutlineLeadsToEachSection(t *testing.T) {
 		t.Errorf("section shown as:\n%s", got)
 	}
 }
+
+// TestConflictTakesItsMeetingsDate covers the drafting model copying the
+// wrong meeting's date onto a conflict: the anchor's meeting decides it.
+func TestConflictTakesItsMeetingsDate(t *testing.T) {
+	rel, subj, meetings := briefFixture()
+	reply := strings.Replace(conflictDraft(t), `"date":"2026-10-14"`, `"date":"2026-01-01"`, 1)
+	if !strings.Contains(reply, "2026-01-01") {
+		t.Fatal("setup: the draft's date was not replaced")
+	}
+	if _, err := newWriter(&stubLLM{reply: reply}, conflictAsker{p: 0.9}, day).Update(context.Background(), rel, subj, meetings); err != nil {
+		t.Fatal(err)
+	}
+	if len(rel.Brief.Conflicts) != 1 || rel.Brief.Conflicts[0].Date != "2026-10-14" {
+		t.Errorf("conflicts = %+v, want the meeting's date 2026-10-14", rel.Brief.Conflicts)
+	}
+}

@@ -17,7 +17,7 @@ import (
 
 // BriefVersion is bumped when what a brief is written from, or how, changes,
 // so existing briefs are written again.
-const BriefVersion = 3
+const BriefVersion = 4
 
 // BriefOptions bound brief writing.
 type BriefOptions struct {
@@ -299,6 +299,10 @@ Write:
 Rules:
 - Every line carries its support: one or more entries, each a snippet label and words copied exactly from that snippet. Copy, do not paraphrase or tidy: quotes are checked character for character against the snippet named beside them, and a line none of whose quotes check out is removed. A conflict's doc support must quote a D snippet and its said support a meeting snippet.
 - Say only what the snippets support. If they do not say something, leave it out. An empty field is better than a guess.
+- Quote enough to carry the line. Every name, number, date and decision in a line must appear in its quotes or in the header of the snippet they come from; add a second quote rather than a detail the first does not hold.
+- Something one person suggested or argued for is "proposed" or "suggested", not "decided", unless the snippet shows the others agreeing or it was recorded as a decision (K).
+- Never claim that something did not happen, is not recorded or was never discussed: you see only these snippets, not everything.
+- A follow-up's owner is whoever took it on in the snippet. Only call it unassigned when nobody did.
 - Use names as the snippets give them. Do not add surnames, titles or roles.
 - Dates are YYYY-MM-DD, taken from the snippets.`
 
@@ -472,8 +476,45 @@ func ground(r briefReply, snips []*snippet, relID string, speakers SpeakerNamer)
 	if b.Headline.Text == "" && len(b.Current) > 0 {
 		b.Headline, b.Current = b.Current[0], b.Current[1:]
 	}
+	fixDates(b, evidence, snips)
 	b.Dropped = dropped
 	return b, evidence, dropped, unverified
+}
+
+// fixDates sets the date of each conflict, and of each event that cites a
+// meeting under a date none of its meetings has, from the meetings its
+// evidence is anchored to. The drafting model copied the wrong meeting's
+// date onto a conflict often enough to matter, and the anchor knows.
+func fixDates(b *Brief, evidence []Evidence, snips []*snippet) {
+	dateOf := make(map[string]string) // session -> date
+	for _, s := range snips {
+		if s.meeting != nil && s.date != "" {
+			dateOf[s.meeting.SessionID] = s.date
+		}
+	}
+	meetingDate := make(map[string]string, len(evidence)) // evidence ID -> date
+	for _, e := range evidence {
+		if d := dateOf[e.SessionID]; e.SessionID != "" && d != "" {
+			meetingDate[e.ID] = d
+		}
+	}
+	for i := range b.Conflicts {
+		if d := meetingDate[b.Conflicts[i].SaidCite]; d != "" {
+			b.Conflicts[i].Date = d
+		}
+	}
+	for i := range b.Events {
+		var dates []string
+		for _, c := range b.Events[i].Cites {
+			if d := meetingDate[c]; d != "" {
+				dates = append(dates, d)
+			}
+		}
+		if len(dates) > 0 && !contains(dates, b.Events[i].Date) {
+			sort.Strings(dates)
+			b.Events[i].Date = dates[len(dates)-1]
+		}
+	}
 }
 
 func containsEvidence(list []Evidence, id string) bool {
