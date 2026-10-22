@@ -57,8 +57,17 @@ type DocsConfig struct {
 	DisableThinking bool `mapstructure:"disable_thinking" yaml:"disable_thinking,omitempty"`
 	// ExcludeExtensions lists file extensions to never index as non-code files.
 	ExcludeExtensions []string `mapstructure:"exclude_extensions" yaml:"exclude_extensions,omitempty"`
+	// MarkdownSections stores each markdown section's own text on its node,
+	// which is what lets markdown be embedded, searched by meaning and quoted
+	// as evidence. Unset means on; false restores heading-only sections.
+	MarkdownSections *bool `mapstructure:"markdown_sections" yaml:"markdown_sections,omitempty"`
 	// Faces contains face detection configuration.
 	Faces FacesConfig `mapstructure:"faces" yaml:"faces,omitempty"`
+}
+
+// MarkdownSectionText reports whether markdown sections carry their text.
+func (d DocsConfig) MarkdownSectionText() bool {
+	return d.MarkdownSections == nil || *d.MarkdownSections
 }
 
 // FacesConfig holds face detection and recognition configuration.

@@ -91,7 +91,7 @@ func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, v
 	registry.Register(javascript.NewParser())
 	registry.Register(java.NewParser())
 	registry.Register(htmlparser.NewParser())
-	registry.Register(markdown.NewParser())
+	registry.Register(markdown.NewParser(markdown.WithSectionText(cfg.Docs.MarkdownSectionText())))
 	registry.Register(makefileparser.NewParser())
 	registry.Register(shell.NewParser())
 	registry.Register(terraform.NewParser())

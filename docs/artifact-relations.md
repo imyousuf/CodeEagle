@@ -91,13 +91,19 @@ on, because a wrong relation corrupts every brief built on it.
 
 The markdown parser emits each section with:
 
-- **DocComment**: the section's own text (up to the next heading of the same
-  or higher level), capped at about 6k characters. This alone makes markdown
-  embeddable: `EmbeddableText` already embeds a node with a DocComment.
-- **EndLine**, **heading_path** (`H1 > H2 > H3`, also the QualifiedName),
-  **ordinal** (position among siblings with the same heading),
-  **section_hash** (sha256 of the whitespace-collapsed text, so a reflow is
-  not a change but an edit is).
+- **EndLine**: the section's extent runs to the next heading of the same or
+  a higher level, so it includes its subsections. This is what `show`
+  displays.
+- **DocComment**: the section's *own* text, up to the next heading of any
+  level, capped at about 6k characters. Own text rather than the whole
+  extent, because a parent carrying its children's words would embed the
+  document a second time and would change whenever any subsection was
+  edited. A DocComment alone makes markdown embeddable: `EmbeddableText`
+  already embeds a node that has one.
+- **heading_path** (`H1 > H2 > H3`, also the QualifiedName), **ordinal**
+  (which occurrence of that heading text in the file it is), and
+  **section_hash** (sha256 of the whitespace-collapsed own text, so a reflow
+  is not a change but an edit is).
 - The root document's DocComment is its front-matter title and description
   plus the text before the first heading.
 - Headings inside fenced code blocks are not headings.
@@ -108,8 +114,9 @@ today. The first keeps exactly that ID; later ones append `#n`. No existing
 ID changes.
 
 **Blast radius.** Additive fields on existing nodes; new vectors for
-markdown in every project (on by default, `docs.markdown_sections: false`
-restores the old behaviour). `rag` starts returning markdown sections, which
+markdown in every project (on by default; `docs.markdown_sections: false`
+stops storing section text and so stops embedding it, keeping the structural
+fields). `rag` starts returning markdown sections, which
 is the point, but saved queries should be re-run before and after.
 
 ### Backfill without a runaway

@@ -464,3 +464,22 @@ func TestTranscriptDirsEmpty(t *testing.T) {
 		t.Errorf("TranscriptDirs() = %v, want none", got)
 	}
 }
+
+// TestMarkdownSectionTextDefaultsOn covers docs.markdown_sections: unset
+// means on, and only an explicit false restores heading-only sections.
+func TestMarkdownSectionTextDefaultsOn(t *testing.T) {
+	off, on := false, true
+	for _, tt := range []struct {
+		name string
+		set  *bool
+		want bool
+	}{
+		{"unset", nil, true},
+		{"true", &on, true},
+		{"false", &off, false},
+	} {
+		if got := (DocsConfig{MarkdownSections: tt.set}).MarkdownSectionText(); got != tt.want {
+			t.Errorf("%s: MarkdownSectionText() = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
