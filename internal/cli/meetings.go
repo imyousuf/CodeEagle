@@ -127,6 +127,7 @@ meetings costs nothing for the ones already done.`,
 					pipeline.closeVectors = nil
 				}
 				embedMissingMeetings(pipeline.cfg, pipeline.store, pipeline.branch, out)
+				relateNewMeetings(cmd.Context(), pipeline.cfg, pipeline.store, out)
 			}
 
 			// Failures are reported per recording so one bad file cannot end a

@@ -61,6 +61,10 @@ const (
 	// meetings judged to discuss it, the evidence quoted from both, and a
 	// brief of where it stands. It lives in the relations scope.
 	NodeRelation NodeType = "Relation"
+	// NodeRelationScan records which documents and meetings have been
+	// considered for relations, and under what content, so each run picks
+	// up only what is new or changed.
+	NodeRelationScan NodeType = "RelationScan"
 )
 
 // Well-known property keys used for architectural classification.

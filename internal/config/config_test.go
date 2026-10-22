@@ -483,3 +483,27 @@ func TestMarkdownSectionTextDefaultsOn(t *testing.T) {
 		}
 	}
 }
+
+// TestRelationsEnabledFollowsTheDecisionModel covers relations.enabled:
+// unset follows the Jev key, false turns them off, and true cannot turn them
+// on without a key, since nothing would decide.
+func TestRelationsEnabledFollowsTheDecisionModel(t *testing.T) {
+	off, on := false, true
+	for _, tt := range []struct {
+		name string
+		set  *bool
+		key  string
+		want bool
+	}{
+		{"unset without key", nil, "", false},
+		{"unset with key", nil, "k", true},
+		{"false with key", &off, "k", false},
+		{"true without key", &on, "", false},
+		{"true with key", &on, "k", true},
+	} {
+		cfg := &Config{Relations: RelationsConfig{Enabled: tt.set}, Transcripts: TranscriptsConfig{JevAPIKey: tt.key}}
+		if got := cfg.RelationsEnabled(); got != tt.want {
+			t.Errorf("%s: RelationsEnabled() = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}

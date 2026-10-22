@@ -32,6 +32,7 @@ func newRelationsCmd() *cobra.Command {
 		measure    string
 		target     float64
 		briefsOnly bool
+		reset      bool
 	)
 
 	cmd := &cobra.Command{
@@ -52,7 +53,11 @@ Without --plan, the selected pairs are judged by the decision model
 (transcripts.jev_api_key) with one yes/no question each, and every verdict
 is recorded, accepted or not, so no pair is asked twice while neither side
 changes. Nothing is ever related on similarity alone. --limit bounds the
-pairs judged in one run; the caps in relations.* bound them anyway.`,
+pairs judged in one run; the caps in relations.* bound them anyway.
+
+--reset deletes every relation, verdict and brief, and the record of what
+automatic runs have considered. Every pair becomes eligible to be judged
+again, so the next runs pay to rebuild what was there.`,
 		Example: `  codeeagle relations --plan
   codeeagle relations --plan --doc docs/specs/retry-policy.md
   codeeagle relations --plan --sample-out /tmp/relation-labels
@@ -65,6 +70,9 @@ pairs judged in one run; the caps in relations.* bound them anyway.`,
 			o := relationsPlanOptions{
 				doc: doc, meeting: meeting, sampleOut: sampleOut, sampleSize: sampleSize, top: top, limit: limit,
 				briefsOnly: briefsOnly,
+			}
+			if reset {
+				return runRelationsReset(cmd.OutOrStdout(), cfg)
 			}
 			if measure != "" {
 				return runRelationsMeasure(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cfg, measure, target)
@@ -86,7 +94,27 @@ pairs judged in one run; the caps in relations.* bound them anyway.`,
 	cmd.Flags().StringVar(&measure, "measure", "", "judge a labelled sample (from --sample-out) and report how well the gate separates it; writes nothing to the graph")
 	cmd.Flags().Float64Var(&target, "target-precision", 0.95, "precision the suggested gate must reach, with --measure")
 	cmd.Flags().BoolVar(&briefsOnly, "briefs-only", false, "rewrite briefs whose inputs changed, without judging new pairs")
+	cmd.Flags().BoolVar(&reset, "reset", false, "delete every relation, verdict and brief")
 	return cmd
+}
+
+// runRelationsReset deletes the relations scope whole. Relations are kept
+// apart from documents and meetings so that this touches nothing else.
+func runRelationsReset(out io.Writer, cfg *config.Config) error {
+	store, _, err := openBranchStore(cfg)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	types, err := store.ScopeNodeTypes(embedded.RelationScope)
+	if err != nil {
+		return fmt.Errorf("count relations: %w", err)
+	}
+	if err := store.DeleteByBranch(embedded.RelationScope); err != nil {
+		return fmt.Errorf("delete relations: %w", err)
+	}
+	fmt.Fprintf(out, "Deleted %d relations and the record of what was considered.\n", types[graph.NodeRelation])
+	return nil
 }
 
 type relationsPlanOptions struct {
@@ -359,34 +387,11 @@ func runRelationsJudge(ctx context.Context, out, errOut io.Writer, cfg *config.C
 // writeRelationBriefs rewrites the briefs of relations whose inputs changed,
 // up to relations.max_briefs_per_run, and stores them.
 func writeRelationBriefs(ctx context.Context, out, errOut io.Writer, cfg *config.Config, store *embedded.BranchStore, run *relationsRun) error {
-	client, err := relationBriefClient(cfg)
+	writer, client, err := newRelationBriefWriter(ctx, cfg, store)
 	if err != nil {
 		return err
 	}
 	defer client.Close()
-
-	var asker jev.Asker
-	if key := strings.TrimSpace(cfg.Transcripts.JevAPIKey); key != "" {
-		var jopts []jev.Option
-		if cfg.Transcripts.JevModel != "" {
-			jopts = append(jopts, jev.WithModel(cfg.Transcripts.JevModel))
-		}
-		if c, err := jev.New(key, jopts...); err == nil {
-			asker = c
-		}
-	}
-	opts := relations.DefaultBriefOptions()
-	if n := cfg.Relations.MaxBriefInputTokens; n > 0 {
-		opts.MaxInputChars = n * 4
-	}
-	if g := cfg.Relations.ConflictGate; g > 0 {
-		opts.ConflictGate = g
-	}
-	if d, err := time.ParseDuration(cfg.Relations.Settle); err == nil {
-		opts.Settle = d
-	}
-	writer := relations.NewBriefWriter(client, asker, relations.NewFileTranscripts(),
-		relations.NewStoreSpeakers(ctx, store), opts, nil)
 	relater := relations.NewRelater(store, nil, relations.RelaterOptions{})
 
 	bySubject := make(map[string]*relations.Subject, len(run.subjects))
@@ -444,6 +449,38 @@ func writeRelationBriefs(ctx context.Context, out, errOut io.Writer, cfg *config
 	}
 	fmt.Fprintln(out)
 	return nil
+}
+
+// newRelationBriefWriter builds the brief writer from configuration. The
+// caller closes the returned client.
+func newRelationBriefWriter(ctx context.Context, cfg *config.Config, store graph.Store) (*relations.BriefWriter, llm.Client, error) {
+	client, err := relationBriefClient(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	var asker jev.Asker
+	if key := strings.TrimSpace(cfg.Transcripts.JevAPIKey); key != "" {
+		var jopts []jev.Option
+		if cfg.Transcripts.JevModel != "" {
+			jopts = append(jopts, jev.WithModel(cfg.Transcripts.JevModel))
+		}
+		if c, err := jev.New(key, jopts...); err == nil {
+			asker = c
+		}
+	}
+	opts := relations.DefaultBriefOptions()
+	if n := cfg.Relations.MaxBriefInputTokens; n > 0 {
+		opts.MaxInputChars = n * 4
+	}
+	if g := cfg.Relations.ConflictGate; g > 0 {
+		opts.ConflictGate = g
+	}
+	if d, err := time.ParseDuration(cfg.Relations.Settle); err == nil {
+		opts.Settle = d
+	}
+	writer := relations.NewBriefWriter(client, asker, relations.NewFileTranscripts(),
+		relations.NewStoreSpeakers(ctx, store), opts, nil)
+	return writer, client, nil
 }
 
 // relationBriefClient builds the language model that writes briefs: the

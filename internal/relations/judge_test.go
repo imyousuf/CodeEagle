@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 // scriptedAsker answers each pair from a table keyed by the topic of the first
 // segment it lists, and can refuse the first request as too large or fail.
 type scriptedAsker struct {
+	mu         sync.Mutex
 	p          map[string]float64
 	refuseOnce bool
 	fail       error
@@ -25,6 +27,8 @@ type scriptedAsker struct {
 }
 
 func (s *scriptedAsker) Ask(_ context.Context, state any, questions jev.Questions) (*jev.Response, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.calls++
 	raw, err := json.Marshal(state)
 	if err != nil {

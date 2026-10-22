@@ -225,6 +225,9 @@ func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, v
 		if err := syncVectorIndex(vs, cfg, full, vecGraph, idx.ChangedFiles(), logFn); err != nil {
 			warnFn("Warning: vector indexing failed: %v", err)
 		}
+		// Relate what changed to what was discussed, now that both can be
+		// found by meaning.
+		autoRelations(cmdCtx, cfg, store, paths, vs, logFn, warnFn)
 	}
 
 	// Cleanup stale branches.

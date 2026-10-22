@@ -131,6 +131,11 @@ type Proposal struct {
 	// CutByCaps counts candidates set aside by the per-subject, per-meeting
 	// or per-run caps.
 	CutByCaps int
+	// Deferred holds those set aside only by the per-run cap. The other two
+	// caps choose the best few candidates for each document and meeting, and
+	// what they drop is not worth judging; what the per-run cap drops is
+	// merely later.
+	Deferred []*Candidate
 }
 
 // Proposer proposes candidates over a loaded corpus.
@@ -235,6 +240,38 @@ func (p *Proposer) All() []*Candidate {
 	return p.ForSubjects(paths...)
 }
 
+// SubjectHasVectors reports whether any of the document's sections has a
+// vector, so the meaning signal can propose for it.
+func (p *Proposer) SubjectHasVectors(path string) bool {
+	p.prepare()
+	s := p.bySubj[path]
+	for _, sv := range p.secVecs {
+		if sv.subj == s {
+			return true
+		}
+	}
+	return false
+}
+
+// MeetingHasVectors reports whether any of the meeting's segments has a
+// vector.
+func (p *Proposer) MeetingHasVectors(sessionID string) bool {
+	p.prepare()
+	m := p.meetings[sessionID]
+	for _, gv := range p.segVecs {
+		if gv.seg.meeting == m {
+			return true
+		}
+	}
+	return false
+}
+
+// HasVectors reports whether the meaning signal can run at all.
+func (p *Proposer) HasVectors() bool {
+	p.prepare()
+	return len(p.secVecs) > 0 && len(p.segVecs) > 0
+}
+
 // Select scores candidates, sets aside pairs already judged, and applies the
 // caps, best first.
 //
@@ -243,6 +280,16 @@ func (p *Proposer) All() []*Candidate {
 // by a name or an identifier alone held no related pair at all. Without
 // vectors those signals are all there is, so they still propose.
 func (p *Proposer) Select(cands []*Candidate, judged func(*Candidate) bool) *Proposal {
+	maxPairs := p.opts.MaxPairs
+	if maxPairs <= 0 {
+		maxPairs = -1
+	}
+	return p.SelectWithin(cands, judged, maxPairs)
+}
+
+// SelectWithin is Select with its own per-run cap in place of the
+// configured one; a negative cap means none. It reorders cands.
+func (p *Proposer) SelectWithin(cands []*Candidate, judged func(*Candidate) bool, maxPairs int) *Proposal {
 	p.prepare()
 	embedded := make(map[*Subject]bool)
 	for _, sv := range p.secVecs {
@@ -279,13 +326,19 @@ func (p *Proposer) Select(cands []*Candidate, judged func(*Candidate) bool) *Pro
 			continue
 		}
 		if (p.opts.MaxPerSubject > 0 && perSubject[c.Subject.Path] >= p.opts.MaxPerSubject) ||
-			(p.opts.MaxPerMeeting > 0 && perMeeting[c.Meeting.SessionID] >= p.opts.MaxPerMeeting) ||
-			(p.opts.MaxPairs > 0 && len(prop.Candidates) >= p.opts.MaxPairs) {
+			(p.opts.MaxPerMeeting > 0 && perMeeting[c.Meeting.SessionID] >= p.opts.MaxPerMeeting) {
 			prop.CutByCaps++
 			continue
 		}
+		// A deferred candidate still takes its place among the best few for
+		// its document and meeting, so the per-run cap never widens them.
 		perSubject[c.Subject.Path]++
 		perMeeting[c.Meeting.SessionID]++
+		if maxPairs >= 0 && len(prop.Candidates) >= maxPairs {
+			prop.CutByCaps++
+			prop.Deferred = append(prop.Deferred, c)
+			continue
+		}
 		prop.Candidates = append(prop.Candidates, c)
 	}
 	return prop

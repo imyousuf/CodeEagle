@@ -378,21 +378,59 @@ regenerate on every branch switch.
 
 ## Pipeline and bounds
 
-- **Sync**: after queue enrichment (so generic documents have summaries and
-  topics), on the default branch or a non-git project: propose for changed
-  subjects, judge, refresh affected relations.
-- **Meetings**: a `transcript.MeetingObserver` hook on the meeting writer,
-  beside the topic relater, runs for each meeting written, including under
-  `meetings watch`. Failures are logged and never fail the meeting write.
-- **Worker**: unchanged. It already runs `sync` and `meetings sync`, and
-  relations run inside them.
-- **Repair and bulk**: `codeeagle relations [--plan|--dry-run] [--doc PATH]
-  [--meeting ID] [--limit N] [--briefs-only] [--reset]`.
+- **Sync**: after vector indexing (so what changed can already be found by
+  meaning), on the default branch or a non-git project. A feature branch
+  never runs it: briefs describe the default branch's documents.
+- **Meetings sync**: after the new meetings are embedded, when any were
+  indexed. `meetings watch` does not run it; the next `sync` or `meetings
+  sync` picks the meetings up.
+- **Worker**: unchanged. It already runs `sync`, and relations run inside it.
+- **Repair and bulk**: `codeeagle relations [--plan] [--doc PATH]
+  [--meeting ID] [--limit N] [--briefs-only] [--reset]`, which proposes over
+  the whole corpus rather than what is pending. `--plan` is the dry run;
+  `--reset` deletes the relations scope whole, verdict ledger and scan
+  ledger included.
 
-Every run prints one cost line: candidates proposed, judged, accepted;
-decision-model requests and tokens; briefs written and their tokens; and how
-many were cut by caps. With no decision-model key, nothing is proposed: a
-relation is never created on cosine similarity alone.
+### What one automatic run considers
+
+A scan ledger (one `RelationScan` node in `@relations`) records, per
+document, the content hash it was last considered under, and per meeting
+its transcript's hash. A run considers what is unrecorded or changed, newest
+first: at most 50 documents and 25 meetings. The same mechanism covers an
+edited document, a new recording, a recording embedded after it was indexed,
+and a corpus that existed before relations were turned on, which is worked
+through a batch per run.
+
+- **Vectors first.** A document or meeting with no vectors waits, and with no
+  vectors at all nothing is considered. On the labelled pairs the name and
+  identifier signals alone proposed no related pair, so judging without the
+  meaning signal spends money to find nothing, and marking those items
+  considered would stop the meaning signal from ever proposing for them.
+- **Two kinds of cap.** The per-document and per-meeting caps pick the best
+  few candidates for each; what they drop is not retried. The per-run cap
+  only postpones: candidates it defers, and those the decision model failed
+  to judge, keep the side that proposed them pending for the next run. A
+  deferred candidate still counts toward its document's and meeting's few,
+  so the per-run cap never widens them.
+- **A fair split.** Pending meetings and pending documents each get at least
+  half the per-run cap and either side what the other leaves. Selected as one
+  pool, document candidates outscored meeting candidates on every run in the
+  experiment corpus, and 609 waiting meetings did not move in three runs.
+- **Whoever proposed it owns it.** A candidate deferred for a pending
+  document does not hold back the meeting it names, and the reverse.
+
+Measured on the experiment corpus (460 documents, 751 meetings), 2026-10-22:
+one run judges 200 pairs in 60-110 decision-model requests (about 200k input
+tokens) and writes up to 10 briefs, for 40-120 s of sync time; each run
+drains about 10 documents and 13 meetings from the backlog. A bulk run of
+`codeeagle relations` gets through a large backlog faster.
+
+Every run with something to do prints one cost line: documents and meetings
+considered; candidates proposed, judged, accepted; decision-model requests
+and tokens; how many were deferred; briefs written and their tokens; and how
+much waits for later runs. With no decision-model key, or `relations.enabled:
+false`, nothing is read or written: a relation is never created on cosine
+similarity alone.
 
 ## Agent verbs
 
@@ -464,7 +502,8 @@ Token estimates use bytes / 3.5 until calibrated against measured usage.
 
 ```yaml
 relations:
-  # enabled: false            # unset = on when transcripts.jev_api_key is set
+  # enabled: false            # unset = on when transcripts.jev_api_key is set;
+  #                           # true cannot turn it on without the key
   gate: 0.8                   # measured 2026-10-22: precision 0.86, recall ~0.7
   conflict_gate: 0.7
   max_pairs_per_run: 200

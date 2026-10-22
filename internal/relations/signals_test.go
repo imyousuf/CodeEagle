@@ -161,6 +161,33 @@ func TestSelectSkipsJudgedPairsAndCaps(t *testing.T) {
 	}
 }
 
+// TestSelectDefersOnlyWithinTheRelevanceCaps covers the boundary between the
+// caps: once the per-run cap is reached, a candidate beyond the best few for
+// its document is dropped, not deferred.
+func TestSelectDefersOnlyWithinTheRelevanceCaps(t *testing.T) {
+	subjects, meetings := corpus()
+	p := NewProposer(subjects, meetings, nil, Options{K: 5, MaxPerSubject: 1, MaxPerMeeting: 8, MaxPairs: 1})
+	var cands []*Candidate
+	for _, s := range subjects {
+		for _, m := range meetings {
+			cands = append(cands, &Candidate{Subject: s, Meeting: m, Signals: SignalName, NameScore: 0.5})
+		}
+	}
+	prop := p.Select(cands, nil)
+	// Three documents and two meetings: one pair judged, the best pair of
+	// each of the other two documents deferred, the rest dropped.
+	if len(prop.Candidates) != 1 || len(prop.Deferred) != 2 || prop.CutByCaps != 5 {
+		t.Errorf("selected %d, deferred %d, cut %d; want 1, 2 and 5", len(prop.Candidates), len(prop.Deferred), prop.CutByCaps)
+	}
+	seen := map[string]bool{prop.Candidates[0].Subject.Path: true}
+	for _, c := range prop.Deferred {
+		if seen[c.Subject.Path] {
+			t.Errorf("%s has more than its one best pair kept", c.Subject.Path)
+		}
+		seen[c.Subject.Path] = true
+	}
+}
+
 // TestSigDocTracksOnlyTheMatchedSections covers when a judged pair becomes
 // eligible again: a change to a section it rests on, not a change anywhere.
 func TestSigDocTracksOnlyTheMatchedSections(t *testing.T) {

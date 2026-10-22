@@ -68,6 +68,10 @@ type DocsConfig struct {
 // RelationsConfig holds settings for discovering relations between
 // documents and meetings. See docs/artifact-relations.md.
 type RelationsConfig struct {
+	// Enabled turns relations on or off. Unset, they run whenever
+	// transcripts.jev_api_key is set, since no relation is ever decided
+	// without the decision model.
+	Enabled *bool `mapstructure:"enabled" yaml:"enabled,omitempty"`
 	// Exclude lists path patterns of documents that are never subjects.
 	Exclude []string `mapstructure:"exclude" yaml:"exclude,omitempty"`
 	// MaxPairsPerRun caps the candidates one run judges.
@@ -94,6 +98,15 @@ type RelationsConfig struct {
 	// Empty uses the transcripts provider and model.
 	Provider string `mapstructure:"provider" yaml:"provider,omitempty"`
 	Model    string `mapstructure:"model" yaml:"model,omitempty"`
+}
+
+// RelationsEnabled reports whether relations are discovered automatically
+// during sync and meetings sync.
+func (c *Config) RelationsEnabled() bool {
+	if c.Relations.Enabled != nil && !*c.Relations.Enabled {
+		return false
+	}
+	return c.Transcripts.JevAPIKey != ""
 }
 
 // MCPConfig holds MCP server settings.
