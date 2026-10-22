@@ -17,7 +17,7 @@ import (
 
 // BriefVersion is bumped when what a brief is written from, or how, changes,
 // so existing briefs are written again.
-const BriefVersion = 4
+const BriefVersion = 5
 
 // BriefOptions bound brief writing.
 type BriefOptions struct {
@@ -578,8 +578,8 @@ func (w *BriefWriter) confirmConflicts(ctx context.Context, b *Brief, evidence [
 			resp, err := w.asker.Ask(ctx, state, jev.Questions{
 				name: jev.NoulWithCriteria(
 					"Does what was said in the meeting contradict what the document says?",
-					"the meeting decided or stated something that cannot be true at the same time as the document's passage; one of them must be out of date",
-					"the two are compatible: they say the same thing, one adds detail, or they are about different things",
+					"the meeting decided or settled something that cannot be true at the same time as the document's passage, so one of them must be out of date",
+					"the two are compatible: they say the same thing, one adds detail, or they are about different things; or the meeting only proposed, asked or argued for something without settling it",
 				),
 			})
 			if err != nil {
