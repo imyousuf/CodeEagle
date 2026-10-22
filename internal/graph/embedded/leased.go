@@ -10,9 +10,10 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/graph"
 )
 
-// ErrBusy is returned when a writer holds the database for longer than a
-// reader will wait.
-var ErrBusy = errors.New("the index is being updated by a sync; try again in a minute")
+// ErrBusy is returned when another process holds the database for longer
+// than an open will wait: a sync, for a reader; for a sync, a reader or
+// another sync.
+var ErrBusy = errors.New("the index is in use by another codeeagle process, usually a sync; try again shortly")
 
 // IsLocked reports whether err is Badger refusing a directory lock another
 // process holds.

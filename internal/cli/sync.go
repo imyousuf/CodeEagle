@@ -62,8 +62,14 @@ func WithProgress() SyncOption {
 // warnFn receives non-fatal warnings (e.g., provider detection failures).
 // logFn receives progress messages.
 func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, verboseMode bool, logFn func(format string, args ...any), warnFn func(format string, args ...any), opts ...SyncOption) error {
-	// Open read-write store.
-	store, currentBranch, err := embedded.OpenReadWrite(cfg, paths, "")
+	// Open read-write store, waiting out a reader such as an agent's query:
+	// readers hold the database only while they run.
+	var currentBranch string
+	store, err := embedded.OpenWaiting(func() (*embedded.BranchStore, error) {
+		s, b, err := embedded.OpenReadWrite(cfg, paths, "")
+		currentBranch = b
+		return s, err
+	})
 	if err != nil {
 		return err
 	}
