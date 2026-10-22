@@ -44,6 +44,7 @@ func newBriefCmd() *cobra.Command {
 		budget  int
 		since   string
 		jsonOut bool
+		all     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "brief <id | words>",
@@ -64,17 +65,26 @@ puts it first.
 --json prints the whole brief for a program instead: every line with the IDs
 of its evidence, each piece of evidence with its quote and where it is
 anchored, the meetings judged to discuss the document, and freshness.
---budget and --since do not apply to it.`,
+--budget and --since do not apply to it. With --all instead of an ID, every
+brief is printed, one JSON object per line.`,
 		Example: `  codeeagle brief 3fa9c2
   codeeagle brief retry policy --budget 250
   codeeagle brief 3fa9c2 --since @r4`,
-		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if all && !jsonOut {
+				return fmt.Errorf("--all needs --json")
+			}
+			if !all && len(args) == 0 {
+				return fmt.Errorf("brief needs an ID or words, or --all --json")
+			}
 			v, err := loadVerbs()
 			if err != nil {
 				return err
 			}
 			defer v.Close()
+			if all {
+				return v.AllBriefsJSON(cmd.Context(), cmd.OutOrStdout())
+			}
 			arg := strings.Join(args, " ")
 			var out string
 			if jsonOut {
@@ -92,6 +102,7 @@ anchored, the meetings judged to discuss the document, and freshness.
 	cmd.Flags().IntVar(&budget, "budget", relations.DefaultBriefBudget, "most estimated tokens to print (max 2000)")
 	cmd.Flags().StringVar(&since, "since", "", "also show what changed after this: a date, RFC 3339 time, 7d/36h/2w, or @rN")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the whole brief and its evidence as JSON")
+	cmd.Flags().BoolVar(&all, "all", false, "with --json, print every brief, one per line")
 	return cmd
 }
 

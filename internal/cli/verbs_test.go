@@ -132,3 +132,38 @@ func TestBriefJSONCarriesTheEvidence(t *testing.T) {
 		t.Errorf("brief --json = %s", out)
 	}
 }
+
+// TestAllBriefsJSONIsOneLinePerBrief covers brief --all --json, the export a
+// program reads in one pass.
+func TestAllBriefsJSONIsOneLinePerBrief(t *testing.T) {
+	cfg := &config.Config{Graph: config.GraphConfig{DBPath: t.TempDir()}}
+	ctx := context.Background()
+	w, _, err := openBranchStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"docs/a.md", "docs/b.md", "docs/none.md"} {
+		rel := relations.New(path)
+		if path != "docs/none.md" {
+			rel.Brief = &relations.Brief{Headline: relations.Line{Text: "about " + path}}
+		}
+		node, err := rel.Node()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := w.View(embedded.RelationScope, []string{embedded.RelationScope}).AddNode(ctx, node); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.Close()
+	v := newVerbs(cfg)
+	defer v.Close()
+	var out strings.Builder
+	if err := v.AllBriefsJSON(ctx, &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], `"subject":"docs/a.md"`) || !strings.Contains(lines[1], `"subject":"docs/b.md"`) {
+		t.Errorf("export = %q", out.String())
+	}
+}

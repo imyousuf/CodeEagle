@@ -50,18 +50,10 @@ def export(args, bench):
     out = bench / "briefs.jsonl"
     if out.exists():
         return [json.loads(l) for l in out.read_text().splitlines() if l.strip()]
-    listing = subprocess.run([args.codeeagle, "query", "--type", "Relation"], cwd=args.corpus,
-                             capture_output=True, text=True, check=True).stdout
-    ids = [line.split()[0] for line in listing.splitlines() if " Relation " in line]
-    briefs = []
-    for rid in ids:
-        p = subprocess.run([args.codeeagle, "brief", rid[:12], "--json"], cwd=args.corpus, capture_output=True, text=True)
-        try:
-            b = json.loads(p.stdout)
-        except json.JSONDecodeError:
-            continue
-        if b.get("brief"):
-            briefs.append(b)
+    dump = subprocess.run([args.codeeagle, "brief", "--all", "--json"], cwd=args.corpus,
+                          capture_output=True, text=True, check=True).stdout
+    briefs = [json.loads(l) for l in dump.splitlines() if l.strip()]
+    briefs = [b for b in briefs if b.get("brief")]
     out.write_text("".join(json.dumps(b) + "\n" for b in briefs))
     return briefs
 

@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"sort"
@@ -334,6 +336,36 @@ func (v *verbs) Brief(ctx context.Context, arg string, budget int, since string)
 // meeting, still answer in text.
 func (v *verbs) BriefJSON(ctx context.Context, arg string) (string, error) {
 	return v.brief(ctx, arg, relations.DefaultBriefBudget, briefJSON)
+}
+
+// AllBriefsJSON prints every relation that has a brief, one JSON object per
+// line, in the form BriefJSON gives one: an export for programs, read in
+// one pass rather than one process per relation.
+func (v *verbs) AllBriefsJSON(ctx context.Context, w io.Writer) error {
+	lib, done, err := v.begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
+	paths := make([]string, 0, len(lib.Relations))
+	for path, rel := range lib.Relations {
+		if rel.Brief != nil {
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		out, err := briefJSON(lib, lib.Relations[path])
+		if err != nil {
+			return err
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, []byte(out)); err != nil {
+			return err
+		}
+		fmt.Fprintln(w, compact.String())
+	}
+	return nil
 }
 
 // renderFunc turns a relation into what brief prints.
