@@ -66,13 +66,13 @@ thorough: find every meeting that bears on the question, check what the \
 document says now, and quote the passages your answer rests on."""
 
 
-def mcp_config(path, codeeagle, tools):
-    cfg = {"mcpServers": {"ce": {"command": codeeagle, "args": ["mcp", "serve", "--tools", tools]}}}
-    path.write_text(json.dumps(cfg))
+def mcp_config(path, codeeagle, tools, log):
+    args = ["mcp", "serve", "--tools", tools, "--log", str(log)]
+    path.write_text(json.dumps({"mcpServers": {"ce": {"command": codeeagle, "args": args}}}))
     return path
 
 
-def command(arm, spec, prompt, args, mcp_dir):
+def command(arm, spec, prompt, args, mcp_dir, out):
     oracle = spec.get("oracle", False)
     cmd = [
         "claude", "-p", prompt,
@@ -92,7 +92,9 @@ def command(arm, spec, prompt, args, mcp_dir):
     if spec["tools"] and args.sessions:
         cmd += ["--add-dir", args.sessions]
     if spec["mcp"]:
-        cfg = mcp_config(mcp_dir / f"{arm}.json", args.codeeagle, spec["mcp"])
+        # Each answer gets its own server log: which tools it called, with
+        # what, is half of explaining what it cost.
+        cfg = mcp_config(mcp_dir / f"{out.stem}.{arm}.json", args.codeeagle, spec["mcp"], out.with_suffix(".mcp.log"))
         cmd += ["--mcp-config", str(cfg), "--allowedTools", "mcp__ce"]
         if spec.get("deny"):
             cmd += ["--disallowedTools", ",".join(f"mcp__ce__{t}" for t in spec["deny"])]
@@ -103,7 +105,7 @@ def run_one(arm, spec, q, rep, args, out, mcp_dir):
     template = ORACLE_PROMPT if spec.get("oracle") else PROMPT
     prompt = template.format(corpus=args.corpus, sessions=args.sessions or "(not available)", question=q["question"])
     started = time.time()
-    proc = subprocess.run(command(arm, spec, prompt, args, mcp_dir), cwd=args.corpus,
+    proc = subprocess.run(command(arm, spec, prompt, args, mcp_dir, out), cwd=args.corpus,
                           capture_output=True, text=True, timeout=args.timeout)
     record = {"arm": arm, "id": q["id"], "rep": rep, "started": started,
               "wall_s": round(time.time() - started, 1), "exit": proc.returncode}
