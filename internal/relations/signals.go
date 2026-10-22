@@ -144,6 +144,7 @@ type Proposer struct {
 	phrases  map[*Subject][]phrase
 	fuzzy    *fuzzyIndex
 	postings map[string][]*Segment
+	segSeq   map[*Segment][]string
 	segIDs   map[*Segment]map[string]bool
 	subjIDs  map[*Subject]map[string]bool
 }
@@ -163,9 +164,11 @@ type secVec struct {
 type phrase struct {
 	text     string
 	tokens   []string
-	weights  []float64
 	required []bool
 	section  *Section
+	// near holds, per token, the words of what meetings said within one
+	// edit of it.
+	near []map[string]bool
 }
 
 // NewProposer prepares a proposer. vec may be nil, in which case the said
@@ -290,8 +293,8 @@ func score(c *Candidate) float64 {
 func (p *Proposer) prepare() {
 	p.once.Do(func() {
 		p.loadVectors()
-		p.buildPhrases()
 		p.buildTargets()
+		p.buildPhrases()
 	})
 }
 
@@ -315,9 +318,13 @@ func (p *Proposer) loadVectors() {
 	}
 }
 
-// buildPhrases picks each document's title and distinctive headings. A word
-// in the titles and headings of many documents ("overview", "goals") is
-// generic and cannot carry a match on its own.
+// buildPhrases picks each document's title and distinctive headings.
+//
+// A word is distinctive only if it is rare on both sides: in the titles and
+// headings of documents ("overview", "goals" are not) and in what meetings
+// said ("agent", "memory" are everywhere in a team that builds agents). A
+// phrase needs at least one distinctive word, and a phrase of one word must
+// be a long one, since a single short word names nothing.
 func (p *Proposer) buildPhrases() {
 	type raw struct {
 		text string
@@ -345,6 +352,7 @@ func (p *Proposer) buildPhrases() {
 	}
 	n := float64(len(p.subjects))
 	genericAt := math.Max(2, 0.1*n)
+	segGenericAt := math.Max(10, 0.02*float64(len(p.segSeq)))
 	p.phrases = make(map[*Subject][]phrase)
 	for s, raws := range rawBy {
 		for _, r := range raws {
@@ -353,13 +361,18 @@ func (p *Proposer) buildPhrases() {
 			anyRequired := false
 			for _, t := range terms {
 				ph.tokens = append(ph.tokens, t)
-				ph.weights = append(ph.weights, math.Log((n+1)/float64(df[t]+1))+1)
-				req := float64(df[t]) <= genericAt
+				near := make(map[string]bool)
+				segFreq := 0
+				for _, w := range p.fuzzy.near(t) {
+					near[w] = true
+					segFreq += len(p.postings[w])
+				}
+				ph.near = append(ph.near, near)
+				req := float64(df[t]) <= genericAt && float64(segFreq) <= segGenericAt
 				ph.required = append(ph.required, req)
 				anyRequired = anyRequired || req
 			}
-			// One word names something only if it is long and rare.
-			if !anyRequired || (len(terms) == 1 && (len(terms[0]) < 6 || !ph.required[0])) {
+			if !anyRequired || (len(terms) == 1 && len(terms[0]) < 6) {
 				continue
 			}
 			p.phrases[s] = append(p.phrases[s], ph)
@@ -373,6 +386,7 @@ func (p *Proposer) buildPhrases() {
 func (p *Proposer) buildTargets() {
 	p.fuzzy = newFuzzyIndex()
 	p.postings = make(map[string][]*Segment)
+	p.segSeq = make(map[*Segment][]string)
 	p.segIDs = make(map[*Segment]map[string]bool)
 	p.subjIDs = make(map[*Subject]map[string]bool)
 	for _, m := range p.meetings {
@@ -380,7 +394,9 @@ func (p *Proposer) buildTargets() {
 		for _, seg := range m.Segments {
 			text := seg.Name + "\n" + seg.Summary + "\n" + seg.Keywords + "\n" + meetingText
 			seen := make(map[string]bool)
-			for _, t := range search.Tokenize(text) {
+			seq := search.Tokenize(text)
+			p.segSeq[seg] = seq
+			for _, t := range seq {
 				if !seen[t] {
 					seen[t] = true
 					p.fuzzy.add(t)
@@ -470,7 +486,8 @@ func (p *Proposer) saidFromSegments(meetings []*Meeting, agg *aggregate) {
 }
 
 // nameMatches proposes the meetings whose segments name one of the subject's
-// phrases: every distinctive word present, allowing one edit in long words.
+// phrases: its words in order, a couple of words apart at most, allowing one
+// edit in long words. Words present but scattered do not name anything.
 // meetings limits the search when given.
 func (p *Proposer) nameMatches(s *Subject, meetings []*Meeting, agg *aggregate) {
 	var only map[*Meeting]bool
@@ -483,16 +500,17 @@ func (p *Proposer) nameMatches(s *Subject, meetings []*Meeting, agg *aggregate) 
 	for _, ph := range p.phrases[s] {
 		// Segments containing each required word (or a near spelling of it).
 		var candidates map[*Segment]bool
-		for i, tok := range ph.tokens {
+		for i := range ph.tokens {
 			if !ph.required[i] {
 				continue
 			}
 			hits := make(map[*Segment]bool)
-			for _, w := range p.fuzzy.near(tok) {
+			for w := range ph.near[i] {
 				for _, seg := range p.postings[w] {
 					hits[seg] = true
 				}
 			}
+
 			if candidates == nil {
 				candidates = hits
 			} else {
@@ -510,32 +528,43 @@ func (p *Proposer) nameMatches(s *Subject, meetings []*Meeting, agg *aggregate) 
 			if only != nil && !only[seg.meeting] {
 				continue
 			}
-			agg.name(s, seg.meeting, ph, seg, p.phraseScore(ph, seg))
+			if !inOrder(ph, p.segSeq[seg]) {
+				continue
+			}
+			sc := 1.0
+			if len(ph.tokens) == 1 {
+				sc = 0.7
+			}
+			agg.name(s, seg.meeting, ph, seg, sc)
 		}
 	}
 }
 
-// phraseScore is the share of a phrase's weight found in the segment.
-func (p *Proposer) phraseScore(ph phrase, seg *Segment) float64 {
-	var got, total float64
-	for i, tok := range ph.tokens {
-		total += ph.weights[i]
-		for _, w := range p.fuzzy.near(tok) {
-			if containsSeg(p.postings[w], seg) {
-				got += ph.weights[i]
-				break
+// maxPhraseGap is how many words may come between two words of a phrase:
+// enough for the function words a title drops ("budget for retries").
+const maxPhraseGap = 2
+
+// inOrder reports whether seq holds the phrase's words in order, each within
+// maxPhraseGap words of the last.
+func inOrder(ph phrase, seq []string) bool {
+	if len(ph.tokens) == 0 {
+		return false
+	}
+	for start, w := range seq {
+		if !ph.near[0][w] {
+			continue
+		}
+		pos, ok := start, true
+		for i := 1; i < len(ph.tokens) && ok; i++ {
+			ok = false
+			for j := pos + 1; j < len(seq) && j <= pos+1+maxPhraseGap; j++ {
+				if ph.near[i][seq[j]] {
+					pos, ok = j, true
+					break
+				}
 			}
 		}
-	}
-	if total == 0 {
-		return 0
-	}
-	return got / total
-}
-
-func containsSeg(list []*Segment, seg *Segment) bool {
-	for _, s := range list {
-		if s == seg {
+		if ok {
 			return true
 		}
 	}

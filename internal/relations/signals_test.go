@@ -178,3 +178,16 @@ func TestSigDocTracksOnlyTheMatchedSections(t *testing.T) {
 		t.Error("editing the section the pair rests on left its signature unchanged")
 	}
 }
+
+// TestNameNeedsThePhraseInOrder covers the noise that bag-of-words matching
+// produced on the real corpus: a title's words scattered through a summary
+// name nothing.
+func TestNameNeedsThePhraseInOrder(t *testing.T) {
+	subjects, meetings := corpus()
+	meetings["s-plat"].Segments[0].Summary = "The design review covered the budget; retry storms came up later."
+	meetings["s-plat"].Segments[0].Keywords = ""
+	p := NewProposer(subjects, meetings, nil, DefaultOptions())
+	if c := find(p.ForSubjects("docs/retry-budget.md"), "docs/retry-budget.md", "s-plat"); c != nil && c.Signals&SignalName != 0 {
+		t.Errorf("scattered title words proposed the pair: %v", c.Names)
+	}
+}
