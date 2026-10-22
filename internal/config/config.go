@@ -76,6 +76,10 @@ type RelationsConfig struct {
 	MaxCandidatesPerSubject int `mapstructure:"max_candidates_per_subject" yaml:"max_candidates_per_subject,omitempty"`
 	// MaxCandidatesPerMeeting caps the documents proposed for one meeting.
 	MaxCandidatesPerMeeting int `mapstructure:"max_candidates_per_meeting" yaml:"max_candidates_per_meeting,omitempty"`
+	// Gate is the decision model's probability at or above which a meeting
+	// is taken to discuss a document. Zero uses the package default, which
+	// is provisional until calibrated on labelled pairs.
+	Gate float64 `mapstructure:"gate" yaml:"gate,omitempty"`
 }
 
 // VectorConfig holds vector index maintenance settings.

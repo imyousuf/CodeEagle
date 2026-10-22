@@ -35,12 +35,12 @@ func corpus() ([]*Subject, map[string]*Meeting) {
 	platform := &Meeting{NodeID: "m-plat", SessionID: "s-plat", Title: "Platform sync", ContentHash: "c-plat", Date: day}
 	platform.Segments = []*Segment{
 		{NodeID: "seg-cap", Name: "Retry cap", Summary: "Agreed to raise the retry cap to five and keep the retry budgt design.",
-			Keywords: "retry, PLAT-412", meeting: platform},
-		{NodeID: "seg-lunch", Name: "Team lunch", Summary: "Picked a place for Friday.", meeting: platform},
+			Keywords: "retry, PLAT-412", Start: 10, End: 90, meeting: platform},
+		{NodeID: "seg-lunch", Name: "Team lunch", Summary: "Picked a place for Friday.", Start: 90, End: 120, meeting: platform},
 	}
 	finance := &Meeting{NodeID: "m-fin", SessionID: "s-fin", Title: "Finance review", ContentHash: "c-fin", Date: day.AddDate(0, -2, 0)}
 	finance.Segments = []*Segment{
-		{NodeID: "seg-inv", Name: "Invoices", Summary: "Invoice templates need the new logo.", meeting: finance},
+		{NodeID: "seg-inv", Name: "Invoices", Summary: "Invoice templates need the new logo.", Start: 0, End: 60, meeting: finance},
 	}
 	return []*Subject{retry, billing, onboarding}, map[string]*Meeting{"s-plat": platform, "s-fin": finance}
 }
