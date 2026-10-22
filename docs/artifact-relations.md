@@ -1,0 +1,495 @@
+# Artifact Relations: Discovered Links With Always-Current Briefs
+
+## Problem
+
+An agent working over a codebase, its documents and the meetings about it
+spends most of its tokens in three places: finding the right material,
+reading whole files to understand fragments, and then checking whether what
+it read is still true. CodeEagle holds documents and meetings in one graph
+but barely connects them:
+
+- A markdown link becomes a `Dependency` node named after the target path
+  and is never resolved to the target `Document`, so documents have no
+  incoming edges from each other.
+- Markdown sections carry a heading and a line number but no text, so
+  markdown is never embedded and `rag` cannot find it by meaning.
+- Documents and meetings share `Topic` nodes only when two different models
+  happen to choose the same label, which in practice they do not: in the
+  home graph "markbench" and "model routing" are linked only from documents
+  although both are discussed in meetings.
+
+So a tech spec and the four meetings that discussed it are unrelated in the
+graph, and nothing records whether the spec still describes what was
+decided. An agent asked "what is the current state of the retry design?"
+has to find the spec, read it, search meetings by word, read transcripts,
+and reconcile them itself, at tens of thousands of tokens, with no warning
+when the spec is stale.
+
+## Goals
+
+1. **Discover** relations between artifacts that do not link to each other,
+   starting with a document and the meeting discussion about it.
+2. **Judge** each candidate with a yes/no decision model; never assert a
+   relation the evidence does not support.
+3. **Keep a brief on each relation** that is current at all times: what the
+   document says, what was said about it and when, what changed since, what
+   is unresolved, and where the document and the latest discussion
+   disagree. Every line cites a verbatim quote that is checked.
+4. **Serve agents token-efficiently**: one call of a few hundred tokens
+   lands on the current state; evidence expands only on demand.
+5. **Stay incremental and bounded**: work only on what changed, under
+   per-run caps, with a cost line, so an automatic run can never run away.
+
+## Non-goals (this round)
+
+- Document ↔ document relations, and code entities as relation endpoints
+  (spec ↔ code ↔ meeting). Both build on this round's model; see Deferred.
+- Verbatim text for non-markdown documents (PDF, DOCX): the graph holds an
+  LLM summary for them, not their text, so quotes cannot be checked yet.
+- Deploying to a hosted personal-file store.
+
+## Vocabulary
+
+| Term | Meaning |
+|---|---|
+| **subject** | The artifact a relation is about. This round: a document (a markdown file) |
+| **discussion** | Meeting content that may concern a subject: topic segments, decisions, action items, transcript turns |
+| **candidate** | A (subject, meeting) pair some signal proposed |
+| **verdict** | The decision model's probability that a candidate is a real relation, stored whether accepted or not |
+| **link** | A candidate whose verdict passed the gate |
+| **evidence** | A verbatim quote anchored to a place in a source: a document section or a span of a transcript |
+| **relation** | The node that holds a subject's links, evidence, verdict ledger and brief |
+| **brief** | The relation's current-state summary, regenerated when its inputs change |
+
+## What is already measured, and what must be measured again
+
+From the topic-relatedness work (2026-09-20, 91 hand-labelled topic pairs;
+`docs/jev.md`):
+
+- **Cosine similarity ranks candidates but cannot decide** (AUC 0.77; no cut
+  better than precision 0.83 at recall 0.50). It is a proposer, never a gate.
+- **A yes/no question to the decision model decides** (AUC 0.92; gate 0.6
+  gave precision 1.00 at recall 0.58). A six-way typed relation from the
+  same model failed (exact 0.51). So relatedness is a yes/no question, and
+  the kind of relation is not asked of the judge.
+- **What was said proposes best.** Segment-summary embeddings found the
+  largest share of real pairs (43% of judged pairs at ≥ 0.6, against 26% for
+  label embeddings).
+- **Exact vector search is cheap** below 250k vectors (0.14–0.26 s over 51k);
+  `rag`'s wall time is index load and keyword scan, not search.
+
+**To measure again before anything runs automatically:** the gate for
+document ↔ discussion pairs. The 0.6 above was measured on topic labels; a
+document section and a meeting segment are longer, differently shaped
+inputs. The gate ships provisional and is recalibrated on a labelled set
+(see Measurement) for precision ≥ 0.95 before the automatic path is turned
+on, because a wrong relation corrupts every brief built on it.
+
+## Document substrate changes (prerequisites)
+
+### Markdown sections carry their text
+
+The markdown parser emits each section with:
+
+- **DocComment**: the section's own text (up to the next heading of the same
+  or higher level), capped at about 6k characters. This alone makes markdown
+  embeddable: `EmbeddableText` already embeds a node with a DocComment.
+- **EndLine**, **heading_path** (`H1 > H2 > H3`, also the QualifiedName),
+  **ordinal** (position among siblings with the same heading),
+  **section_hash** (sha256 of the whitespace-collapsed text, so a reflow is
+  not a change but an edit is).
+- The root document's DocComment is its front-matter title and description
+  plus the text before the first heading.
+- Headings inside fenced code blocks are not headings.
+
+**Duplicate headings.** Section IDs are `NewNodeID(Document, path,
+"section:"+title)`, so two sections with the same title in one file collide
+today. The first keeps exactly that ID; later ones append `#n`. No existing
+ID changes.
+
+**Blast radius.** Additive fields on existing nodes; new vectors for
+markdown in every project (on by default, `docs.markdown_sections: false`
+restores the old behaviour). `rag` starts returning markdown sections, which
+is the point, but saved queries should be re-run before and after.
+
+### Backfill without a runaway
+
+Existing markdown is re-parsed once by a backpop step gated on a
+`SyncState.MarkdownSectionsVersion` flag, like `BackpopContentHash`. It
+deliberately does not mark files as changed: a changed-file list triggers
+summarization, the linker and the enrichment queue, and doing that for every
+markdown file at once is the shape of the runaway-sync incident. It
+re-parses only the scope being written, so a feature branch does not copy
+the default branch's documents into its own scope.
+
+### Incremental vectors
+
+Today only a full rebuild embeds anything; incremental syncs and the
+meetings pipeline embed nothing, so new documents and meetings are invisible
+to vector search until `vectorindex --force`. After this change:
+
+- a sync embeds the embeddable nodes of the files it changed;
+- each sync backfills missing vectors and drops vectors of deleted nodes, up
+  to `vector.backfill_limit` (default 2000) so a large gap closes over
+  several runs instead of in one;
+- the meetings pipeline embeds the meetings it writes, best-effort; if the
+  vector store is locked it skips, and the next sync's backfill catches up.
+
+`EmbeddableTextVersion` does not change: markdown was never embedded, so no
+existing vector's text changes.
+
+## Data model
+
+### Where relations live
+
+Relations live in their own reserved scope, **`@relations`**, alongside
+`@meetings`:
+
+- Meeting re-indexing deletes `@meetings` edges touching the meeting's
+  nodes, and `meetings migrate` moves the meetings scope whole. Neither
+  should touch relations.
+- Relations are not branch data: a spec's discussion does not change when
+  you switch branches. Branch cleanup already skips reserved scopes.
+- Resetting is one scope deletion.
+
+Readers that serve agents read `[current branch, default, @meetings,
+@relations]`. The writer opens a view over the same database handle that
+writes `@relations` and reads the others (Badger allows one writer handle
+per directory, so a second store cannot be opened in the same process).
+
+### The relation node
+
+One `Relation` per subject document, not one per pair. A per-pair brief
+cannot say "the spec says X; the latest of four meetings decided Y"; the
+per-meeting verdicts live inside the relation instead.
+
+- **ID**: `NewNodeID("Relation", "", "doc:"+subject_path)`. The empty file
+  path means `DeleteByFile` never removes it when the document is re-indexed.
+- **Edges**: `About` (Relation → the subject Document) and `DiscussedIn`
+  (Relation → Meeting, accepted links only, carrying the probability).
+  Edges are derived from the properties and rewritten on every refresh.
+- **DocComment**: the brief's headline and current lines, so relations are
+  embedded and `find` can land on them directly.
+
+| Property | Content |
+|---|---|
+| `subject_path`, `subject_hash` | The document and its content hash at the last refresh |
+| `sections_json` | `heading_path → {hash, first_seen}`: the document's change history, which the graph otherwise does not keep |
+| `links_json` | The verdict ledger, one entry per meeting session (below) |
+| `evidence_json` | Evidence anchors (below) |
+| `brief_json` | The current brief (below) |
+| `brief_inputs_hash`, `brief_model`, `briefed_at`, `revision` | Regeneration bookkeeping; `revision` increments on each new brief |
+
+### The verdict ledger
+
+One entry per meeting session ID: `p`, `accepted`, `judge` (model),
+`signals` (which proposed it), best cosine, the segment time ranges judged,
+`sig_doc` (hash of the subject's matched section hashes), `sig_meeting` (the
+transcript's content hash) and `judged_at`.
+
+**Rejected verdicts are kept.** A pair is never asked again while both
+signatures are unchanged; a changed section or a changed transcript makes it
+eligible again. Re-enriching a meeting does not change its transcript hash,
+so it does not trigger re-judging.
+
+### Evidence anchors
+
+Meeting child node IDs are not stable: decisions and action items are
+numbered by position, and segment IDs embed the model's topic name, so
+re-enrichment changes them. Evidence therefore anchors to sources, not node
+IDs:
+
+| Kind | Anchor |
+|---|---|
+| `doc` | `{path, heading_path, ordinal, section_hash, quote}` |
+| `said` | `{session_id, start, end, speaker, quote}` |
+| `decided` | `{session_id, quote}` (the decision's own quote) |
+
+On each refresh an anchor is re-resolved: a `doc` anchor by heading path and
+a check that the quote is still in the section; a `said` anchor by loading
+the transcript and finding the quote within ±60 s of the anchor, then
+anywhere. An anchor that no longer resolves is kept and marked
+`source_missing`, and is never cited in `current` or `conflicts`.
+
+**Evidence IDs** are the first 6 hex characters of
+`sha256(relation_id | kind | anchor | collapsed quote)`, so a regenerated
+brief citing the same words keeps the same IDs.
+
+## Proposal
+
+Signals propose (subject, meeting) candidates. They are compared at the
+section ↔ segment level and aggregated per pair.
+
+| Signal | What it compares |
+|---|---|
+| `said` | Section vectors against segment-summary vectors, nearest 5 each way |
+| `name` | The document's title (front matter, first H1, or file name with separators as spaces) and its distinctive headings, against segment summaries, keywords, the meeting's mentions and transcript turns. Token-set match, tolerating one edit in tokens of five or more letters, because transcription mangles names. Headings that occur in many documents ("Overview", "Goals") are discounted by IDF |
+| `ids` | Shared identifiers: issue keys, URLs, PR and issue numbers, file names, multi-part identifiers |
+| `topic` | A document topic equal to, or `RelatedTo` at the gate with, a segment's topic |
+
+People and time (an editor of the document attended a meeting near the
+edit) only boost ranking; they never propose on their own.
+
+**Not subjects:** transcripts that are also indexed as documents (they would
+"relate" to their own meeting), AI guideline files, documents under 400
+characters of text, paths matching `relations.exclude`. Duplicate documents
+collapse to their canonical copy.
+
+**Caps:** at most 8 meetings per changed document, 8 documents per newly
+written meeting, and 200 pairs per run. `codeeagle relations --plan` prints
+the candidate counts per signal and the estimated tokens, and writes
+nothing.
+
+## Judging
+
+One decision-model request per subject carries a document card (path,
+title, outline of up to 20 headings, up to 3 matched excerpts of 500
+characters) and up to 10 segment cards (meeting title and date, what the
+segment said, a verbatim excerpt of up to 400 characters, one decision
+quote). Each pair is one yes/no question with criteria:
+
+- **true** when the segment discusses the work, design or decision this
+  document describes, or changes or questions something in it;
+- **false** when they share vocabulary or a broad area only.
+
+Facts the judge needs are named literally in the state ("words of the
+document title found in this segment: …") rather than described, because
+the model believes what the state asserts. A request too large for the model
+is split in half and retried; four requests run at a time. A failed request
+writes no verdict, so the pair is retried on a later run, within the caps.
+
+## Briefs and grounding
+
+### Inputs
+
+At most `relations.max_brief_input_tokens` (12k): the document's matched
+sections first, then its outline, labelled D1…Dn; transcript slices for the
+latest four linked meetings (from segment start and end times, with
+timestamps and speakers), labelled M1…Mk; earlier meetings as their verified
+evidence with dates; open action items from linked meetings; and the
+previous brief's unresolved items and conflicts as hints. The language model
+writes the brief; the decision model only judges.
+
+### Output schema
+
+```json
+{
+  "headline":   {"text": "...", "cites": ["D2", "M1"]},
+  "current":    [{"text": "...", "cites": ["M1"]}],
+  "events":     [{"date": "2026-10-14", "text": "...", "cites": ["M1"]}],
+  "unresolved": [{"text": "...", "raised": "2026-10-14", "cites": ["M1"]}],
+  "conflicts":  [{"doc_says": "...", "discussion_says": "...", "date": "2026-10-14",
+                  "doc_cite": "D2", "said_cite": "M1"}],
+  "quotes":     [{"label": "M1", "quote": "verbatim words"}]
+}
+```
+
+### Grounding rules
+
+- Every cited quote is checked against **its cited snippet only**, not the
+  whole document or transcript, so a quote cannot be borrowed from
+  elsewhere. A line with no verified citation is dropped, and the count is
+  recorded as `unverified_dropped`.
+- A conflict is shown only if the decision model confirms the two cited
+  passages contradict each other (`relations.conflict_gate`, provisionally
+  0.7). Otherwise it is kept as an event, not presented as a conflict.
+- `delta` is not stored. It is derived when read, from `events` and from
+  `sections_json` changes after the reader's `--since`.
+
+### When a brief is regenerated
+
+All three must hold:
+
+1. the inputs hash changed: stage version, model, the resolved anchors, the
+   subject's hash and the accepted meetings;
+2. the subject has been unchanged for `relations.settle` (30 minutes),
+   because working-tree indexing sees every save of a file being edited;
+3. the run has not yet written `relations.max_briefs_per_run` (10) briefs.
+
+## Freshness
+
+Freshness is computed deterministically on every read, not stored, so it is
+never out of date:
+
+| Flag | Meaning |
+|---|---|
+| `doc_changed_after_discussion` | The document changed after the last linked meeting; nobody has discussed the new version |
+| `discussed_after_doc_change` | Meetings discussed it after its last change; the document may not reflect them |
+| `brief_pending` | Inputs changed and the brief has not been regenerated yet |
+| `doc_differs_on_branch` | The current branch's copy differs from the one the brief was written from |
+| `doc_missing` | The subject no longer exists |
+| `quote_gone` | A cited section changed, so a cited quote may no longer be there |
+| `source_missing` | An evidence anchor no longer resolves |
+
+Briefs are written against the default branch (or the working tree of a
+non-git project). A feature branch's difference is a flag, not a reason to
+regenerate on every branch switch.
+
+## Pipeline and bounds
+
+- **Sync**: after queue enrichment (so generic documents have summaries and
+  topics), on the default branch or a non-git project: propose for changed
+  subjects, judge, refresh affected relations.
+- **Meetings**: a `transcript.MeetingObserver` hook on the meeting writer,
+  beside the topic relater, runs for each meeting written, including under
+  `meetings watch`. Failures are logged and never fail the meeting write.
+- **Worker**: unchanged. It already runs `sync` and `meetings sync`, and
+  relations run inside them.
+- **Repair and bulk**: `codeeagle relations [--plan|--dry-run] [--doc PATH]
+  [--meeting ID] [--limit N] [--briefs-only] [--reset]`.
+
+Every run prints one cost line: candidates proposed, judged, accepted;
+decision-model requests and tokens; briefs written and their tokens; and how
+many were cut by caps. With no decision-model key, nothing is proposed: a
+relation is never created on cosine similarity alone.
+
+## Agent verbs
+
+Three verbs, as CLI commands and MCP tools. Output is compact text by
+default and `--json` on request; every line carries an ID that the next verb
+accepts.
+
+### `find <words>`
+
+Hybrid search (vector, keyword, centrality) over documents, meetings,
+segments and relations. Hits fold up to their subject (a section to its
+document, a document to its relation). At most 8 lines:
+
+```
+3fa9c2 doc docs/specs/retry-policy.md: retries capped at 5 with jitter (4 mtgs, last 2026-10-14) !doc_changed_after_discussion
+81d0e4 mtg 2026-10-14 Platform sync: retry budget and backoff
+```
+
+### `brief <id|words> [--since T] [--budget N] [--json]`
+
+Words resolve through `find`; a clear winner is briefed, otherwise the
+candidates are returned, in the same call. Default budget 400 tokens,
+maximum 2000. A sample (fictitious content), about 170 tokens:
+
+```
+docs/specs/retry-policy.md · 4 meetings (last 2026-10-14) · @r7
+retries capped at 5 with jitter; spec still says 3 [e1a2b3]
+current:
+- cap is 5 retries, exponential backoff with full jitter [9c4d10]
+- idempotency keys required on all write calls [77e0f2]
+conflicts:
+- spec §Limits says 3 retries; 2026-10-14 meeting agreed 5 [e1a2b3]
+unresolved:
+- who owns the retry-budget dashboard (raised 2026-10-14) [b51a09]
+delta since 2026-10-07:
+- 2026-10-14 cap raised from 3 to 5 after the load test [9c4d10]
+fresh: discussed_after_doc_change
+expand: show 9c4d10 · brief 3fa9c2 --since @r7
+```
+
+Order: header, headline, current, conflicts, unresolved, delta, freshness,
+expand hints. Under a tight budget, lines are dropped in this order: delta,
+unresolved beyond two, current beyond three, conflicts beyond two. The
+header, headline and freshness are never dropped. With `--since`, delta
+moves up to follow the headline. `--since` takes a date, an RFC 3339 time, a
+duration (`7d`) or the `@rN` revision printed in the header.
+
+### `show <id-prefix> [--from N]`
+
+Expands an evidence ID or a node ID prefix (at least 4 hex characters). An
+ambiguous prefix lists up to ten matches. A `doc` evidence shows its section
+from disk, at most 60 lines or 2,500 characters, continuing with `--from`,
+and says if the section changed since the brief. A `said` evidence shows the
+transcript turns within ±15 s of the anchor, at most 1,500 characters. Never
+a whole file.
+
+### MCP
+
+Three tools with short descriptions (every tool definition is sent with
+every request, so fewer tools is itself a saving). The vector index loads
+once, lazily. A long-lived MCP server holds a read-only snapshot, so the
+store is reopened when the database's manifest changes; otherwise briefs
+refreshed by the worker would stay invisible for the session.
+`mcp.tools: verbs` exposes only the three verbs.
+
+Token estimates use bytes / 3.5 until calibrated against measured usage.
+
+## Configuration
+
+```yaml
+relations:
+  # enabled: false            # unset = on when transcripts.jev_api_key is set
+  gate: 0.6                   # provisional until recalibrated (Measurement)
+  conflict_gate: 0.7
+  max_pairs_per_run: 200
+  max_candidates_per_subject: 8
+  max_candidates_per_meeting: 8
+  max_briefs_per_run: 10
+  max_brief_input_tokens: 12000
+  settle: 30m
+  # provider: baseten         # unset = transcripts.provider
+  # model: ...                # unset = transcripts.model
+  exclude: []
+
+docs:
+  markdown_sections: true     # false restores heading-only sections
+
+vector:
+  backfill_limit: 2000
+
+mcp:
+  tools: all                  # all | verbs
+```
+
+## Measurement
+
+All data stays outside the repository; tests that use it are gated on
+environment variables (`RELATION_MEASURE`, `RELATION_MEASURE_OUT`,
+`RELATION_BENCH_DIR`).
+
+**Corpus**: an experiment instance with its own index: transcripts imported
+from a copy of the home graph's meetings scope (never the live database),
+tech specs copied into a scratch folder, and personal files in the shape an
+agent's workspace keeps (memories with front matter, per-source world and
+journal files, digests and open loops).
+
+**Labelled set**: about 200 stratified candidate pairs exported by
+`relations --plan --sample-out`, labelled by a person.
+
+**Metrics**:
+
+- proposal recall per signal and combined, at the caps;
+- judge AUC, and precision and recall at the gate (target precision ≥ 0.95);
+- grounding: the share of brief lines supported by their cited quote,
+  checked by a person (target ≥ 95%);
+- **stale shown as current**: a `current` line contradicted by later
+  evidence with no freshness flag (target 0);
+- conflict precision.
+
+**Tokens to answer**: about 20 real questions with reference answers, run
+headless by an agent in four arms (file reading and search only; the
+existing MCP tools; the three verbs only; everything), three repetitions
+each, recording input tokens (including cache reads and writes), output
+tokens, turns, cost and wall time. Answers are graded blind (arm labels
+removed, order shuffled) for correctness, staleness and citation validity.
+Target: 5–10× fewer tokens than file reading at equal or better accuracy.
+Dated results go in this document and decide the `mcp.tools` default.
+
+## Deferred
+
+- Document ↔ document relations (an issue in a tracker export and a spec).
+- Code endpoints: spec ↔ code ↔ meeting, through existing `Documents` and
+  `Mentions` edges.
+- Verbatim text for non-markdown documents.
+- Rename detection by content hash, so a moved document keeps its relation.
+- Document deltas from git history.
+- The people-and-time proposer.
+- Serving a hosted personal-file store.
+
+## Implementation sequence
+
+| Milestone | Delivers |
+|---|---|
+| M1 | Markdown section text, duplicate-heading IDs, backfill, incremental vectors, store view and prefix lookup |
+| M2 | Hybrid search extracted from `rag` into a reusable function |
+| M3 | Relation schema, proposal signals, `relations --plan` (read-only) |
+| M4 | Judging, verdict ledger, gate calibration |
+| M5 | Brief writer, grounding, freshness |
+| M6 | Sync and meetings hooks, configuration, cost line |
+| M7 | `find`, `brief`, `show` as CLI and MCP tools |
+| M8 | Measurement report |
