@@ -147,9 +147,7 @@ func LoadSubjects(ctx context.Context, store graph.Store, keep SubjectFilter) ([
 		if s.TextLen < minSubjectText {
 			continue
 		}
-		// GetEdges returns edges in both directions; only a document that is
-		// itself a copy of another is skipped, not the original it copies.
-		if len(outgoing(ctx, store, s.RootID, graph.EdgeDuplicateOf)) > 0 {
+		if copiesAnotherFile(ctx, store, s) {
 			continue
 		}
 		if s.Title == "" {
@@ -252,6 +250,19 @@ func LoadMeetings(ctx context.Context, store graph.Store) (map[string]*Meeting, 
 		sort.Slice(m.Segments, func(i, j int) bool { return m.Segments[i].Start < m.Segments[j].Start })
 	}
 	return meetings, nil
+}
+
+// copiesAnotherFile reports whether the document is a duplicate of another
+// file. GetEdges returns edges in both directions, so only outgoing ones
+// count, and an edge into the document's own file does not: an earlier
+// linker marked a markdown file a duplicate of its own section.
+func copiesAnotherFile(ctx context.Context, store graph.Store, s *Subject) bool {
+	for _, target := range outgoing(ctx, store, s.RootID, graph.EdgeDuplicateOf) {
+		if n, err := store.GetNode(ctx, target); err == nil && n.FilePath != s.Path {
+			return true
+		}
+	}
+	return false
 }
 
 // outgoing returns the targets of a node's outgoing edges of one type.
