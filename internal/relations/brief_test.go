@@ -136,3 +136,19 @@ func TestRenderSaysWhatTheGraphKnows(t *testing.T) {
 		t.Errorf("a document with no confirmed meeting reads as never discussed:\n%s", out)
 	}
 }
+
+// TestRenderShowsTypeStatusAndParts covers what a brief says about a
+// document's kind: its type and stated status in the header, and its
+// type-specific parts under their own names.
+func TestRenderShowsTypeStatusAndParts(t *testing.T) {
+	rel, meetings := renderFixture()
+	rel.Brief.Parts = []Part{{Part: "root_cause", Text: "a blind Redis scan per webhook", Cites: []string{"aaa111"}}}
+	subj := &Subject{Path: "docs/outage-postmortem.md", Preamble: "**Status:** Final, 2026-06-20.",
+		Sections: sections("Impact", "Root cause", "Timeline")}
+	out := Render(rel, RenderOptions{Budget: MaxBriefBudget, Meetings: meetings, Subject: subj})
+	for _, want := range []string{" · incident · Final, 2026-06-20", "root cause:\n- a blind Redis scan per webhook [aaa111]"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("brief lacks %q:\n%s", want, out)
+		}
+	}
+}

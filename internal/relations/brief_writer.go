@@ -18,7 +18,7 @@ import (
 
 // BriefVersion is bumped when what a brief is written from, or how, changes,
 // so existing briefs are written again.
-const BriefVersion = 6
+const BriefVersion = 7
 
 // BriefOptions bound brief writing.
 type BriefOptions struct {
@@ -132,6 +132,19 @@ func (w *BriefWriter) Update(ctx context.Context, rel *Relation, subj *Subject, 
 	}
 
 	brief, evidence, dropped, unverified := ground(out, snips, RelationID(rel.SubjectPath), w.speakers)
+	// Parts are kept only under the names the document's type allows.
+	asset, _ := ClassifyAsset(subj)
+	allowed := make(map[string]bool)
+	for _, name := range assetParts[asset] {
+		allowed[name] = true
+	}
+	kept := brief.Parts[:0]
+	for _, pt := range brief.Parts {
+		if allowed[pt.Part] {
+			kept = append(kept, pt)
+		}
+	}
+	brief.Parts = kept
 	rep.Dropped = dropped
 	rep.Unverified = unverified
 	if brief.Headline.Text == "" {
@@ -309,6 +322,7 @@ Write:
 - conflicts: only where the document says one thing and a later meeting decided or stated something different. Leave it empty otherwise. Never present vocabulary differences as conflicts.
 - document: what the document itself says, in three to five lines: its status and date if it states them, what it proposes, and the choices that matter. Quote only D snippets.
 - timeline: one line for each meeting snippet (M), newest first, saying what was said or decided there about this document: who reported what, what was demoed, asked, agreed or deferred. Every meeting the snippets show gets its line.
+- parts: the parts the document's type calls for, named as the prompt allows, several lines per part where the snippets support them.
 
 Rules:
 - Every line carries its support: one or more entries, each a snippet label and words copied exactly from that snippet. Copy, do not paraphrase or tidy: quotes are checked character for character against the snippet named beside them, and a line none of whose quotes check out is removed. A conflict's doc support must quote a D snippet and its said support a meeting snippet.
@@ -364,6 +378,11 @@ type briefReply struct {
 		Text    string    `json:"text"`
 		Support []support `json:"support"`
 	} `json:"timeline"`
+	Parts []struct {
+		Part    string    `json:"part"`
+		Text    string    `json:"text"`
+		Support []support `json:"support"`
+	} `json:"parts"`
 }
 
 var briefSchema = func() *llm.JSONSchema {
@@ -384,13 +403,25 @@ var briefSchema = func() *llm.JSONSchema {
 			})},
 			"document": map[string]any{"type": "array", "items": line},
 			"timeline": map[string]any{"type": "array", "items": llmjson.Object(map[string]any{"date": str, "text": str, "support": sups})},
+			"parts":    map[string]any{"type": "array", "items": llmjson.Object(map[string]any{"part": str, "text": str, "support": sups})},
 		}),
 	}
 }()
 
 func (w *BriefWriter) userPrompt(rel *Relation, subj *Subject, snips []*snippet) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Document: %s (%s)\n\n", subj.Title, subj.Path)
+	fmt.Fprintf(&b, "Document: %s (%s)\n", subj.Title, subj.Path)
+	asset, _ := ClassifyAsset(subj)
+	fmt.Fprintf(&b, "Type: %s.", asset)
+	if guide := assetGuide[asset]; guide != "" {
+		fmt.Fprintf(&b, " %s The allowed part names are: %s.", guide, strings.Join(assetParts[asset], ", "))
+	} else {
+		b.WriteString(" Leave parts empty.")
+	}
+	if status, date := DocStatus(subj); status != "" || date != "" {
+		fmt.Fprintf(&b, "\nThe document states its status as %q and its date as %q.", status, date)
+	}
+	b.WriteString("\n\n")
 	for _, s := range snips {
 		fmt.Fprintf(&b, "<%s>\n%s\n</%s>\n\n", s.Label, s.Text, s.Label)
 	}
@@ -511,6 +542,11 @@ func ground(r briefReply, snips []*snippet, relID string, speakers SpeakerNamer)
 	for _, e := range r.Timeline {
 		if ids := cite(e.Text, e.Support); len(ids) > 0 {
 			b.Timeline = append(b.Timeline, Event{Date: e.Date, Text: e.Text, Cites: ids})
+		}
+	}
+	for _, pt := range r.Parts {
+		if ids := cite(pt.Text, pt.Support); len(ids) > 0 {
+			b.Parts = append(b.Parts, Part{Part: strings.ToLower(strings.TrimSpace(pt.Part)), Text: pt.Text, Cites: ids})
 		}
 	}
 	// A headline that did not check out is replaced by the first current

@@ -89,7 +89,19 @@ func Render(rel *Relation, o RenderOptions) string {
 			last = m.Date
 		}
 	}
-	header := fmt.Sprintf("%s · %s %s", rel.SubjectPath, plural(len(accepted), "meeting"), lastSeen(last))
+	header := rel.SubjectPath
+	if o.Subject != nil {
+		if asset, _ := ClassifyAsset(o.Subject); asset != AssetOther {
+			header += " · " + string(asset)
+		}
+		if status, date := DocStatus(o.Subject); status != "" {
+			header += " · " + clip(status, 60)
+			if date != "" && !strings.Contains(status, date) {
+				header += " (" + date + ")"
+			}
+		}
+	}
+	header += fmt.Sprintf(" · %s %s", plural(len(accepted), "meeting"), lastSeen(last))
 	if rel.Revision > 0 {
 		header += fmt.Sprintf(" · @r%d", rel.Revision)
 	}
@@ -160,6 +172,23 @@ func Render(rel *Relation, o RenderOptions) string {
 	points := briefPart{title: "the document says:", keep: 3}
 	for _, l := range b.Points {
 		points.lines = append(points.lines, "- "+l.Text+cites(l.Cites))
+	}
+	// The parts a document of its type has, each under its own name, in
+	// the order the type lists them.
+	partsPart := briefPart{keep: 4}
+	var order []string
+	byPart := make(map[string][]Part)
+	for _, pt := range b.Parts {
+		if _, ok := byPart[pt.Part]; !ok {
+			order = append(order, pt.Part)
+		}
+		byPart[pt.Part] = append(byPart[pt.Part], pt)
+	}
+	for _, name := range order {
+		partsPart.lines = append(partsPart.lines, strings.ReplaceAll(name, "_", " ")+":")
+		for _, pt := range byPart[name] {
+			partsPart.lines = append(partsPart.lines, "- "+pt.Text+cites(pt.Cites))
+		}
 	}
 	// With a timeline, each meeting is a line of what was said there; the
 	// meetings it does not cover are still listed by title.
@@ -253,9 +282,9 @@ func Render(rel *Relation, o RenderOptions) string {
 	expand += fmt.Sprintf("brief %s --since @r%d", ShortID(RelationID(rel.SubjectPath)), rel.Revision)
 	tail = append(tail, expand)
 
-	parts := []*briefPart{&points, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &delta}
+	parts := []*briefPart{&points, &partsPart, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &delta}
 	if !o.Since.IsZero() {
-		parts = []*briefPart{&delta, &points, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed}
+		parts = []*briefPart{&delta, &points, &partsPart, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed}
 	}
 	render := func() string {
 		out := []string{header, headline}
@@ -276,8 +305,8 @@ func Render(rel *Relation, o RenderOptions) string {
 	for _, trim := range []struct {
 		p    *briefPart
 		keep int
-	}{{&delta, 0}, {&unconfirmed, 2}, {&unresolved, 2}, {&meetingsPart, meetingsPart.keep}, {&points, 3}, {&current, 3},
-		{&conflicts, 2}, {&unresolved, 0}, {&unconfirmed, 0}, {&meetingsPart, 3}, {&points, 1}, {&current, 1}} {
+	}{{&delta, 0}, {&unconfirmed, 2}, {&unresolved, 2}, {&meetingsPart, meetingsPart.keep}, {&partsPart, 6}, {&points, 3}, {&current, 3},
+		{&conflicts, 2}, {&unresolved, 0}, {&unconfirmed, 0}, {&meetingsPart, 3}, {&partsPart, 3}, {&points, 1}, {&current, 1}} {
 		if EstimateTokens(render()) <= o.Budget {
 			break
 		}
@@ -348,6 +377,9 @@ func allCites(b *Brief) []string {
 	}
 	for _, e := range b.Timeline {
 		add(e.Cites)
+	}
+	for _, pt := range b.Parts {
+		add(pt.Cites)
 	}
 	return out
 }

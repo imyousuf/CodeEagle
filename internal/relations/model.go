@@ -169,12 +169,22 @@ type Brief struct {
 	// Timeline has a line per meeting, newest first: what was said or
 	// decided there about the document.
 	Timeline []Event `json:"timeline,omitempty"`
+	// Parts are what a document of its type has besides the common parts:
+	// an incident's impact and root cause, a decision record's context.
+	Parts []Part `json:"parts,omitempty"`
 	// Dropped counts lines the writer produced whose citations did not
 	// check out, so a brief that lost most of its lines says so.
 	Dropped int `json:"unverified_dropped,omitempty"`
 }
 
 // Line is a statement and the evidence it cites.
+// Part is one line of a type-specific part of a brief.
+type Part struct {
+	Part  string   `json:"part"`
+	Text  string   `json:"text"`
+	Cites []string `json:"cites"`
+}
+
 type Line struct {
 	Text  string   `json:"text"`
 	Cites []string `json:"cites"`
