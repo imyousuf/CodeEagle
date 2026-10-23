@@ -167,3 +167,36 @@ func TestAllBriefsJSONIsOneLinePerBrief(t *testing.T) {
 		t.Errorf("export = %q", out.String())
 	}
 }
+
+// TestBriefTakesSeveralIDs covers briefing several of find's results in one
+// call, which saves the agent a turn for each.
+func TestBriefTakesSeveralIDs(t *testing.T) {
+	cfg := &config.Config{Graph: config.GraphConfig{DBPath: t.TempDir()}}
+	ctx := context.Background()
+	w, _, err := openBranchStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"docs/a.md", "docs/b.md"} {
+		rel := relations.New(path)
+		rel.Brief = &relations.Brief{Headline: relations.Line{Text: "about " + path}}
+		node, err := rel.Node()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := w.View(embedded.RelationScope, []string{embedded.RelationScope}).AddNode(ctx, node); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.Close()
+	v := newVerbs(cfg)
+	defer v.Close()
+	a, b := relations.ShortID(relations.RelationID("docs/a.md")), relations.ShortID(relations.RelationID("docs/b.md"))
+	out, err := v.Brief(ctx, a+", "+b, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "about docs/a.md") || !strings.Contains(out, "about docs/b.md") {
+		t.Errorf("brief of two IDs = %q", out)
+	}
+}

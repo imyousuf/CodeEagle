@@ -57,7 +57,7 @@ rests on; show expands one.
 Give an ID from find, or words. Words that clearly name one document are
 briefed; words that match several list them instead.
 
---budget caps the output in estimated tokens (default 800, at most 2000);
+--budget caps the output in estimated tokens (default 1500, at most 2000);
 lines are dropped in a fixed order to fit. --since adds what changed after a
 date, a time, a duration (7d) or a revision printed in the header (@r3), and
 puts it first.
@@ -165,8 +165,8 @@ func verbTools(v *verbs) []agents.Tool {
 			name: "brief",
 			desc: "Where a document stands (headline, what holds now, conflicts, open items, freshness; lines cite evidence IDs), or a meeting's summary, decisions, topics and follow-ups.",
 			params: map[string]any{
-				"target": map[string]any{"type": "string", "description": "An ID from find, or words naming the document."},
-				"budget": map[string]any{"type": "integer", "description": "Most tokens to return (default 800, max 2000)."},
+				"target": map[string]any{"type": "string", "description": "An ID from find, several IDs separated by commas to brief them in one call, or words naming the document."},
+				"budget": map[string]any{"type": "integer", "description": "Most tokens to return (default 1500, max 2000)."},
 				"since":  map[string]any{"type": "string", "description": "Also what changed after: a date, 7d, or @rN from a previous brief."},
 			},
 			required: []string{"target"},
@@ -228,4 +228,4 @@ func num(a map[string]any, key string) int {
 // turn resends the whole conversation, so an answer's cost is mostly its
 // turns: agents that probed with show until they ran out of turns spent the
 // most and answered worst.
-const verbInstructions = `To answer a question about documents and the meetings that discussed them: call find with the subject, then brief on the best ID. A brief already gathers what the document says, every meeting confirmed to discuss it with dates, what changed, what is open, conflicts, and the closest unconfirmed meetings. Answer from it, citing its dates and IDs. Call show only to check one specific claim or read one section, not to page through transcripts. A meeting that is not confirmed may still be relevant: say so rather than claiming no meeting discussed something.`
+const verbInstructions = `To answer a question about documents and the meetings that discussed them: call find with the subject, then brief on the best ID, or on several IDs at once separated by commas. A brief already gathers what the document says, every meeting confirmed to discuss it with dates, what changed, what is open, conflicts, and the closest unconfirmed meetings. Answer from it, citing its dates and IDs. Call show only to check one specific claim or read one section, not to page through transcripts. A meeting that is not confirmed may still be relevant: say so rather than claiming no meeting discussed something.`

@@ -352,7 +352,7 @@ func readLines(path string, first, last int) []string {
 // Bounds on a meeting's brief.
 const (
 	maxMeetingSummary   = 500
-	maxPartSummary      = 180
+	maxPartSummary      = 350
 	maxMeetingQuote     = 200
 	maxTopicsInBrief    = 12
 	maxDecisionsInBrief = 8

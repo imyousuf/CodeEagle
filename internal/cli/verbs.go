@@ -325,7 +325,7 @@ const clearMargin = 0.05
 // document or meeting, or words that clearly name one. When words match
 // several, it lists them instead, in the same call.
 func (v *verbs) Brief(ctx context.Context, arg string, budget int, since string) (string, error) {
-	return v.brief(ctx, arg, budget, func(lib *relations.Library, rel *relations.Relation) (string, error) {
+	return v.brief(ctx, arg, budget, func(lib *relations.Library, rel *relations.Relation, budget int) (string, error) {
 		return v.renderBrief(lib, rel, budget, since)
 	})
 }
@@ -335,7 +335,9 @@ func (v *verbs) Brief(ctx context.Context, arg string, budget int, since string)
 // the document, and its freshness. Words that match several things, or a
 // meeting, still answer in text.
 func (v *verbs) BriefJSON(ctx context.Context, arg string) (string, error) {
-	return v.brief(ctx, arg, relations.DefaultBriefBudget, briefJSON)
+	return v.brief(ctx, arg, relations.DefaultBriefBudget, func(lib *relations.Library, rel *relations.Relation, _ int) (string, error) {
+		return briefJSON(lib, rel)
+	})
 }
 
 // AllBriefsJSON prints every relation that has a brief, one JSON object per
@@ -369,7 +371,28 @@ func (v *verbs) AllBriefsJSON(ctx context.Context, w io.Writer) error {
 }
 
 // renderFunc turns a relation into what brief prints.
-type renderFunc func(lib *relations.Library, rel *relations.Relation) (string, error)
+type renderFunc func(lib *relations.Library, rel *relations.Relation, budget int) (string, error)
+
+// minMultiBudget is the least each brief gets when several are asked for at
+// once.
+const minMultiBudget = 600
+
+// multipleIDs returns the IDs when arg names several, separated by commas or
+// spaces, and nothing otherwise. Agents brief several of find's results; one
+// call for all of them saves a turn for each, and every turn resends the
+// conversation.
+func multipleIDs(arg string) []string {
+	ids := strings.FieldsFunc(arg, func(r rune) bool { return r == ',' || r == ' ' })
+	if len(ids) < 2 {
+		return nil
+	}
+	for _, id := range ids {
+		if !hexPrefix.MatchString(id) {
+			return nil
+		}
+	}
+	return ids
+}
 
 func (v *verbs) brief(ctx context.Context, arg string, budget int, render renderFunc) (string, error) {
 	lib, done, err := v.begin(ctx)
@@ -378,6 +401,21 @@ func (v *verbs) brief(ctx context.Context, arg string, budget int, render render
 	}
 	defer done()
 	arg = strings.TrimSpace(arg)
+	if ids := multipleIDs(arg); ids != nil {
+		per := max(budget/len(ids), minMultiBudget)
+		var outs []string
+		for _, id := range ids {
+			out, ok, err := v.briefByID(ctx, lib, id, per, render)
+			if err != nil {
+				return "", err
+			}
+			if !ok {
+				out = "nothing has an ID starting " + id
+			}
+			outs = append(outs, out)
+		}
+		return strings.Join(outs, "\n\n---\n\n"), nil
+	}
 	if hexPrefix.MatchString(arg) {
 		if out, ok, err := v.briefByID(ctx, lib, arg, budget, render); ok || err != nil {
 			return out, err
@@ -394,7 +432,7 @@ func (v *verbs) brief(ctx context.Context, arg string, budget int, render render
 	if len(fs) == 1 || top.score-fs[1].score >= clearMargin {
 		switch {
 		case top.rel != nil:
-			return render(lib, top.rel)
+			return render(lib, top.rel, budget)
 		case top.m != nil:
 			return lib.MeetingBrief(ctx, top.m, budget), nil
 		}
@@ -418,7 +456,7 @@ func (v *verbs) renderBrief(lib *relations.Library, rel *relations.Relation, bud
 // anything.
 func (v *verbs) briefByID(ctx context.Context, lib *relations.Library, prefix string, budget int, render renderFunc) (string, bool, error) {
 	if rel := lib.RelationByID(prefix); rel != nil {
-		out, err := render(lib, rel)
+		out, err := render(lib, rel, budget)
 		return out, true, err
 	}
 	if v.store == nil {
@@ -435,7 +473,7 @@ func (v *verbs) briefByID(ctx context.Context, lib *relations.Library, prefix st
 	switch n.Type {
 	case graph.NodeDocument, graph.NodeAIGuideline:
 		if rel := lib.Relations[n.FilePath]; rel != nil {
-			out, err := render(lib, rel)
+			out, err := render(lib, rel, budget)
 			return out, true, err
 		}
 		if subj := lib.Subjects[n.FilePath]; subj != nil {
