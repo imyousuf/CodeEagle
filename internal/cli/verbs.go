@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -61,6 +62,10 @@ func (v *verbs) Close() {
 
 // dbStamp is the newest modification time of any file in the database
 // directory: a write anywhere in it, flushed or not, moves it.
+// librarySnapshotFile is the library snapshot, in the configuration
+// directory beside the databases.
+const librarySnapshotFile = "library.snap"
+
 func (v *verbs) dbStamp() time.Time {
 	dir := v.cfg.ResolveDBPath(dbPath)
 	entries, err := os.ReadDir(dir)
@@ -108,10 +113,22 @@ func (v *verbs) begin(ctx context.Context) (*relations.Library, func(), error) {
 	}
 	if stamp := v.dbStamp(); v.lib == nil || stamp.After(v.stamp) {
 		roots := repoPaths(v.cfg)
-		lib, err := relations.LoadLibrary(ctx, store, func(p string) string { return indexer.ResolveAbsPath(p, roots) })
-		if err != nil {
-			release()
-			return nil, nil, err
+		resolve := func(p string) string { return indexer.ResolveAbsPath(p, roots) }
+		// A process that starts on an unchanged database reads the library
+		// from the snapshot the last one left, rather than every document.
+		snap := filepath.Join(v.cfg.ConfigDir, librarySnapshotFile)
+		lib, ok := relations.LoadSnapshot(snap, stamp)
+		if ok {
+			lib.Resolve = resolve
+		} else {
+			lib, err = relations.LoadLibrary(ctx, store, resolve)
+			if err != nil {
+				release()
+				return nil, nil, err
+			}
+			if v.cfg.ConfigDir != "" {
+				_ = lib.SaveSnapshot(snap, stamp)
+			}
 		}
 		v.lib, v.stamp = lib, stamp
 	}
