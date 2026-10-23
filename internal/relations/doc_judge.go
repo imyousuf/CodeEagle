@@ -261,12 +261,39 @@ func (v *DocVerdict) Decide(a, b *Subject, g DocGates) {
 			link(DocReplaces, replaces, v.PReplaces)
 		}
 	}
-	if records := direction(v.PRecords, g.Records); records >= 0 {
+	// Each might be read as an account of the other; only a document whose
+	// kind is to record things (an incident write-up, notes, a chat) is
+	// taken as the record, and when that does not tell them apart neither
+	// is.
+	records := -1
+	switch ab, ba := v.PRecords[0] >= g.Records, v.PRecords[1] >= g.Records; {
+	case ab && ba:
+		if ra, rb := recordLike(a), recordLike(b); ra != rb {
+			records = 0
+			if rb {
+				records = 1
+			}
+		}
+	case ab:
+		records = 0
+	case ba:
+		records = 1
+	}
+	if records >= 0 {
 		link(DocRecords, records, v.PRecords)
 	}
 	if len(v.Links) == 0 {
 		v.Links = append(v.Links, DocLink{Kind: DocCompanion, From: a.Path, To: b.Path, P: v.PRelated})
 	}
+}
+
+// recordLike reports whether a document's kind is to record what happened.
+func recordLike(s *Subject) bool {
+	switch asset, _ := ClassifyAsset(s); asset {
+	case AssetIncident, AssetMeetingNotes, AssetNotes, AssetChat, AssetReport:
+		return true
+	}
+	return false
 }
 
 // JudgedDoc reports, for a pair, whether a verdict exists under the same

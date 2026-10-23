@@ -233,10 +233,15 @@ func (v *verbs) findings(ctx context.Context, lib *relations.Library, query stri
 					break
 				}
 				title := n.FilePath
-				if s := lib.Subjects[n.FilePath]; s != nil && s.Title != "" {
-					title = n.FilePath + ": " + s.Title
-				}
 				root := graph.NewNodeID(string(graph.NodeDocument), n.FilePath, n.FilePath)
+				if s := lib.Subjects[n.FilePath]; s != nil {
+					// A PDF's or deck's own node is named by its file name,
+					// not its path.
+					root = s.RootID
+					if s.Title != "" {
+						title = n.FilePath + ": " + s.Title
+					}
+				}
 				key, f = "doc:"+n.FilePath, finding{line: fmt.Sprintf("%s doc %s", relations.ShortID(root), title)}
 			default:
 				m := lib.Meetings[n.Properties[graph.PropMeetingID]]

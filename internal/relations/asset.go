@@ -21,6 +21,7 @@ const (
 	AssetNotes        AssetType = "notes"
 	AssetReport       AssetType = "report"
 	AssetDeck         AssetType = "deck"
+	AssetChat         AssetType = "chat"
 	AssetReference    AssetType = "reference"
 	AssetOther        AssetType = "other"
 )
@@ -70,8 +71,12 @@ var deckFormats = map[string]bool{".pptx": true, ".odp": true}
 // whose words point nowhere in particular is "other", and its brief still
 // has every common part.
 func ClassifyAsset(s *Subject) (AssetType, string) {
-	// A slide deck is a deck whatever it is about: it argues for something
-	// in a few claims, which is what its brief must say.
+	// A chat is a chat and a slide deck a deck whatever they are about: a
+	// chat's brief follows its threads and what was agreed, a deck's the
+	// few claims it argues for.
+	if s.ChatFormat != "" {
+		return AssetChat, "format"
+	}
 	if deckFormats[strings.ToLower(path.Ext(s.Path))] {
 		return AssetDeck, "format"
 	}
@@ -163,6 +168,7 @@ var assetParts = map[AssetType][]string{
 	AssetNotes:        {"entries", "open_loops"},
 	AssetReport:       {"findings", "recommendations"},
 	AssetDeck:         {"purpose", "claims", "asks"},
+	AssetChat:         {"threads", "agreed", "open_questions"},
 	AssetReference:    {"purpose", "how_to"},
 }
 
@@ -175,6 +181,7 @@ var assetGuide = map[AssetType]string{
 	AssetNotes:        "These are working notes or a journal. In parts, give the dated entries that matter and the open loops still unresolved.",
 	AssetReport:       "This is a report or analysis. In parts, give its findings and its recommendations.",
 	AssetDeck:         "This is a slide deck. In parts, give its purpose (who it is for and what it wants of them), its main claims with the figures it gives, and its asks. Cite slides by their snippet.",
+	AssetChat:         "This is a chat log; each snippet is one day of it, headed by its date. In parts, give the threads (what each was about, when), what was agreed and by whom, and the questions left open. A suggestion nobody was shown accepting is not agreed.",
 	AssetReference:    "This is reference material. In parts, give its purpose and how it is used.",
 	AssetOther:        "",
 }

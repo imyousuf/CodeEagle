@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/imyousuf/CodeEagle/pkg/jev"
 )
 
 func TestDocDecisionsReadsDatedLines(t *testing.T) {
@@ -69,6 +71,49 @@ func TestWriterDecisionsAreCheckedAndDated(t *testing.T) {
 		if got == nil || got.Status != tt.status || got.Date != "2026-10-14" || got.DateBasis != DateMeeting {
 			t.Errorf("%s: %+v", tt.name, got)
 		}
+	}
+}
+
+// TestChatDecisionsAreDatedByTheirDay covers a decision drawn from a chat:
+// dated by the day its messages were sent, and recorded as proposed unless
+// the decision model finds it settled, like speech in a meeting.
+func TestChatDecisionsAreDatedByTheirDay(t *testing.T) {
+	subj := &Subject{Path: "chats/eng.jsonl", Title: "eng", TextOnly: true, ChatFormat: "slack", Sections: []*Section{
+		{NodeID: "c1", Heading: "2026-05-30", HeadingPath: "eng > 2026-05-30", Ordinal: 1, Position: 1, Hash: "h1",
+			Text: "09:00 Kevin: prefill stalled again overnight\n09:05 Mona: looking into the queue"},
+		{NodeID: "c2", Heading: "2026-06-01", HeadingPath: "eng > 2026-06-01", Ordinal: 1, Position: 2, Hash: "h2",
+			Text: "10:32 Kevin: let's time out prefill at 30 seconds\n10:33 Mona: agreed, shipping it today"},
+	}}
+	// A chat's newest day is read first, so it is D1.
+	reply := draft(t, map[string]any{
+		"headline": map[string]any{"text": "prefill times out at 30s", "support": []map[string]any{{"label": "D1", "quote": "time out prefill at 30 seconds"}}},
+		"current":  []any{}, "events": []any{}, "unresolved": []any{}, "conflicts": []any{}, "timeline": []any{}, "document": []any{},
+		"decisions": []map[string]any{
+			{"date": "", "text": "time out prefill at 30 seconds", "support": []map[string]any{{"label": "D1", "quote": "let's time out prefill at 30 seconds"}}},
+		},
+	})
+	for _, tt := range []struct {
+		name   string
+		asker  jev.Asker
+		status string
+	}{{"settled", conflictAsker{p: 0.9}, StatusDecided}, {"no decision model", nil, StatusProposed}} {
+		rel := New(subj.Path)
+		rel.Observe(subj, day.AddDate(0, 0, -30))
+		if _, err := newWriter(&stubLLM{reply: reply}, tt.asker, day).Update(context.Background(), rel, subj, map[string]*Meeting{}); err != nil {
+			t.Fatal(err)
+		}
+		var got *DecisionEntry
+		for i := range rel.Decisions {
+			if rel.Decisions[i].Source == "chat" {
+				got = &rel.Decisions[i]
+			}
+		}
+		if got == nil || got.Date != "2026-06-01" || got.DateBasis != DateMessage || got.Status != tt.status {
+			t.Errorf("%s: %+v", tt.name, got)
+		}
+	}
+	if asset, basis := ClassifyAsset(subj); asset != AssetChat || basis != "format" {
+		t.Errorf("chat classified as %s (%s)", asset, basis)
 	}
 }
 

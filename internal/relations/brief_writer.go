@@ -155,7 +155,7 @@ func (w *BriefWriter) Update(ctx context.Context, rel *Relation, subj *Subject, 
 		return rep, err
 	}
 
-	entries := w.ledgerEntries(ctx, rel, brief, evidence, meetings, &rep)
+	entries := w.ledgerEntries(ctx, rel, subj, brief, evidence, meetings, &rep)
 	meetingEntries, meetingEvidence := MeetingDecisions(rel, meetings)
 	docEntries, docEvidence := DocDecisions(rel, subj)
 	entries = append(append(entries, meetingEntries...), docEntries...)
@@ -229,6 +229,11 @@ func (w *BriefWriter) snippets(subj *Subject, accepted []*Verdict, meetings map[
 		}
 	}
 	secs := append([]*Section(nil), subj.Sections...)
+	// A chat's days are read newest first: its latest days say where things
+	// stand, and the budget may not reach the oldest.
+	if subj.ChatFormat != "" {
+		sort.SliceStable(secs, func(i, j int) bool { return secs[i].Position > secs[j].Position })
+	}
 	sort.SliceStable(secs, func(i, j int) bool { return linked[sectionKey(secs[i])] > linked[sectionKey(secs[j])] })
 	docBudget := w.opts.MaxInputChars * 2 / 5
 	used := 0
@@ -759,8 +764,9 @@ const (
 // on a recorded decision or the document, checked with the decision model
 // for whether it was settled. The writer called proposals decisions often
 // enough to matter when measured.
-func (w *BriefWriter) ledgerEntries(ctx context.Context, rel *Relation, b *Brief, evidence []Evidence,
+func (w *BriefWriter) ledgerEntries(ctx context.Context, rel *Relation, subj *Subject, b *Brief, evidence []Evidence,
 	meetings map[string]*Meeting, rep *BriefReport) []DecisionEntry {
+	chat := subj.ChatFormat != ""
 	byID := make(map[string]Evidence, len(evidence))
 	for _, e := range evidence {
 		byID[e.ID] = e
@@ -771,6 +777,9 @@ func (w *BriefWriter) ledgerEntries(ctx context.Context, rel *Relation, b *Brief
 	for _, d := range b.Decisions {
 		entry := DecisionEntry{ID: decisionID(relID, d.Cites), Text: d.Text, Status: StatusDecided, Source: "writer",
 			Cites: d.Cites, DateBasis: DateNone}
+		if chat {
+			entry.Source = "chat"
+		}
 		said, recorded := "", false
 		for _, c := range d.Cites {
 			e := byID[c]
@@ -788,6 +797,17 @@ func (w *BriefWriter) ledgerEntries(ctx context.Context, rel *Relation, b *Brief
 					entry.Date, entry.DateBasis = m.Date.Format("2006-01-02"), DateMeeting
 				}
 			case EvidenceDoc:
+				// A chat's section is a day, and what was said there may
+				// have been only a suggestion, like speech in a meeting.
+				if chat {
+					if said == "" {
+						said = e.Quote
+					}
+					if day := datedLineRe.FindString(e.HeadingPath); day != "" && entry.DateBasis == DateNone {
+						entry.Date, entry.DateBasis = day, DateMessage
+					}
+					continue
+				}
 				if d.Date != "" && strings.Contains(e.Quote, d.Date) && entry.DateBasis == DateNone {
 					entry.Date, entry.DateBasis = d.Date, DateStated
 				}

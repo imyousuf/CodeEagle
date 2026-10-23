@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/imyousuf/CodeEagle/internal/parser/chatlog"
 )
 
 // LangDocument is the language of non-code documents whose text is kept in
@@ -41,6 +43,38 @@ var proseExtensions = map[string]bool{
 	".docx": true, ".pptx": true, ".odt": true, ".odp": true, ".pdf": true,
 	".txt": true, ".text": true, ".rst": true, ".adoc": true, ".asciidoc": true, ".org": true,
 	".textile": true, ".creole": true, ".wiki": true, ".mediawiki": true, ".rdoc": true,
+}
+
+// PropChatFormat marks a document that is a chat log, naming the layout it
+// was read from.
+const PropChatFormat = "chat_format"
+
+// chatExtensions are the formats a chat log is looked for in: exports and
+// histories in JSON, and conversations pasted into text or a document.
+var chatExtensions = map[string]bool{
+	".json": true, ".jsonl": true, ".txt": true, ".text": true,
+	".docx": true, ".odt": true, ".pdf": true,
+}
+
+// detectChat reads a file as a chat log if it is one.
+func (p *GenericParser) detectChat(path string, class FileClass, content []byte, extractDoc func() (string, error)) (*chatlog.Log, bool) {
+	if !chatExtensions[strings.ToLower(filepath.Ext(path))] {
+		return nil, false
+	}
+	if class == FileClassDocument {
+		text, err := extractDoc()
+		if err != nil {
+			return nil, false
+		}
+		return chatlog.DetectText(path, Normalize(text))
+	}
+	return chatlog.Detect(path, content)
+}
+
+// MaySection reports whether a file may have sections: prose, or a format
+// a chat log is looked for in.
+func MaySection(path string) bool {
+	return Sectioned(path) || chatExtensions[strings.ToLower(filepath.Ext(path))]
 }
 
 // Sectioned reports whether a file's text is kept in sections.

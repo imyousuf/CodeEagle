@@ -862,6 +862,39 @@ a model's two-sentence summary that also overwrote the text. Now:
   summary. `show` and `brief` read the indexed text, since the file cannot
   be read as lines, and name the page or slide instead of line numbers.
 
+### Chat logs
+
+A conversation held in a chat tool is a record of decisions like a meeting,
+but arrives as a file. `internal/parser/chatlog` recognizes, by shape rather
+than by name:
+
+- role/content JSONL, as assistant chat histories store it, dated from the
+  file name where the messages carry no time;
+- an assistant session's JSONL, whose records wrap messages with
+  timestamps, skipping tool calls and their results;
+- a ChatGPT `conversations.json`, one thread per conversation;
+- a Slack channel's day file, and a Teams (Graph) message list;
+- a conversation pasted into text, a PDF or a word-processor file:
+  `[10:32] Kevin: ...`, `2026-06-01 10:32 Kevin: ...`, or the name-and-time
+  header lines copying from Slack or Teams leaves, with date-only lines
+  separating days.
+
+Pasted text is a chat only when message lines are at least 30% of its
+non-empty lines, it holds at least four messages, and at least two people
+speak; an application log, whose "speakers" are levels such as `INFO`, is
+not one. An email quoting a line of chat stays an email.
+
+A chat's sections are days, or a day of one thread where a log holds
+several, rendered `15:04 Speaker: text`; a day too long for one section
+continues in the next. Its type is `chat` whatever it is about, with parts
+threads, agreed and open_questions, and the writer reads its newest days
+first. A decision drawn from it is dated by the day its messages were sent
+(`date_basis: message`) and recorded as proposed unless the decision model
+finds that what was said settled it, as for speech in a meeting. When the
+decision model reads two documents as each recording the other, a chat,
+incident write-up, notes, meeting notes or report is taken as the record;
+when neither or both are, no `records` link is kept.
+
 ### Readers do not fetch credentials
 
 Configuration values may run a command, typically to read a key from the
@@ -874,7 +907,8 @@ credential they never use.
 
 - Code endpoints: spec ↔ code ↔ meeting, through existing `Documents` and
   `Mentions` edges.
-- Chat logs as subjects, sectioned by day and thread (phase 2, M9).
+- One subject per conversation in an export that holds many (a ChatGPT
+  history is one subject today, its conversations its threads).
 - Images and spreadsheets as subjects; PDF transcripts as meetings.
 - Rename detection by content hash, so a moved document keeps its relation.
 - Document deltas from git history.

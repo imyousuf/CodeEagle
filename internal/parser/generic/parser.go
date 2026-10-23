@@ -183,14 +183,24 @@ func (p *GenericParser) ParseFileWithHash(ctx context.Context, filePath string, 
 
 	// The text itself, in sections, whatever the root's summary says: the
 	// summary is for search, the sections are what can be read and quoted.
-	if (class == FileClassText || class == FileClassDocument) && Sectioned(filePath) {
-		raw := ""
-		if class == FileClassText {
-			raw = ExtractText(filePath, content)
-		} else if text, err := extractDoc(); err == nil {
-			raw = text
+	// A chat log is sectioned by day instead, whatever format holds it.
+	if class == FileClassText || class == FileClassDocument {
+		var secs []TextSection
+		if log, ok := p.detectChat(filePath, class, content, extractDoc); ok {
+			docNode.Properties[PropChatFormat] = log.Format
+			for _, sec := range log.Sections() {
+				secs = append(secs, TextSection{Heading: sec.Heading, Text: sec.Text})
+			}
+		} else if Sectioned(filePath) {
+			raw := ""
+			if class == FileClassText {
+				raw = ExtractText(filePath, content)
+			} else if text, err := extractDoc(); err == nil {
+				raw = text
+			}
+			secs = Sectionize(filePath, raw)
 		}
-		if secs := Sectionize(filePath, raw); len(secs) > 0 {
+		if len(secs) > 0 {
 			docNode.Language = LangDocument
 			docNode.Properties["sections"] = fmt.Sprintf("%d", len(secs))
 			title := strings.TrimSuffix(fileName, filepath.Ext(fileName))

@@ -18,14 +18,16 @@ type DecisionEntry struct {
 	ID string `json:"id"`
 	// Date is YYYY-MM-DD, or empty when nothing dates it. DateBasis says
 	// where it came from: stated (written beside the decision), meeting (the
-	// day of the meeting that recorded it), or undated.
+	// day of the meeting that recorded it), message (the day of the chat
+	// messages that recorded it), or undated.
 	Date      string `json:"date,omitempty"`
 	DateBasis string `json:"date_basis"`
 	Text      string `json:"text"`
 	// Status is decided, or proposed when what was said was a suggestion
 	// nobody was shown settling.
 	Status string `json:"status"`
-	// Source is doc, meeting, or writer (drawn from the brief's snippets).
+	// Source is doc, meeting, chat, or writer (drawn from the brief's
+	// snippets).
 	Source        string    `json:"source"`
 	Cites         []string  `json:"cites"`
 	FirstRecorded time.Time `json:"first_recorded"`
@@ -38,6 +40,7 @@ const (
 
 	DateStated  = "stated"
 	DateMeeting = "meeting"
+	DateMessage = "message"
 	DateNone    = "undated"
 )
 

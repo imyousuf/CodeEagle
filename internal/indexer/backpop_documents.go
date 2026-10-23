@@ -44,7 +44,7 @@ func BackpopDocumentSections(ctx context.Context, idx *Indexer, repoRoots []stri
 	byPath := make(map[string]*graph.Node)
 	for _, n := range nodes {
 		kind := n.Properties["kind"]
-		if (kind != "text" && kind != "document") || n.Name != path.Base(n.FilePath) || !generic.Sectioned(n.FilePath) {
+		if (kind != "text" && kind != "document") || n.Name != path.Base(n.FilePath) || !generic.MaySection(n.FilePath) {
 			continue
 		}
 		if n.Properties["sections"] != "" || n.FilePath <= resume {

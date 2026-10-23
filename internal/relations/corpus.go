@@ -41,6 +41,10 @@ type Subject struct {
 	// or plain text split into runs of paragraphs. Its sections are pages,
 	// slides or parts, and what is shown is the indexed text.
 	TextOnly bool
+	// ChatFormat names the layout of a chat log (an export, an assistant's
+	// history, a pasted conversation), whose sections are days; empty for
+	// any other document.
+	ChatFormat string
 }
 
 // Section is one section of a subject.
@@ -157,6 +161,7 @@ func loadSubjects(ctx context.Context, store graph.Store, keep SubjectFilter, fo
 			// not the document's words; its sections are.
 			if n.Language == documentLanguage {
 				s.TextOnly = true
+				s.ChatFormat = n.Properties[propChatFormat]
 			} else {
 				s.TextLen = len(n.DocComment)
 				s.Preamble = excerpt(n.DocComment, maxPreamble)
@@ -415,6 +420,8 @@ func outgoing(ctx context.Context, store graph.Store, id string, t graph.EdgeTyp
 const (
 	markdownLanguage = "markdown"
 	documentLanguage = "document"
+	// propChatFormat is generic.PropChatFormat.
+	propChatFormat = "chat_format"
 )
 
 // isSubjectRoot reports whether a node is a document's own node rather than

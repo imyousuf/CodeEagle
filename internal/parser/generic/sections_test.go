@@ -138,3 +138,37 @@ func TestGenericParserDeckSlides(t *testing.T) {
 		t.Errorf("slides = %q, want %q", got, want)
 	}
 }
+
+func TestGenericParserChatLog(t *testing.T) {
+	p := NewGenericParser(nil, nil, nil, 0)
+	content := `{"role":"user","content":"How should the prefill queue time out?"}
+{"role":"assistant","content":"Per request, at 30 seconds."}
+{"role":"user","content":"And alerting?"}
+{"role":"assistant","content":"Alert on queue age above a minute."}`
+	result, err := p.ParseFile("Downloads/chat_history_20250427164006.jsonl", []byte(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := result.Nodes[0]
+	if root.Properties[PropChatFormat] != "role-jsonl" || root.Language != LangDocument {
+		t.Fatalf("root = %+v", root)
+	}
+	var got []string
+	for _, n := range result.Nodes {
+		if n.Properties["kind"] == "section" {
+			got = append(got, n.Properties["heading_path"])
+		}
+	}
+	if strings.Join(got, "|") != "chat_history_20250427164006 > 2025-04-27" {
+		t.Errorf("sections = %q", got)
+	}
+
+	// JSON that is not a chat stays data.
+	data, err := p.ParseFile("config/app.json", []byte(`{"name":"app","ts":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.Nodes[0].Language == LangDocument {
+		t.Error("a config file was sectioned")
+	}
+}

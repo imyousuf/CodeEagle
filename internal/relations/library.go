@@ -750,7 +750,15 @@ func (l *Library) FinderLine(r *Relation) string {
 			last = m.Date
 		}
 	}
-	line := fmt.Sprintf("%s doc %s: %s (%s %s)", ShortID(RelationID(r.SubjectPath)), r.SubjectPath, head,
+	// The kind of document says what its brief holds: a chat's threads, a
+	// deck's claims, an incident's root cause.
+	kind := ""
+	if subj := l.Subjects[r.SubjectPath]; subj != nil {
+		if asset, _ := ClassifyAsset(subj); asset != AssetOther {
+			kind = string(asset) + " · "
+		}
+	}
+	line := fmt.Sprintf("%s doc %s: %s (%s%s %s)", ShortID(RelationID(r.SubjectPath)), r.SubjectPath, head, kind,
 		plural(len(r.Accepted()), "mtg"), strings.TrimSuffix(strings.TrimPrefix(lastSeen(last), "("), ")"))
 	if flags := append(Freshness(r, l.Subjects[r.SubjectPath], l.Meetings), l.DocFlags(r.SubjectPath)...); len(flags) > 0 {
 		line += " !" + strings.Join(flags, " !")

@@ -15,6 +15,7 @@ func TestDecideDirection(t *testing.T) {
 	old := &Subject{Path: "a.md", Preamble: "Status: draft, 2026-06-02"}
 	newer := &Subject{Path: "b.md", Preamble: "Status: draft, 2026-09-14"}
 	undated := &Subject{Path: "b.md"}
+	chat := &Subject{Path: "b.jsonl", ChatFormat: "slack"}
 	for _, tt := range []struct {
 		name string
 		b    *Subject
@@ -30,6 +31,8 @@ func TestDecideDirection(t *testing.T) {
 		{"both ways, no dates, neither", undated, DocVerdict{PRelated: 0.9, PChanges: [2]float64{0.9, 0.9}}, []string{"companion:a.md>b.md"}},
 		{"records", newer, DocVerdict{PRelated: 0.9, PRecords: [2]float64{0.1, 0.9}}, []string{"records:b.md>a.md"}},
 		{"records both ways, undated, neither", undated, DocVerdict{PRelated: 0.9, PRecords: [2]float64{0.9, 0.9}}, []string{"companion:a.md>b.md"}},
+		{"records both ways, dated specs, neither", newer, DocVerdict{PRelated: 0.9, PRecords: [2]float64{0.9, 0.9}}, []string{"companion:a.md>b.md"}},
+		{"records both ways, the chat is the record", chat, DocVerdict{PRelated: 0.9, PRecords: [2]float64{0.9, 0.9}}, []string{"records:b.jsonl>a.md"}},
 	} {
 		v := tt.v
 		v.Decide(old, tt.b, g)
