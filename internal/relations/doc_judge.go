@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -261,6 +264,15 @@ func (v *DocVerdict) Decide(a, b *Subject, g DocGates) {
 		}
 		v.Links = append(v.Links, DocLink{Kind: kind, From: from, To: to, P: p[dir]})
 	}
+	// Dated outputs of two different routines (a morning brief and an
+	// evening recap, a weekly digest and a daily log) share what they report
+	// on, but neither revises or recounts the other: seven of eight wrong
+	// changes and records links in a blind check were such pairs. Within one
+	// series, a later output can change an earlier one.
+	if datedOutput(a.Path) && datedOutput(b.Path) && path.Dir(a.Path) != path.Dir(b.Path) {
+		v.Links = append(v.Links, DocLink{Kind: DocCompanion, From: a.Path, To: b.Path, P: v.PRelated})
+		return
+	}
 	changes := direction(v.PChanges, g.Changes)
 	if changes >= 0 {
 		link(DocChanges, changes, v.PChanges)
@@ -294,6 +306,49 @@ func (v *DocVerdict) Decide(a, b *Subject, g DocGates) {
 	if len(v.Links) == 0 {
 		v.Links = append(v.Links, DocLink{Kind: DocCompanion, From: a.Path, To: b.Path, P: v.PRelated})
 	}
+}
+
+// datedName is a file named by its date, as a routine names its outputs.
+var datedName = regexp.MustCompile(`^20\d\d-\d\d-\d\d(?:[_-].*)?$`)
+
+// datedOutput reports whether a document is a dated output of a routine.
+func datedOutput(p string) bool {
+	base := path.Base(p)
+	return datedName.MatchString(strings.TrimSuffix(base, path.Ext(base)))
+}
+
+// RedecideDocs applies the gates and rules to every stored document verdict
+// again and rewrites the links and edges that follow from them, without
+// asking the decision model anything: the probabilities are kept, so a change
+// of gate or rule takes effect at no cost. It returns how many links changed.
+func RedecideDocs(ctx context.Context, store graph.Store, rels map[string]*Relation, subjects []*Subject, g DocGates) (int, error) {
+	by := make(map[string]*Subject, len(subjects))
+	for _, s := range subjects {
+		by[s.Path] = s
+	}
+	relater := NewRelater(store, nil, RelaterOptions{})
+	changed := 0
+	for p, rel := range rels {
+		touched := false
+		for other, v := range rel.DocLinks {
+			a, b := by[p], by[other]
+			if a == nil || b == nil {
+				continue
+			}
+			before := fmt.Sprint(v.Links)
+			v.Decide(a, b, g)
+			if fmt.Sprint(v.Links) != before {
+				changed++
+				touched = true
+			}
+		}
+		if touched {
+			if err := relater.Write(ctx, rel, by[p]); err != nil {
+				return changed, fmt.Errorf("store document verdicts of %s: %w", p, err)
+			}
+		}
+	}
+	return changed, nil
 }
 
 // recordLike reports whether a document's kind is to record what happened.

@@ -40,6 +40,7 @@ func newRelationsCmd() *cobra.Command {
 		limitDocs  int
 		sampleDocs string
 		measureDoc string
+		redecide   bool
 	)
 
 	cmd := &cobra.Command{
@@ -82,6 +83,9 @@ again, so the next runs pay to rebuild what was there.`,
 			if measureDoc != "" {
 				return runRelationsMeasureDocs(cmd.Context(), cmd.OutOrStdout(), cfg, measureDoc, scoredOut)
 			}
+			if redecide {
+				return runRelationsRedecideDocs(cmd.Context(), cmd.OutOrStdout(), cfg)
+			}
 			if reset {
 				return runRelationsReset(cmd.OutOrStdout(), cfg)
 			}
@@ -111,6 +115,7 @@ again, so the next runs pay to rebuild what was there.`,
 	cmd.Flags().BoolVar(&docs, "docs", false, "also propose and judge how documents relate to each other (changes, replaces, records, companion)")
 	cmd.Flags().IntVar(&limitDocs, "limit-docs", 0, "judge at most this many document pairs (default: relations.max_doc_pairs_per_run)")
 	cmd.Flags().StringVar(&sampleDocs, "sample-out-docs", "", "write a stratified sample of document pairs to label into this directory (implies --plan)")
+	cmd.Flags().BoolVar(&redecide, "redecide-docs", false, "apply the current gates and rules to stored document verdicts again, asking nothing new")
 	cmd.Flags().StringVar(&measureDoc, "measure-docs", "", "judge labelled document pairs (from --sample-out-docs) and report how the answers match")
 	// Experiments on what the judge is shown, measured with --measure.
 	cmd.Flags().IntVar(&jopts.BatchSize, "judge-batch", 0, "with --measure: pairs per decision-model request")

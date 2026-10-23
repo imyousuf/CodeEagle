@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
+	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/relations"
 )
 
@@ -198,5 +199,31 @@ func runRelationsMeasureDocs(ctx context.Context, out io.Writer, cfg *config.Con
 		}
 	}
 	fmt.Fprintf(out, "Per-pair probabilities: %s\n", scoredOut)
+	return nil
+}
+
+// runRelationsRedecideDocs applies the configured gates and the rules to the
+// stored document verdicts again, rewriting the links that follow.
+func runRelationsRedecideDocs(ctx context.Context, out io.Writer, cfg *config.Config) error {
+	base, _, err := openBranchStore(cfg)
+	if err != nil {
+		return err
+	}
+	defer base.Close()
+	reads := append(append([]string(nil), base.ReadBranches()...), embedded.MeetingScope, embedded.RelationScope)
+	view := base.View(embedded.RelationScope, reads)
+	subjects, err := relations.LoadSubjects(ctx, view, subjectFilter(cfg))
+	if err != nil {
+		return err
+	}
+	rels, err := relations.LoadRelations(ctx, view)
+	if err != nil {
+		return err
+	}
+	n, err := relations.RedecideDocs(ctx, view, rels, subjects, docGates(cfg))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Document links re-decided under the current gates: %d changed.\n", n)
 	return nil
 }

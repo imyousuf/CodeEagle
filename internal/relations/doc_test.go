@@ -173,3 +173,56 @@ func TestRecordsNeedARecordOfSomethingElse(t *testing.T) {
 		}
 	}
 }
+
+func TestDatedOutputsOfDifferentRoutinesAreCompanions(t *testing.T) {
+	brief := &Subject{Path: "jarvis/signal_triage/vt_daily_brief/2026-10-14.md"}
+	recap := &Subject{Path: "jarvis/signal_triage/vt_meeting_recap/2026-10-13.md"}
+	nextBrief := &Subject{Path: "jarvis/signal_triage/vt_daily_brief/2026-10-19.md"}
+	v := DocVerdict{PRelated: 0.95, PChanges: [2]float64{0.9, 0.1}, PRecords: [2]float64{0.9, 0.1}}
+	v.Decide(brief, recap, DefaultDocGates())
+	if len(v.Links) != 1 || v.Links[0].Kind != DocCompanion {
+		t.Errorf("two routines' dated outputs: %+v, want a companion only", v.Links)
+	}
+	v = DocVerdict{PRelated: 0.95, PChanges: [2]float64{0.1, 0.9}}
+	v.Decide(brief, nextBrief, DefaultDocGates())
+	if len(v.Links) != 1 || v.Links[0].Kind != DocChanges || v.Links[0].From != nextBrief.Path {
+		t.Errorf("a later output of the same series: %+v, want it to change the earlier", v.Links)
+	}
+}
+
+// TestRedecideDocsAppliesNewGates covers a gate change taking effect on
+// stored verdicts without asking the decision model again.
+func TestRedecideDocsAppliesNewGates(t *testing.T) {
+	store, base, _ := incrementalStores(t)
+	ctx := context.Background()
+	indexMarkdown(t, base, "docs/tracker.md", "# Tracker\n\nStatus: draft, 2026-10-01\n\nThe redesign of `retry.md`. "+longBody, nil)
+	subjects, err := LoadSubjects(ctx, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rels := map[string]*Relation{}
+	if _, err := EnsureRelations(ctx, store, subjects, rels, day); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RefreshReferences(ctx, store, subjects, rels); err != nil {
+		t.Fatal(err)
+	}
+	cands := NewDocProposer(subjects, rels, nil, DefaultDocOptions()).ForDocuments("docs/tracker.md")
+	asker := docAsker{p: map[string]float64{"related": 0.95, "changes_ba": 0.8}}
+	strict := DefaultDocGates()
+	strict.Changes = 0.9
+	if _, err := JudgeDocPairs(ctx, store, NewDocJudge(asker), cands, rels, strict, day); err != nil {
+		t.Fatal(err)
+	}
+	if links := rels["docs/retry.md"].DocLinks["docs/tracker.md"].Links; len(links) != 1 || links[0].Kind != DocCompanion {
+		t.Fatalf("under the strict gate: %+v", links)
+	}
+	n, err := RedecideDocs(ctx, store, rels, subjects, DefaultDocGates())
+	if err != nil || n != 1 {
+		t.Fatalf("re-decided %d, %v", n, err)
+	}
+	edges, _ := store.GetEdges(ctx, RelationID("docs/tracker.md"), graph.EdgeChanges)
+	if len(edges) != 1 {
+		t.Errorf("changes edges after re-deciding = %+v", edges)
+	}
+}
