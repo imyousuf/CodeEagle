@@ -93,10 +93,11 @@ type RelationsConfig struct {
 	// DocGates are the probabilities at or above which each kind of
 	// document relation is accepted; zero keeps the package default.
 	DocGates DocGatesConfig `mapstructure:"doc_gates" yaml:"doc_gates,omitempty"`
-	// AutoDocLinks also judges document pairs on every sync, for the
-	// documents that changed. Off until the gates are calibrated; the
-	// relations command judges them on request either way.
-	AutoDocLinks bool `mapstructure:"auto_doc_links" yaml:"auto_doc_links,omitempty"`
+	// AutoDocLinks judges document pairs on every sync too, for the
+	// documents that changed, within max_doc_pairs_per_run. Unset, it is on
+	// whenever relations are; false leaves document pairs to the relations
+	// command.
+	AutoDocLinks *bool `mapstructure:"auto_doc_links" yaml:"auto_doc_links,omitempty"`
 	// MaxBriefsPerRun caps the briefs one run writes.
 	MaxBriefsPerRun int `mapstructure:"max_briefs_per_run" yaml:"max_briefs_per_run,omitempty"`
 	// MaxBriefInputTokens bounds what one brief is written from.
@@ -116,6 +117,11 @@ type DocGatesConfig struct {
 	Changes  float64 `mapstructure:"changes" yaml:"changes,omitempty"`
 	Replaces float64 `mapstructure:"replaces" yaml:"replaces,omitempty"`
 	Records  float64 `mapstructure:"records" yaml:"records,omitempty"`
+}
+
+// RelationsAutoDocLinks reports whether syncs judge document pairs.
+func (c *Config) RelationsAutoDocLinks() bool {
+	return c.Relations.AutoDocLinks == nil || *c.Relations.AutoDocLinks
 }
 
 // RelationsEnabled reports whether relations are discovered automatically

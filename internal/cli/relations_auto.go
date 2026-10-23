@@ -55,7 +55,7 @@ func autoRelations(ctx context.Context, cfg *config.Config, store *embedded.Bran
 	if n := cfg.Relations.MaxBriefsPerRun; n > 0 {
 		o.MaxBriefs = n
 	}
-	if cfg.Relations.AutoDocLinks {
+	if cfg.RelationsAutoDocLinks() {
 		if asker, err := newJevAsker(cfg); err != nil {
 			warnFn("Warning: relations: document links: %v", err)
 		} else {

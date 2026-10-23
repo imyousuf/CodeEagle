@@ -830,9 +830,8 @@ report) on the recording side and one that is not on the other.
 writes a stratified sample for labelling; `--measure-docs labels.jsonl`
 reports related AUC, precision and recall per gate, and per-kind precision
 and recall with direction included. The automatic pass judges document
-pairs only with `relations.auto_doc_links: true`, off until the gates are
-calibrated on labelled pairs and a blind check of accepted links. With it on,
-each sync considers the documents whose content changed since their pairs
+pairs too, now that the gates are calibrated (below); `relations.auto_doc_links:
+false` leaves them to the relations command. Each sync considers the documents whose content changed since their pairs
 were last considered (newest first, at most 50), proposes and judges within
 the per-run cap, and marks a document considered only when none of its pairs
 was deferred or failed.
