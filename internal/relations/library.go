@@ -26,6 +26,8 @@ type Library struct {
 	// Resolve turns a graph path into a file on disk.
 	Resolve func(graphPath string) string
 	Now     func() time.Time
+
+	backrefs map[string][]string
 }
 
 // LoadLibrary reads the corpus and the relations from store. resolve turns a
@@ -69,7 +71,55 @@ func (l *Library) Brief(rel *Relation, budget int, since time.Time, sinceLabel s
 		Flags:       Freshness(rel, l.Subjects[rel.SubjectPath], l.Meetings),
 		Subject:     l.Subjects[rel.SubjectPath],
 		Unconfirmed: l.unconfirmed(rel),
+		LinksTo:     l.linkLines(refTargets(rel.Refs)),
+		LinkedFrom:  l.linkLines(l.linkedFrom(rel.SubjectPath)),
 	})
+}
+
+// maxLinkLines bounds each list of linked documents in a brief.
+const maxLinkLines = 6
+
+func refTargets(refs []Reference) []string {
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, ref.Target)
+	}
+	return out
+}
+
+// linkedFrom lists the documents that name path, from every relation's
+// references; built once per library.
+func (l *Library) linkedFrom(path string) []string {
+	if l.backrefs == nil {
+		l.backrefs = make(map[string][]string)
+		for src, rel := range l.Relations {
+			for _, ref := range rel.Refs {
+				l.backrefs[ref.Target] = append(l.backrefs[ref.Target], src)
+			}
+		}
+		for _, srcs := range l.backrefs {
+			sort.Strings(srcs)
+		}
+	}
+	return l.backrefs[path]
+}
+
+// linkLines describes linked documents one per line: path, ID and, where
+// it has one, the other document's headline.
+func (l *Library) linkLines(paths []string) []string {
+	var lines []string
+	for i, p := range paths {
+		if i >= maxLinkLines {
+			lines = append(lines, fmt.Sprintf("… %d more", len(paths)-i))
+			break
+		}
+		line := fmt.Sprintf("- %s (%s)", p, ShortID(RelationID(p)))
+		if rel := l.Relations[p]; rel != nil && rel.Brief != nil && rel.Brief.Headline.Text != "" {
+			line += ": " + clip(rel.Brief.Headline.Text, maxHeadlineInFinder)
+		}
+		lines = append(lines, line)
+	}
+	return lines
 }
 
 // unconfirmed lists the closest meetings below the gate with what was said

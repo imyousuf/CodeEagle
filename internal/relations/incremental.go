@@ -147,6 +147,9 @@ func incremental(ctx context.Context, store graph.Store, p *Proposer, subjects [
 	if _, err := EnsureRelations(ctx, store, subjects, existing, time.Now()); err != nil {
 		return rep, err
 	}
+	if _, err := RefreshReferences(ctx, store, subjects, existing); err != nil {
+		return rep, err
+	}
 	if p.HasVectors() {
 		if err := judgePending(ctx, store, p, subjects, meetings, existing, state, judge, gate, o, rep); err != nil {
 			return rep, err

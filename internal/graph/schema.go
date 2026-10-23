@@ -208,6 +208,10 @@ const (
 	// subject, carrying the decision model's probability. Only accepted
 	// verdicts get an edge; rejected ones are kept on the Relation itself.
 	EdgeDiscussedIn EdgeType = "DiscussedIn"
+	// EdgeReferences links a Relation to the Relation of a document its
+	// subject names, by a link or a written path: a fact the author wrote,
+	// resolved to the document it means.
+	EdgeReferences EdgeType = "References"
 )
 
 // MeetingNodeTypes lists the node types produced by meeting transcript indexing.

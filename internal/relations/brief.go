@@ -46,6 +46,9 @@ type RenderOptions struct {
 	// Unconfirmed, when set, are lines for the closest meetings below the
 	// gate, with what was said there; otherwise they are listed by title.
 	Unconfirmed []string
+	// LinksTo and LinkedFrom are lines for the documents the subject names
+	// and the documents that name it.
+	LinksTo, LinkedFrom []string
 }
 
 // Bounds on the parts of a brief that come from the graph rather than the
@@ -161,6 +164,15 @@ func Render(rel *Relation, o RenderOptions) string {
 		if len(unconfirmed.lines) > 0 {
 			lines = append(lines, unconfirmed.title)
 			lines = append(lines, unconfirmed.lines...)
+		}
+		for _, part := range []struct {
+			title string
+			lines []string
+		}{{"links to:", o.LinksTo}, {"linked from:", o.LinkedFrom}} {
+			if len(part.lines) > 0 {
+				lines = append(lines, part.title)
+				lines = append(lines, part.lines...)
+			}
 		}
 		if len(o.Flags) > 0 {
 			lines = append(lines, "fresh: "+strings.Join(o.Flags, ", "))
@@ -282,9 +294,11 @@ func Render(rel *Relation, o RenderOptions) string {
 	expand += fmt.Sprintf("brief %s --since @r%d", ShortID(RelationID(rel.SubjectPath)), rel.Revision)
 	tail = append(tail, expand)
 
-	parts := []*briefPart{&points, &partsPart, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &delta}
+	linksTo := briefPart{title: "links to:", keep: 3, lines: o.LinksTo}
+	linkedFrom := briefPart{title: "linked from:", keep: 3, lines: o.LinkedFrom}
+	parts := []*briefPart{&points, &partsPart, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &linksTo, &linkedFrom, &delta}
 	if !o.Since.IsZero() {
-		parts = []*briefPart{&delta, &points, &partsPart, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed}
+		parts = []*briefPart{&delta, &points, &partsPart, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &linksTo, &linkedFrom}
 	}
 	render := func() string {
 		out := []string{header, headline}
@@ -305,8 +319,9 @@ func Render(rel *Relation, o RenderOptions) string {
 	for _, trim := range []struct {
 		p    *briefPart
 		keep int
-	}{{&delta, 0}, {&unconfirmed, 2}, {&unresolved, 2}, {&meetingsPart, meetingsPart.keep}, {&partsPart, 6}, {&points, 3}, {&current, 3},
-		{&conflicts, 2}, {&unresolved, 0}, {&unconfirmed, 0}, {&meetingsPart, 3}, {&partsPart, 3}, {&points, 1}, {&current, 1}} {
+	}{{&delta, 0}, {&linkedFrom, 3}, {&linksTo, 3}, {&unconfirmed, 2}, {&unresolved, 2}, {&meetingsPart, meetingsPart.keep}, {&partsPart, 6},
+		{&points, 3}, {&current, 3}, {&conflicts, 2}, {&unresolved, 0}, {&unconfirmed, 0}, {&linkedFrom, 1}, {&linksTo, 1},
+		{&meetingsPart, 3}, {&partsPart, 3}, {&points, 1}, {&current, 1}} {
 		if EstimateTokens(render()) <= o.Budget {
 			break
 		}

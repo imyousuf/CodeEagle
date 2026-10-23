@@ -36,6 +36,7 @@ const (
 	propBriefedAt    = "briefed_at"
 	propRevision     = "revision"
 	propRevisions    = "revisions_json"
+	propRefs         = "refs_json"
 	propRelationKind = "kind"
 )
 
@@ -65,6 +66,8 @@ type Relation struct {
 	// Revision increments with every new brief, so a reader can ask what
 	// changed since the one it last saw.
 	Revision int
+	// Refs are the documents the subject names, resolved.
+	Refs []Reference
 	// Revisions records when recent revisions were written, so "since
 	// revision N" can be turned into a time.
 	Revisions []RevisionStamp
@@ -271,6 +274,7 @@ func (r *Relation) Node() (*graph.Node, error) {
 		propLinks:     r.Links,
 		propEvidence:  r.Evidence,
 		propRevisions: r.Revisions,
+		propRefs:      r.Refs,
 	} {
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -332,6 +336,9 @@ func FromNode(n *graph.Node) (*Relation, error) {
 		return nil, err
 	}
 	if err := decode(propRevisions, &r.Revisions); err != nil {
+		return nil, err
+	}
+	if err := decode(propRefs, &r.Refs); err != nil {
 		return nil, err
 	}
 	if raw := n.Properties[propBrief]; raw != "" {

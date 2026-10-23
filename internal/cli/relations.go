@@ -390,6 +390,11 @@ func runRelationsJudge(ctx context.Context, out, errOut io.Writer, cfg *config.C
 	} else if n > 0 {
 		fmt.Fprintf(out, "Created relations for %d documents not yet related to anything.\n", n)
 	}
+	if n, err := relations.RefreshReferences(ctx, store, run.subjects, run.existing); err != nil {
+		return err
+	} else if n > 0 {
+		fmt.Fprintf(out, "Resolved the documents %d documents name.\n", n)
+	}
 	if o.briefsOnly {
 		return writeRelationBriefs(ctx, out, errOut, cfg, store, run)
 	}

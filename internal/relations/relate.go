@@ -194,6 +194,9 @@ func (r *Relater) Write(ctx context.Context, rel *Relation, subj *Subject) error
 			}
 		}
 	}
+	if err := r.writeReferences(ctx, node.ID, rel); err != nil {
+		return err
+	}
 	for meetingID, v := range want {
 		if err := r.store.AddEdge(ctx, &graph.Edge{
 			ID:       graph.NewNodeID("edge", node.ID, meetingID+":"+string(graph.EdgeDiscussedIn)),
@@ -231,4 +234,69 @@ func EnsureRelations(ctx context.Context, store graph.Store, subjects []*Subject
 		created++
 	}
 	return created, nil
+}
+
+// writeReferences rewrites the References edges from a relation to the
+// relations of the documents its subject names.
+func (r *Relater) writeReferences(ctx context.Context, id string, rel *Relation) error {
+	want := make(map[string]bool, len(rel.Refs))
+	for _, ref := range rel.Refs {
+		want[RelationID(ref.Target)] = true
+	}
+	current, err := r.store.GetEdges(ctx, id, graph.EdgeReferences)
+	if err != nil {
+		return err
+	}
+	for _, e := range current {
+		if e.SourceID == id && !want[e.TargetID] {
+			if err := r.store.DeleteEdge(ctx, e.ID); err != nil {
+				return err
+			}
+		}
+	}
+	for _, ref := range rel.Refs {
+		target := RelationID(ref.Target)
+		if err := r.store.AddEdge(ctx, &graph.Edge{
+			ID:       graph.NewNodeID("edge", id, target+":"+string(graph.EdgeReferences)),
+			Type:     graph.EdgeReferences,
+			SourceID: id,
+			TargetID: target,
+			Properties: map[string]string{
+				"via":     ref.Via,
+				"section": ref.Section,
+			},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RefreshReferences resolves what each subject names and stores it on its
+// relation, writing only the relations whose references changed. It costs no
+// model call: references are facts the author wrote.
+func RefreshReferences(ctx context.Context, store graph.Store, subjects []*Subject, rels map[string]*Relation) (int, error) {
+	paths := make([]string, 0, len(subjects))
+	for _, s := range subjects {
+		paths = append(paths, s.Path)
+	}
+	resolver := NewResolver(paths)
+	relater := NewRelater(store, nil, RelaterOptions{})
+	changed := 0
+	for _, s := range subjects {
+		rel := rels[s.Path]
+		if rel == nil {
+			continue
+		}
+		refs := References(s, resolver)
+		if sameRefs(refs, rel.Refs) {
+			continue
+		}
+		rel.Refs = refs
+		if err := relater.Write(ctx, rel, s); err != nil {
+			return changed, fmt.Errorf("store references of %s: %w", s.Path, err)
+		}
+		changed++
+	}
+	return changed, nil
 }
