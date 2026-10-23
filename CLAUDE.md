@@ -137,12 +137,17 @@ codeeagle mcp serve [--tools all|verbs] # Start MCP server (stdio transport)
 
 codeeagle find <words>                  # Documents and meetings about something: one line
                                         # each, with an ID for brief or show
-codeeagle brief <id|words> [--since T] [--budget N]  # Where a document stands: a cited
-                                        # brief, what changed since T, freshness flags
+codeeagle brief <id|path|words> [--since T] [--budget N] [--json]  # Where a document
+                                        # stands: a cited brief shaped by its type, dated
+                                        # decisions, linked documents, freshness flags
 codeeagle show <id> [--from N]          # Expand a citation: the section as it is now, or
                                         # the turns around a quote; never a whole file
 codeeagle relations [--plan] [--doc P] [--meeting ID] [--limit N] [--briefs-only] [--reset]
                                         # Discover which meetings discussed which documents
+codeeagle relations --docs [--limit-docs N]   # ...and how documents relate to each other
+codeeagle relations --plan --sample-out-docs DIR | --measure-docs FILE
+                                        # Label a sample of document pairs; measure the gates
+codeeagle relations --redecide-docs     # Apply changed gates to stored verdicts, at no cost
 
 codeeagle faces scan [dirs...]         # Detect, cluster, and assign faces in images
 codeeagle faces clusters               # View face clusters
@@ -435,11 +440,28 @@ design and its measurements are in `docs/artifact-relations.md`.
 - **Similarity proposes, the decision model decides.** Four signals propose
   document <-> meeting pairs (what was said near a section in meaning, the
   title said aloud, a shared identifier, a shared topic) and Jev answers one
-  yes/no per pair. On 160 labelled pairs: AUC 0.97; at the default gate of 0.8,
-  precision 0.86 and recall about 0.7. No gate reached 0.95 precision with
-  useful recall. Pairs proposed only by a name or identifier held no related
-  pair (0 of 32), so a pair must be near in meaning to be judged. There is no
-  relation without a decision model.
+  yes/no per pair, one pair per request (batched pairs moved each other's
+  scores) over the stretch of the meeting that shares the document's words.
+  On 160 labelled pairs: AUC 0.987; at the default gate of 0.8, precision
+  0.89-0.96 and recall 0.89. There is no relation without a decision model.
+- **Every document has a brief, shaped by its type**: spec, ADR, incident,
+  meeting notes, notes, report, deck, chat, reference, decided from its path,
+  headings and format at no cost, each with its own parts (an incident's root
+  cause, a deck's claims, a chat's threads). Status and date are read from the
+  document, never written by the model.
+- **Documents link to each other**: references resolved deterministically,
+  and judged kinds (changes, replaces, records, companion), one yes/no each.
+  Calibrated on 136 pairs two blind labellers agreed on (kappa 0.86): related
+  AUC 0.90; changes precision about 0.9 at 0.75. Replaces never cleared its
+  gate, so revisions read as "changed by". A blind check of accepted links
+  found every companion right and no direction reversed.
+- **A dated decision ledger per document**, from the meetings that discussed
+  it (by the judged stretch), dated lines in its own changelog, and decisions
+  the writer finds, checked as settled or merely proposed; a chat's are dated
+  by the day they were said. Entries are kept across rewrites.
+- **PDFs, decks, word-processor files, plain text and chat logs are subjects
+  too**: their text is kept in sections (pages, slides, days), so they can be
+  quoted and related like markdown.
 - **One relation per document, not per pair**, so a brief can say "the
   document says X; the latest of four meetings decided Y". Every verdict is
   kept, rejected ones included, keyed on what each side looked like when
@@ -462,6 +484,13 @@ design and its measurements are in `docs/artifact-relations.md`.
   lock that keeps every writer out, so the MCP server opens the graph per tool
   call; a session kept open would otherwise stop the worker from ever
   refreshing a brief.
+- **A CLI call starts from a snapshot.** The verbs save the library they read,
+  marked with the database's state, and load the vector index only to search:
+  a brief by ID takes 0.27 s, from 3.4 s.
+- **A rewritten brief is embedded again.** The vector index keeps a hash of
+  the text each node was embedded from, and reconcile re-embeds what changed;
+  a graph that has had deletions is rebuilt before it is saved, because the
+  HNSW library's Delete leaves links that load back as nil.
 
 ### 5. Multi-Language Support
 
@@ -587,6 +616,9 @@ relations:                    # runs when transcripts.jev_api_key is set
   max_briefs_per_run: 10
   settle: 30m                 # a brief waits for its document to stop changing
   exclude: ["notes/private/**"]
+  # auto_doc_links: false     # leave document <-> document pairs to `relations --docs`
+  max_doc_pairs_per_run: 60
+  # doc_gates: {related: 0.85, changes: 0.75, replaces: 0.95, records: 0.85}
 
 vector:
   backfill_limit: 2000        # nodes one sync embeds while catching up
@@ -633,8 +665,9 @@ codeeagle/
 │   │   ├── chatlog/        # Chat log detection (JSONL histories, ChatGPT, Slack, Teams, pasted) and day sections
 │   │   └── manifest/       # Manifest parser (go.mod, package.json, pyproject.toml, requirements.txt)
 │   ├── faces/              # Face detection & recognition (OpenCV DNN, Caffe SSD + ONNX SFace, agglomerative clustering, KNN classification)
-│   ├── relations/          # Discovered document <-> meeting relations: proposal signals, Jev judging,
-│   │                       #   cited briefs, freshness, and the library find/brief/show read
+│   ├── relations/          # Discovered document <-> meeting and document <-> document relations:
+│   │                       #   proposal signals, Jev judging, per-type cited briefs, decision ledger,
+│   │                       #   freshness, and the library find/brief/show read
 │   ├── search/             # Hybrid ranking (vectors, keywords, centrality) shared by rag and find
 │   ├── queue/              # Async job queue with worker pool (face detection, clustering, document enrichment)
 │   ├── transcript/         # Meeting transcripts: loading, speaker identification, enrichment, graph projection
