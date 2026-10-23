@@ -19,13 +19,16 @@ import (
 type ScanState struct {
 	Subjects map[string]string `json:"subjects"`
 	Meetings map[string]string `json:"meetings"`
+	// DocPairs records, per document, the content under which its pairs
+	// with other documents were last considered.
+	DocPairs map[string]string `json:"doc_pairs,omitempty"`
 }
 
 func scanStateID() string { return graph.NewNodeID(string(graph.NodeRelationScan), "", "state") }
 
 // LoadScanState reads the scan state, empty if there is none yet.
 func LoadScanState(ctx context.Context, store graph.Store) (*ScanState, error) {
-	st := &ScanState{Subjects: map[string]string{}, Meetings: map[string]string{}}
+	st := &ScanState{Subjects: map[string]string{}, Meetings: map[string]string{}, DocPairs: map[string]string{}}
 	n, err := store.GetNode(ctx, scanStateID())
 	if err != nil || n == nil {
 		return st, nil
@@ -40,6 +43,9 @@ func LoadScanState(ctx context.Context, store graph.Store) (*ScanState, error) {
 	}
 	if st.Meetings == nil {
 		st.Meetings = map[string]string{}
+	}
+	if st.DocPairs == nil {
+		st.DocPairs = map[string]string{}
 	}
 	return st, nil
 }
@@ -66,6 +72,12 @@ type IncrementalOptions struct {
 	MaxMeetings int
 	// MaxBriefs bounds the briefs written per run.
 	MaxBriefs int
+	// DocJudge, when set, also judges pairs of documents whose content
+	// changed, within DocOptions and under DocGates. Unset, document pairs
+	// are judged only from the relations command.
+	DocJudge   *DocJudge
+	DocOptions DocOptions
+	DocGates   DocGates
 }
 
 // DefaultIncrementalOptions consider enough per run to keep up with a busy
@@ -86,9 +98,15 @@ type IncrementalReport struct {
 	Judged             RunStats
 	BriefsWritten      int
 	BriefsPending      int
-	BriefTokensIn      int
-	BriefTokensOut     int
-	Dropped            int
+	// Document pairs: documents considered and waiting, pairs judged,
+	// accepted by kind, and deferred to a later run.
+	DocsConsidered int
+	DocsWaiting    int
+	DocPairs       DocRunStats
+	DocDeferred    int
+	BriefTokensIn  int
+	BriefTokensOut int
+	Dropped        int
 	// Rewritten are the documents whose briefs were rewritten; their
 	// relations need embedding again for search to see the new text.
 	Rewritten []string
@@ -157,6 +175,11 @@ func incremental(ctx context.Context, store graph.Store, p *Proposer, subjects [
 	} else {
 		rep.NoVectors = true
 	}
+	if o.DocJudge != nil && p.HasVectors() {
+		if err := judgeDocsPending(ctx, store, p.vec, subjects, existing, state, o, rep); err != nil {
+			return rep, err
+		}
+	}
 
 	// Briefs whose inputs changed, up to the bound.
 	if writer != nil {
@@ -177,6 +200,60 @@ func incremental(ctx context.Context, store graph.Store, p *Proposer, subjects [
 		}
 	}
 	return rep, nil
+}
+
+// judgeDocsPending proposes and judges pairs for the documents whose content
+// changed since their pairs were last considered, newest first and at most
+// MaxSubjects of them. A document is marked considered only when none of its
+// pairs was deferred or failed, so a later run takes up the rest.
+func judgeDocsPending(ctx context.Context, store graph.Store, vec Vectors, subjects []*Subject,
+	existing map[string]*Relation, state *ScanState, o IncrementalOptions, rep *IncrementalReport) error {
+	var pending []*Subject
+	for _, s := range subjects {
+		if state.DocPairs[s.Path] != s.Hash {
+			pending = append(pending, s)
+		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	sort.SliceStable(pending, func(i, j int) bool { return pending[i].UpdatedAt.After(pending[j].UpdatedAt) })
+	if len(pending) > o.MaxSubjects {
+		rep.DocsWaiting = len(pending) - o.MaxSubjects
+		pending = pending[:o.MaxSubjects]
+	}
+	rep.DocsConsidered = len(pending)
+	paths := make([]string, len(pending))
+	for i, s := range pending {
+		paths[i] = s.Path
+	}
+	opts := o.DocOptions
+	if opts.MaxPairs <= 0 {
+		opts = DefaultDocOptions()
+	}
+	dp := NewDocProposer(subjects, existing, vec, opts)
+	selected, deferred := dp.SelectDocs(dp.ForDocuments(paths...), JudgedDoc(existing))
+	stats, err := JudgeDocPairs(ctx, store, o.DocJudge, selected, existing, o.DocGates, time.Now())
+	rep.DocPairs, rep.DocDeferred = stats, len(deferred)
+	if err != nil {
+		return err
+	}
+	open := make(map[string]bool)
+	for _, c := range deferred {
+		open[c.A.Path], open[c.B.Path] = true, true
+	}
+	judged := JudgedDoc(existing)
+	for _, c := range selected {
+		if !judged(c) {
+			open[c.A.Path], open[c.B.Path] = true, true
+		}
+	}
+	for _, s := range pending {
+		if !open[s.Path] {
+			state.DocPairs[s.Path] = s.Hash
+		}
+	}
+	return state.Save(ctx, store)
 }
 
 // judgePending considers what is new or changed, judges its candidates and
@@ -382,6 +459,18 @@ func (r *IncrementalReport) Summary() string {
 	}
 	if r.SubjectsWaiting > 0 || r.MeetingsWaiting > 0 {
 		out += fmt.Sprintf(" · %d documents and %d meetings wait for later runs", r.SubjectsWaiting, r.MeetingsWaiting)
+	}
+	if r.DocsConsidered > 0 {
+		dj := r.DocPairs.Judging
+		accepted := 0
+		for _, n := range r.DocPairs.Accepted {
+			accepted += n
+		}
+		out += fmt.Sprintf(" · document pairs: %d documents, %d judged, %d links (%d requests, %dk tokens)",
+			r.DocsConsidered, r.DocPairs.Judged, accepted, dj.Requests, (dj.InputTokens+999)/1000)
+		if r.DocDeferred > 0 || r.DocsWaiting > 0 {
+			out += fmt.Sprintf(", %d pairs deferred, %d documents waiting", r.DocDeferred, r.DocsWaiting)
+		}
 	}
 	return out
 }

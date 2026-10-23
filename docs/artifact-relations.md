@@ -810,9 +810,13 @@ never trimmed, and a related-documents part.
 `relations --docs --plan` lists the proposals; `--sample-out-docs DIR`
 writes a stratified sample for labelling; `--measure-docs labels.jsonl`
 reports related AUC, precision and recall per gate, and per-kind precision
-and recall with direction included. Document pairs run only from the
-`relations` command until the gates are calibrated on labelled pairs and a
-blind check of accepted links; only then do they join the automatic pass.
+and recall with direction included. The automatic pass judges document
+pairs only with `relations.auto_doc_links: true`, off until the gates are
+calibrated on labelled pairs and a blind check of accepted links. With it on,
+each sync considers the documents whose content changed since their pairs
+were last considered (newest first, at most 50), proposes and judges within
+the per-run cap, and marks a document considered only when none of its pairs
+was deferred or failed.
 
 ### A dated decision ledger
 

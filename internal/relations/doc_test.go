@@ -121,3 +121,39 @@ func TestJudgeDocPairsStoresAndLinks(t *testing.T) {
 		t.Errorf("related lines = %v", lines)
 	}
 }
+
+// TestIncrementalJudgesChangedDocumentPairs covers document pairs in the
+// automatic pass: judged once for the content they were judged under, and
+// not asked about again until a document changes.
+func TestIncrementalJudgesChangedDocumentPairs(t *testing.T) {
+	store, base, vec := incrementalStores(t)
+	ctx := context.Background()
+	indexMarkdown(t, base, "docs/tracker.md", "# Tracker\n\nStatus: draft, 2026-10-01\n\nThe redesign of `retry.md`. "+longBody, nil)
+	asker := docAsker{p: map[string]float64{"related": 0.95, "changes_ba": 0.95}}
+	run := func() *IncrementalReport {
+		t.Helper()
+		o := IncrementalOptions{DocJudge: NewDocJudge(asker), DocOptions: DefaultDocOptions(), DocGates: DefaultDocGates()}
+		rep, err := Incremental(ctx, store, vec, NewJudge(&scriptedAsker{}, spokenStub{}), nil, nil, DefaultOptions(), 0.8, o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rep
+	}
+
+	rep := run()
+	if rep.DocsConsidered != 2 || rep.DocPairs.Judged != 1 || rep.DocPairs.Accepted[DocChanges] != 1 {
+		t.Fatalf("first run: considered %d, judged %d, accepted %v", rep.DocsConsidered, rep.DocPairs.Judged, rep.DocPairs.Accepted)
+	}
+	if !strings.Contains(rep.Summary(), "document pairs: 2 documents, 1 judged, 1 links") {
+		t.Errorf("summary = %q", rep.Summary())
+	}
+	if rep = run(); rep.DocsConsidered != 0 || rep.DocPairs.Judged != 0 {
+		t.Errorf("second run considered %d documents and judged %d pairs; want none", rep.DocsConsidered, rep.DocPairs.Judged)
+	}
+
+	// An edit to one side asks about the pair again.
+	indexMarkdown(t, base, "docs/tracker.md", "# Tracker\n\nStatus: draft, 2026-10-09\n\nThe redesign of `retry.md`, revised. "+longBody, map[string]string{graph.PropContentHash: "sha256:tracker-v2"})
+	if rep = run(); rep.DocsConsidered != 1 || rep.DocPairs.Judged != 1 {
+		t.Errorf("after an edit: considered %d, judged %d; want 1 and 1", rep.DocsConsidered, rep.DocPairs.Judged)
+	}
+}

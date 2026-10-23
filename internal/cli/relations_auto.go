@@ -55,6 +55,13 @@ func autoRelations(ctx context.Context, cfg *config.Config, store *embedded.Bran
 	if n := cfg.Relations.MaxBriefsPerRun; n > 0 {
 		o.MaxBriefs = n
 	}
+	if cfg.Relations.AutoDocLinks {
+		if asker, err := newJevAsker(cfg); err != nil {
+			warnFn("Warning: relations: document links: %v", err)
+		} else {
+			o.DocJudge, o.DocOptions, o.DocGates = relations.NewDocJudge(asker), docOptions(cfg, 0), docGates(cfg)
+		}
+	}
 	rep, err := relations.Incremental(ctx, view, vec, judge, writer, subjectFilter(cfg),
 		relationOptions(cfg), cfg.Relations.Gate, o)
 	if err != nil {
@@ -66,7 +73,7 @@ func autoRelations(ctx context.Context, cfg *config.Config, store *embedded.Bran
 	if n := reembedRelations(ctx, view, vec, rep.Rewritten); n > 0 {
 		logFn("relations: re-embedded %d rewritten briefs for search", n)
 	}
-	if rep.SubjectsConsidered+rep.MeetingsConsidered+rep.BriefsWritten+rep.BriefsPending > 0 {
+	if rep.SubjectsConsidered+rep.MeetingsConsidered+rep.BriefsWritten+rep.BriefsPending+rep.DocsConsidered > 0 {
 		logFn("%s", rep.Summary())
 	}
 }

@@ -93,6 +93,10 @@ type RelationsConfig struct {
 	// DocGates are the probabilities at or above which each kind of
 	// document relation is accepted; zero keeps the package default.
 	DocGates DocGatesConfig `mapstructure:"doc_gates" yaml:"doc_gates,omitempty"`
+	// AutoDocLinks also judges document pairs on every sync, for the
+	// documents that changed. Off until the gates are calibrated; the
+	// relations command judges them on request either way.
+	AutoDocLinks bool `mapstructure:"auto_doc_links" yaml:"auto_doc_links,omitempty"`
 	// MaxBriefsPerRun caps the briefs one run writes.
 	MaxBriefsPerRun int `mapstructure:"max_briefs_per_run" yaml:"max_briefs_per_run,omitempty"`
 	// MaxBriefInputTokens bounds what one brief is written from.
