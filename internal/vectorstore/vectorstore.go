@@ -67,6 +67,9 @@ type VectorStore struct {
 	// detachedKeys lists the indexed chunk keys once the vector database
 	// has been closed by Detach.
 	detachedKeys []string
+	// deleted counts the vectors removed from the graph since it was loaded
+	// or rebuilt; a graph with deletions is rebuilt before it is saved.
+	deleted int
 }
 
 // Embedder returns the provider this store embeds with.
@@ -250,7 +253,57 @@ func (vs *VectorStore) searchLocked(queryVec []float32, k int) []hnsw.Node[strin
 		vs.idx.EfSearch = k
 		defer func() { vs.idx.EfSearch = prev }()
 	}
+	return vs.safeSearchLocked(queryVec, k)
+}
+
+// safeSearchLocked searches the graph, rebuilding it once if the walk
+// crashes on a link a Delete left behind.
+func (vs *VectorStore) safeSearchLocked(queryVec []float32, k int) (out []hnsw.Node[string]) {
+	defer func() {
+		if recover() != nil {
+			vs.rebuildLocked("")
+			out = vs.idx.Search(queryVec, k)
+		}
+	}()
 	return vs.idx.Search(queryVec, k)
+}
+
+// addLocked adds one vector, rebuilding the graph once if the Add crashes
+// on a link a Delete left behind.
+func (vs *VectorStore) addLocked(key string, vec []float32) {
+	defer func() {
+		if recover() != nil {
+			vs.rebuildLocked(key)
+			vs.idx.Add(hnsw.MakeNode(key, vec))
+		}
+	}()
+	vs.idx.Add(hnsw.MakeNode(key, vec))
+}
+
+// rebuildLocked replaces the graph with a fresh one holding the same live
+// vectors, all but skip.
+//
+// coder/hnsw v0.6.1's Delete leaves neighbour links to the nodes it removed.
+// Saved and loaded again, those links come back nil, and the next Add or
+// search that walks past one dereferences it: re-embedding rewritten briefs
+// in one run crashed the next. Lookup still finds every live vector, so a
+// clean graph is rebuilt from them without embedding anything again, and
+// keys whose chunks are gone are left out.
+func (vs *VectorStore) rebuildLocked(skip string) {
+	var keys []string
+	_ = vs.eachChunkKey(func(key string) {
+		if key != skip {
+			keys = append(keys, key)
+		}
+	})
+	fresh := newGraph()
+	for _, key := range keys {
+		if vec, ok := vs.idx.Lookup(key); ok {
+			fresh.Add(hnsw.MakeNode(key, vec))
+		}
+	}
+	vs.idx = fresh
+	vs.deleted = 0
 }
 
 // exactSearch compares the query with every indexed vector. The chunk
@@ -470,7 +523,7 @@ func (vs *VectorStore) IndexNode(ctx context.Context, node *graph.Node) error {
 		key := chunkKey(node.ID, i)
 
 		// Add to HNSW.
-		vs.idx.Add(hnsw.MakeNode(key, vec))
+		vs.addLocked(key, vec)
 
 		// Store chunk text in BadgerDB.
 		entry := ChunkEntry{
@@ -541,7 +594,7 @@ func (vs *VectorStore) indexNodes(
 		defer vs.mu.Unlock()
 		for i, c := range batch {
 			key := chunkKey(c.nodeID, c.index)
-			vs.idx.Add(hnsw.MakeNode(key, embeddings[i]))
+			vs.addLocked(key, embeddings[i])
 			entry := ChunkEntry{NodeID: c.nodeID, ChunkIndex: c.index, ChunkText: c.text}
 			if err := vs.putChunkEntry(key, entry); err != nil {
 				return fmt.Errorf("store chunk %s: %w", key, err)
@@ -719,8 +772,13 @@ func (vs *VectorStore) Load() (bool, error) {
 
 // Save persists the HNSW index to disk and metadata to BadgerDB.
 func (vs *VectorStore) Save() error {
-	vs.mu.RLock()
-	defer vs.mu.RUnlock()
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+
+	// A graph saved with links to deleted nodes loads with nil ones.
+	if vs.deleted > 0 {
+		vs.rebuildLocked("")
+	}
 
 	// Save HNSW index.
 	f, err := os.Create(vs.idxPath)
@@ -890,6 +948,7 @@ func (vs *VectorStore) removeNodeVectors(nodeID string) {
 		if !vs.idx.Delete(key) {
 			break // no more chunks for this node
 		}
+		vs.deleted++
 	}
 
 	// coder/hnsw v0.6.1 panics on the next Add once Delete has emptied the
