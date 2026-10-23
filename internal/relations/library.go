@@ -434,8 +434,11 @@ func wrapLines(lines []string, width int) []string {
 			cut := strings.LastIndexByte(ln[:width], ' ')
 			if cut <= 0 {
 				cut = width
-				for cut > 1 && !utf8.RuneStart(ln[cut]) {
+				for cut > 0 && !utf8.RuneStart(ln[cut]) {
 					cut--
+				}
+				if cut == 0 {
+					_, cut = utf8.DecodeRuneInString(ln)
 				}
 			}
 			out = append(out, ln[:cut])

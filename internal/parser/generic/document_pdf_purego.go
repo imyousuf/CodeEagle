@@ -83,7 +83,9 @@ func newPDFReader(content []byte) (r *pdf.Reader, err error) {
 // a sync for good: it is given up on, and since a goroutine cannot be
 // stopped, the one still working on it is left behind. After a few, pure Go
 // extraction stops for the rest of the process rather than leave every core
-// spinning.
+// spinning. Documents parsed in parallel can each give up on a page before
+// any sees the count reach the limit, so it can be passed by as many pages as
+// there are parsers; that is still bounded.
 const (
 	pageTimeout  = 20 * time.Second
 	maxAbandoned = 3

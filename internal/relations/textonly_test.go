@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
@@ -67,5 +68,15 @@ func TestTextOnlyDocumentIsASubject(t *testing.T) {
 
 	if asset, basis := ClassifyAsset(&Subject{Path: "decks/where-the-21-minutes-went.pptx"}); asset != AssetDeck || basis != "format" {
 		t.Errorf("deck classified as %s (%s)", asset, basis)
+	}
+}
+
+func TestWrapLinesKeepsRunesWhole(t *testing.T) {
+	for _, width := range []int{1, 2, 4, 7} {
+		for _, ln := range wrapLines([]string{"你好世界 prefill 停滞"}, width) {
+			if !utf8.ValidString(ln) {
+				t.Errorf("width %d: %q is not valid UTF-8", width, ln)
+			}
+		}
 	}
 }
