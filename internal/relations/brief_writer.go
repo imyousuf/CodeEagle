@@ -18,7 +18,7 @@ import (
 
 // BriefVersion is bumped when what a brief is written from, or how, changes,
 // so existing briefs are written again.
-const BriefVersion = 7
+const BriefVersion = 8
 
 // BriefOptions bound brief writing.
 type BriefOptions struct {
@@ -155,8 +155,29 @@ func (w *BriefWriter) Update(ctx context.Context, rel *Relation, subj *Subject, 
 		return rep, err
 	}
 
+	entries := w.ledgerEntries(ctx, rel, brief, evidence, meetings, &rep)
+	meetingEntries, meetingEvidence := MeetingDecisions(rel, meetings)
+	docEntries, docEvidence := DocDecisions(rel, subj)
+	entries = append(append(entries, meetingEntries...), docEntries...)
+	old := rel.Evidence
 	rel.Brief = brief
-	rel.Evidence = evidence
+	rel.Decisions = MergeDecisions(rel.Decisions, entries, w.now().UTC())
+	// Evidence is what this brief and the ledger cite: decisions recorded by
+	// earlier rewrites keep their quotes so show can still expand them.
+	cited := make(map[string]bool)
+	for _, d := range rel.Decisions {
+		for _, c := range d.Cites {
+			cited[c] = true
+		}
+	}
+	evidence = mergeEvidence(evidence, append(meetingEvidence, docEvidence...))
+	var keptEvidence []Evidence
+	for _, e := range old {
+		if cited[e.ID] {
+			keptEvidence = append(keptEvidence, e)
+		}
+	}
+	rel.Evidence = mergeEvidence(evidence, keptEvidence)
 	rel.BriefInputsHash = hash
 	rel.BriefModel = w.client.Model()
 	rel.BriefedAt = w.now().UTC()
@@ -323,6 +344,7 @@ Write:
 - document: what the document itself says, in three to five lines: its status and date if it states them, what it proposes, and the choices that matter. Quote only D snippets.
 - timeline: one line for each meeting snippet (M), newest first, saying what was said or decided there about this document: who reported what, what was demoed, asked, agreed or deferred. Every meeting the snippets show gets its line.
 - parts: the parts the document's type calls for, named as the prompt allows, several lines per part where the snippets support them.
+- decisions: each decision the snippets record about this document's subject, one line each, with the date it was made (YYYY-MM-DD) when the quoted words or the snippet's date give one, else empty. A decision is something settled: chosen, agreed, ruled out, reversed. Do not list proposals or open questions here.
 
 Rules:
 - Every line carries its support: one or more entries, each a snippet label and words copied exactly from that snippet. Copy, do not paraphrase or tidy: quotes are checked character for character against the snippet named beside them, and a line none of whose quotes check out is removed. A conflict's doc support must quote a D snippet and its said support a meeting snippet.
@@ -383,6 +405,11 @@ type briefReply struct {
 		Text    string    `json:"text"`
 		Support []support `json:"support"`
 	} `json:"parts"`
+	Decisions []struct {
+		Date    string    `json:"date"`
+		Text    string    `json:"text"`
+		Support []support `json:"support"`
+	} `json:"decisions"`
 }
 
 var briefSchema = func() *llm.JSONSchema {
@@ -401,9 +428,10 @@ var briefSchema = func() *llm.JSONSchema {
 			"conflicts": map[string]any{"type": "array", "items": llmjson.Object(map[string]any{
 				"doc_says": str, "discussion_says": str, "date": str, "doc": sup, "said": sup,
 			})},
-			"document": map[string]any{"type": "array", "items": line},
-			"timeline": map[string]any{"type": "array", "items": llmjson.Object(map[string]any{"date": str, "text": str, "support": sups})},
-			"parts":    map[string]any{"type": "array", "items": llmjson.Object(map[string]any{"part": str, "text": str, "support": sups})},
+			"document":  map[string]any{"type": "array", "items": line},
+			"timeline":  map[string]any{"type": "array", "items": llmjson.Object(map[string]any{"date": str, "text": str, "support": sups})},
+			"parts":     map[string]any{"type": "array", "items": llmjson.Object(map[string]any{"part": str, "text": str, "support": sups})},
+			"decisions": map[string]any{"type": "array", "items": llmjson.Object(map[string]any{"date": str, "text": str, "support": sups})},
 		}),
 	}
 }()
@@ -542,6 +570,11 @@ func ground(r briefReply, snips []*snippet, relID string, speakers SpeakerNamer)
 	for _, e := range r.Timeline {
 		if ids := cite(e.Text, e.Support); len(ids) > 0 {
 			b.Timeline = append(b.Timeline, Event{Date: e.Date, Text: e.Text, Cites: ids})
+		}
+	}
+	for _, d := range r.Decisions {
+		if ids := cite(d.Text, d.Support); len(ids) > 0 {
+			b.Decisions = append(b.Decisions, Event{Date: d.Date, Text: d.Text, Cites: ids})
 		}
 	}
 	for _, pt := range r.Parts {
@@ -710,4 +743,88 @@ func (w *BriefWriter) confirmConflicts(ctx context.Context, b *Brief, evidence [
 	}
 	b.Conflicts = kept
 	return nil
+}
+
+// settledGate is the decision model's probability at or above which a
+// decision drawn from what was said is recorded as decided; below it, as
+// proposed. maxSettledChecks bounds the checks one brief makes.
+const (
+	settledGate      = 0.7
+	maxSettledChecks = 8
+)
+
+// ledgerEntries turns the writer's decisions into ledger entries: dated by
+// the meeting they cite, or by a date written in the cited words of the
+// document, else undated; and, when they rest on what was said rather than
+// on a recorded decision or the document, checked with the decision model
+// for whether it was settled. The writer called proposals decisions often
+// enough to matter when measured.
+func (w *BriefWriter) ledgerEntries(ctx context.Context, rel *Relation, b *Brief, evidence []Evidence,
+	meetings map[string]*Meeting, rep *BriefReport) []DecisionEntry {
+	byID := make(map[string]Evidence, len(evidence))
+	for _, e := range evidence {
+		byID[e.ID] = e
+	}
+	relID := RelationID(rel.SubjectPath)
+	checks := 0
+	var out []DecisionEntry
+	for _, d := range b.Decisions {
+		entry := DecisionEntry{ID: decisionID(relID, d.Cites), Text: d.Text, Status: StatusDecided, Source: "writer",
+			Cites: d.Cites, DateBasis: DateNone}
+		said, recorded := "", false
+		for _, c := range d.Cites {
+			e := byID[c]
+			switch e.Kind {
+			case EvidenceDecided:
+				recorded = true
+				if m := meetings[e.SessionID]; m != nil {
+					entry.Date, entry.DateBasis = m.Date.Format("2006-01-02"), DateMeeting
+				}
+			case EvidenceSaid:
+				if said == "" {
+					said = e.Quote
+				}
+				if m := meetings[e.SessionID]; m != nil && entry.DateBasis == DateNone {
+					entry.Date, entry.DateBasis = m.Date.Format("2006-01-02"), DateMeeting
+				}
+			case EvidenceDoc:
+				if d.Date != "" && strings.Contains(e.Quote, d.Date) && entry.DateBasis == DateNone {
+					entry.Date, entry.DateBasis = d.Date, DateStated
+				}
+			}
+		}
+		if said != "" && !recorded {
+			entry.Status = StatusProposed
+			if w.asker != nil && checks < maxSettledChecks {
+				checks++
+				if p, ok := w.settled(ctx, d.Text, said, rep); ok && p >= settledGate {
+					entry.Status = StatusDecided
+				}
+			}
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+// settled asks whether what was said settled the decision, rather than
+// proposing or arguing for it.
+func (w *BriefWriter) settled(ctx context.Context, decision, said string, rep *BriefReport) (float64, bool) {
+	resp, err := w.asker.Ask(ctx, map[string]string{
+		"what_was_said_in_a_meeting":   said,
+		"decision_it_is_claimed_to_be": decision,
+	}, jev.Questions{
+		"settled": jev.NoulWithCriteria(
+			"Does what was said show the decision being made or settled?",
+			"the words show it chosen, agreed, ruled out or reversed: someone with the standing to decide says it is so, or the others agree",
+			"the words only propose, suggest, argue for, ask about or plan to consider it, with nobody shown settling it",
+		),
+	})
+	if err != nil {
+		return 0, false
+	}
+	rep.JudgeRequests++
+	rep.JudgeTokens += resp.Usage.InputTokens
+	p, err := resp.Answers.Noul("settled")
+	return p, err == nil
 }

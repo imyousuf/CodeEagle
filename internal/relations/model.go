@@ -38,6 +38,7 @@ const (
 	propRevisions    = "revisions_json"
 	propRefs         = "refs_json"
 	propDocLinks     = "doc_links_json"
+	propDecisions    = "decisions_json"
 	propRelationKind = "kind"
 )
 
@@ -69,6 +70,8 @@ type Relation struct {
 	Revision int
 	// Refs are the documents the subject names, resolved.
 	Refs []Reference
+	// Decisions is the dated decision ledger, newest first.
+	Decisions []DecisionEntry
 	// DocLinks are the decision model's verdicts on pairs with documents of
 	// higher path, keyed by that path; a pair is stored once, on the lower.
 	DocLinks map[string]*DocVerdict
@@ -179,6 +182,9 @@ type Brief struct {
 	// Parts are what a document of its type has besides the common parts:
 	// an incident's impact and root cause, a decision record's context.
 	Parts []Part `json:"parts,omitempty"`
+	// Decisions holds the writer's decisions only while a brief is being
+	// written; they are dated, checked and kept in the relation's ledger.
+	Decisions []Event `json:"-"`
 	// Dropped counts lines the writer produced whose citations did not
 	// check out, so a brief that lost most of its lines says so.
 	Dropped int `json:"unverified_dropped,omitempty"`
@@ -280,6 +286,7 @@ func (r *Relation) Node() (*graph.Node, error) {
 		propRevisions: r.Revisions,
 		propRefs:      r.Refs,
 		propDocLinks:  r.DocLinks,
+		propDecisions: r.Decisions,
 	} {
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -298,6 +305,14 @@ func (r *Relation) Node() (*graph.Node, error) {
 		props[propBriefModel] = r.BriefModel
 		props[propBriefedAt] = r.BriefedAt.UTC().Format(time.RFC3339)
 		doc = r.Brief.Text()
+	}
+	// The latest decisions are part of what search matches, so "when was X
+	// decided" finds the document that records it.
+	for i, d := range r.Decisions {
+		if i >= 3 {
+			break
+		}
+		doc += "\nDecided " + d.Date + ": " + d.Text
 	}
 	return &graph.Node{
 		ID:            RelationID(r.SubjectPath),
@@ -347,6 +362,9 @@ func FromNode(n *graph.Node) (*Relation, error) {
 		return nil, err
 	}
 	if err := decode(propDocLinks, &r.DocLinks); err != nil {
+		return nil, err
+	}
+	if err := decode(propDecisions, &r.Decisions); err != nil {
 		return nil, err
 	}
 	if raw := n.Properties[propBrief]; raw != "" {

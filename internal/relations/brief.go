@@ -52,6 +52,8 @@ type RenderOptions struct {
 	// Related are lines for the documents linked to the subject by a judged
 	// kind: replaced by, changes, records, companion of.
 	Related []string
+	// Inherited are decision lines from documents that change this one.
+	Inherited []string
 }
 
 // Bounds on the parts of a brief that come from the graph rather than the
@@ -276,6 +278,11 @@ func Render(rel *Relation, o RenderOptions) string {
 		delta.lines = append(delta.lines, fmt.Sprintf("- %s %s%s", e.Date, e.Text, cites(e.Cites)))
 	}
 	if !o.Since.IsZero() {
+		for _, d := range rel.Decisions {
+			if dateAfter(d.Date, o.Since) {
+				delta.lines = append(delta.lines, decisionLine(d, ""))
+			}
+		}
 		for _, key := range sortedKeys(rel.Sections) {
 			if st := rel.Sections[key]; st.FirstSeen.After(o.Since) {
 				delta.lines = append(delta.lines, fmt.Sprintf("- %s document section %q changed", st.FirstSeen.Format("2006-01-02"), key))
@@ -298,11 +305,16 @@ func Render(rel *Relation, o RenderOptions) string {
 	tail = append(tail, expand)
 
 	related := briefPart{title: "related documents:", keep: 3, lines: o.Related}
+	decisions := briefPart{title: "decisions, newest first:", keep: 4}
+	for _, d := range rel.Decisions {
+		decisions.lines = append(decisions.lines, decisionLine(d, ""))
+	}
+	decisions.lines = append(decisions.lines, o.Inherited...)
 	linksTo := briefPart{title: "links to:", keep: 3, lines: o.LinksTo}
 	linkedFrom := briefPart{title: "linked from:", keep: 3, lines: o.LinkedFrom}
-	parts := []*briefPart{&related, &points, &partsPart, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &linksTo, &linkedFrom, &delta}
+	parts := []*briefPart{&related, &points, &partsPart, &current, &decisions, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &linksTo, &linkedFrom, &delta}
 	if !o.Since.IsZero() {
-		parts = []*briefPart{&delta, &related, &points, &partsPart, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &linksTo, &linkedFrom}
+		parts = []*briefPart{&delta, &related, &points, &partsPart, &current, &decisions, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &linksTo, &linkedFrom}
 	}
 	render := func() string {
 		out := []string{header, headline}
@@ -323,9 +335,9 @@ func Render(rel *Relation, o RenderOptions) string {
 	for _, trim := range []struct {
 		p    *briefPart
 		keep int
-	}{{&delta, 0}, {&linkedFrom, 3}, {&linksTo, 3}, {&unconfirmed, 2}, {&unresolved, 2}, {&meetingsPart, meetingsPart.keep}, {&partsPart, 6},
-		{&points, 3}, {&current, 3}, {&conflicts, 2}, {&unresolved, 0}, {&unconfirmed, 0}, {&linkedFrom, 1}, {&linksTo, 1},
-		{&meetingsPart, 3}, {&partsPart, 3}, {&points, 1}, {&current, 1}} {
+	}{{&delta, 0}, {&linkedFrom, 3}, {&linksTo, 3}, {&unconfirmed, 2}, {&unresolved, 2}, {&decisions, 8}, {&meetingsPart, meetingsPart.keep},
+		{&partsPart, 6}, {&points, 3}, {&current, 3}, {&conflicts, 2}, {&unresolved, 0}, {&unconfirmed, 0}, {&linkedFrom, 1}, {&linksTo, 1},
+		{&decisions, 4}, {&meetingsPart, 3}, {&partsPart, 3}, {&points, 1}, {&current, 1}} {
 		if EstimateTokens(render()) <= o.Budget {
 			break
 		}

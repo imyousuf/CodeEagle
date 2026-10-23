@@ -75,7 +75,34 @@ func (l *Library) Brief(rel *Relation, budget int, since time.Time, sinceLabel s
 		LinksTo:     l.linkLines(refTargets(rel.Refs)),
 		LinkedFrom:  l.linkLines(l.linkedFrom(rel.SubjectPath)),
 		Related:     l.relatedLines(rel.SubjectPath),
+		Inherited:   l.inheritedDecisions(rel.SubjectPath),
 	})
+}
+
+// maxInherited bounds the decisions taken from each changing document.
+const maxInherited = 3
+
+// inheritedDecisions are the latest decisions of documents that change or
+// replace path, labelled with where they come from: a redesign's decisions
+// are decisions about what it redesigns.
+func (l *Library) inheritedDecisions(path string) []string {
+	var lines []string
+	seen := make(map[string]bool)
+	for _, link := range l.docLinksOf(path) {
+		if link.To != path || (link.Kind != DocChanges && link.Kind != DocReplaces) || seen[link.From] {
+			continue
+		}
+		seen[link.From] = true
+		if rel := l.Relations[link.From]; rel != nil {
+			for i, d := range rel.Decisions {
+				if i >= maxInherited {
+					break
+				}
+				lines = append(lines, decisionLine(d, link.From))
+			}
+		}
+	}
+	return lines
 }
 
 // Freshness flags from other documents.

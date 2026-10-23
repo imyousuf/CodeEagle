@@ -147,7 +147,6 @@ func DocStatus(s *Subject) (status, date string) {
 
 // assetParts are the parts a brief of each type has besides the common ones.
 var assetParts = map[AssetType][]string{
-	AssetSpec:         {"decisions"},
 	AssetADR:          {"context", "decision", "consequences"},
 	AssetIncident:     {"impact", "root_cause", "incident_timeline", "follow_ups"},
 	AssetMeetingNotes: {"agreed", "follow_ups"},
@@ -158,7 +157,7 @@ var assetParts = map[AssetType][]string{
 
 // assetGuide tells the writer what a brief of each type is for.
 var assetGuide = map[AssetType]string{
-	AssetSpec:         "This is a spec or design document. In parts, 'decisions' lists the choices the document records, each with its date if the document gives one.",
+	AssetSpec:         "",
 	AssetADR:          "This is a decision record. In parts, give its context, the decision itself, and its consequences.",
 	AssetIncident:     "This is an incident or investigation write-up. In parts, give the impact (who or what was affected, how long), the root cause as the document states it, the incident timeline with times or dates, and the follow-ups with owners if named.",
 	AssetMeetingNotes: "These are notes of a meeting. In parts, give what was agreed and the follow-ups with owners if named.",
