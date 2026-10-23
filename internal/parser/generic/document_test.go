@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
 )
@@ -218,7 +219,11 @@ func createTestODP() []byte {
 
 // createTestPDF builds a minimal valid PDF with "Hello World" text
 // and correct xref byte offsets.
-func createTestPDF() []byte {
+func createTestPDF() []byte { return createTestPDFContents("4 0 R") }
+
+// createTestPDFContents builds a one-page PDF whose page names its content
+// as contents: a stream reference, or an array of them.
+func createTestPDFContents(contents string) []byte {
 	var b bytes.Buffer
 
 	// Track object byte offsets for xref table.
@@ -233,7 +238,7 @@ func createTestPDF() []byte {
 	b.WriteString("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n")
 
 	offsets[3] = b.Len()
-	b.WriteString("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n")
+	b.WriteString("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents " + contents + " /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n")
 
 	// Stream content for the page — draws "Hello World".
 	streamContent := "BT /F1 12 Tf 100 700 Td (Hello World) Tj ET"
@@ -381,6 +386,26 @@ func TestExtractPDF(t *testing.T) {
 		t.Errorf("expected 'Hello World', got: %s", text)
 	}
 }
+
+// TestExtractPDF_ContentArray covers a page whose content is an array of
+// streams, which is common and which the pure Go library's own text helper
+// looped on forever.
+func TestExtractPDF_ContentArray(t *testing.T) {
+	done := make(chan string, 1)
+	go func() {
+		text, _ := extractPDF(context.Background(), createTestPDFContents("[4 0 R]"))
+		done <- text
+	}()
+	select {
+	case text := <-done:
+		if !strings.Contains(text, "Hello World") {
+			t.Errorf("text = %q", text)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("extraction did not finish")
+	}
+}
+
 func TestExtractPDF_PageMarkers(t *testing.T) {
 	content := createTestPDF()
 	text, err := extractPDF(context.Background(), content)

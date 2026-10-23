@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/imyousuf/CodeEagle/internal/parser/chatlog"
 )
@@ -167,15 +168,60 @@ func Sectionize(path, text string) []TextSection {
 			out = append(out, TextSection{Heading: fmt.Sprintf("Part %d: %s", part, firstLine(buf.String())), Text: strings.TrimSpace(buf.String())})
 		}
 	}
-	for i := range out {
-		if len(out[i].Text) > maxSectionTextLen {
-			out[i].Text = out[i].Text[:maxSectionTextLen]
+	kept := out[:0]
+	for _, sec := range out {
+		if garbled(sec.Text) {
+			continue
 		}
+		if len(sec.Text) > maxSectionTextLen {
+			sec.Text = sec.Text[:maxSectionTextLen]
+		}
+		kept = append(kept, sec)
 	}
+	out = kept
 	if len(out) > maxSections {
 		out = out[:maxSections]
 	}
 	return out
+}
+
+// garbled reports whether extracted text is not text: what a font with no
+// usable encoding map yields, control characters and runs of accented
+// capitals where words should be. A model shown it reads nonsense, and no
+// quote can be checked against it, so it is not kept.
+func garbled(text string) bool {
+	runes, control, letters, latin1, cjk := 0, 0, 0, 0, 0
+	for _, r := range text {
+		runes++
+		switch {
+		case r < 0x20 && r != '\n' && r != '\t' && r != '\r':
+			control++
+		case unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul):
+			cjk++
+			letters++
+		case unicode.IsLetter(r):
+			letters++
+			if r >= 0xC0 && r <= 0xFF {
+				latin1++
+			}
+		}
+	}
+	if runes < 40 {
+		return false
+	}
+	// Prose has no control characters; French or German has far fewer
+	// accented letters than a quarter of all of them.
+	if control*100 > runes || (letters > 0 && latin1*4 > letters) {
+		return true
+	}
+	// Words are separated; a page of 25-character "words" is not words,
+	// except in scripts written without spaces.
+	if cjk*3 < letters {
+		if fields := len(strings.Fields(text)); fields > 0 && runes/fields > 25 {
+			return true
+		}
+	}
+	return false
 }
 
 func firstLine(text string) string {
