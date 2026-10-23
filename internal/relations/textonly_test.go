@@ -80,3 +80,16 @@ func TestWrapLinesKeepsRunesWhole(t *testing.T) {
 		}
 	}
 }
+
+func TestRefSentenceKeepsWhatItSays(t *testing.T) {
+	for in, want := range map[string]string{
+		"- `docs/tech-spec/agent-framework/stickyboard.md` — the original Stickyboard spec. Tracker keeps its backend.": "the original Stickyboard spec. Tracker keeps its backend.",
+		"> Executes `docs/x.md`. Branch: `t`.":                           "Executes `docs/x.md`. Branch: `t`.",
+		"See [the retry policy](retry.md): caps at three.":               "See [the retry policy](retry.md): caps at three.",
+		"- [Stickyboard](../stickyboard.md) — superseded for UI by this": "superseded for UI by this",
+	} {
+		if got := refSentence(in); got != want {
+			t.Errorf("refSentence(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

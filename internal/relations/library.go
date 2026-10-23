@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -159,44 +160,68 @@ func (l *Library) DocFlags(path string) []string {
 // relatedLines describes the documents linked to path by a judged kind, with
 // the direction read from path's side.
 func (l *Library) relatedLines(path string) []string {
-	var lines []string
-	seen := make(map[string]bool)
 	replacedPair := make(map[string]bool) // a replacement says it changed too
 	for _, link := range l.docLinksOf(path) {
 		if link.Kind == DocReplaces {
 			replacedPair[link.From+"\x00"+link.To] = true
 		}
 	}
+	type related struct {
+		rank       int
+		how, other string
+	}
+	var list []related
+	seen := make(map[string]bool)
 	for _, link := range l.docLinksOf(path) {
 		if link.Kind == DocChanges && replacedPair[link.From+"\x00"+link.To] {
 			continue
 		}
-		other, how := link.To, ""
+		r := related{other: link.To}
 		switch {
 		case link.Kind == DocReplaces && link.To == path:
-			other, how = link.From, "replaced by"
-		case link.Kind == DocReplaces:
-			how = "replaces"
+			r = related{0, "replaced by", link.From}
 		case link.Kind == DocChanges && link.To == path:
-			other, how = link.From, "changed by"
-		case link.Kind == DocChanges:
-			how = "changes"
+			r = related{1, "changed by", link.From}
 		case link.Kind == DocRecords && link.To == path:
-			other, how = link.From, "recorded in"
+			r = related{2, "recorded in", link.From}
+		case link.Kind == DocReplaces:
+			r.rank, r.how = 3, "replaces"
+		case link.Kind == DocChanges:
+			r.rank, r.how = 3, "changes"
 		case link.Kind == DocRecords:
-			how = "records"
+			r.rank, r.how = 4, "records"
 		default:
-			how = "companion of"
+			r.rank, r.how = 5, "companion of"
 			if link.To == path {
-				other = link.From
+				r.other = link.From
 			}
 		}
-		if seen[how+other] {
-			continue
+		if !seen[r.how+r.other] {
+			seen[r.how+r.other] = true
+			list = append(list, r)
 		}
-		seen[how+other] = true
-		line := fmt.Sprintf("- %s %s (%s)", how, other, ShortID(RelationID(other)))
-		if rel := l.Relations[other]; rel != nil && rel.Brief != nil && rel.Brief.Headline.Text != "" {
+	}
+	// What replaces or changes the document comes first: it decides what
+	// holds now. Companions, which can number dozens, come last and fewest.
+	sort.SliceStable(list, func(i, j int) bool {
+		if list[i].rank != list[j].rank {
+			return list[i].rank < list[j].rank
+		}
+		return list[i].other < list[j].other
+	})
+	var lines []string
+	companions := 0
+	for _, r := range list {
+		if r.rank == 5 {
+			if companions >= maxCompanionLines {
+				continue
+			}
+			companions++
+		}
+		line := fmt.Sprintf("- %s %s (%s)", r.how, r.other, ShortID(RelationID(r.other)))
+		if about := l.saysAbout(r.other, path); about != "" {
+			line += ": " + about
+		} else if rel := l.Relations[r.other]; rel != nil && rel.Brief != nil && rel.Brief.Headline.Text != "" {
 			line += ": " + clip(rel.Brief.Headline.Text, maxHeadlineInFinder)
 		}
 		lines = append(lines, line)
@@ -206,6 +231,49 @@ func (l *Library) relatedLines(path string) []string {
 	}
 	return lines
 }
+
+// saysAbout is what one document says where it names the other: the
+// sentence around its reference, which tells what a redesign changes or a
+// companion adds better than either document's headline. It tries other's
+// mention of path first, then path's mention of other.
+func (l *Library) saysAbout(other, path string) string {
+	for _, pair := range [][2]string{{other, path}, {path, other}} {
+		rel := l.Relations[pair[0]]
+		if rel == nil {
+			continue
+		}
+		for _, ref := range rel.Refs {
+			if ref.Target == pair[1] && strings.TrimSpace(ref.Context) != "" {
+				quote := clip(refSentence(ref.Context), maxRefQuote)
+				if quote == "" {
+					continue
+				}
+				if pair[0] == path {
+					return "this document says " + quote
+				}
+				return quote
+			}
+		}
+	}
+	return ""
+}
+
+// maxRefQuote bounds what a related-documents line quotes of a reference.
+const maxRefQuote = 280
+
+// leadingRef is a list marker, quote marker or the referenced path itself at
+// the start of a reference's context, which say nothing about the relation.
+var leadingRef = regexp.MustCompile("^(?:[-*>]\\s*)*(?:\\[[^\\]]*\\]\\([^)]*\\)|`[^`]+`)?\\s*(?:[—–:-]\\s*)?")
+
+// refSentence is a reference's context with what does not describe the
+// relation removed.
+func refSentence(context string) string {
+	return strings.TrimSpace(leadingRef.ReplaceAllString(strings.Join(strings.Fields(context), " "), ""))
+}
+
+// maxCompanionLines bounds the companions listed, after every directional
+// link.
+const maxCompanionLines = 3
 
 // maxLinkLines bounds each list of linked documents in a brief.
 const maxLinkLines = 6

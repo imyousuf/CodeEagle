@@ -338,7 +338,7 @@ func Render(rel *Relation, o RenderOptions) string {
 		keep int
 	}{{&delta, 0}, {&linkedFrom, 3}, {&linksTo, 3}, {&unconfirmed, 2}, {&unresolved, 2}, {&decisions, 8}, {&meetingsPart, meetingsPart.keep},
 		{&partsPart, 6}, {&points, 3}, {&current, 3}, {&conflicts, 2}, {&unresolved, 0}, {&unconfirmed, 0}, {&linkedFrom, 1}, {&linksTo, 1},
-		{&decisions, 4}, {&meetingsPart, 3}, {&partsPart, 3}, {&points, 1}, {&current, 1}} {
+		{&related, 4}, {&decisions, 4}, {&meetingsPart, 3}, {&partsPart, 3}, {&related, 2}, {&points, 1}, {&current, 1}} {
 		if EstimateTokens(render()) <= o.Budget {
 			break
 		}
