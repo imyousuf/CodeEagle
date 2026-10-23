@@ -65,8 +65,15 @@ type Options struct {
 }
 
 // DefaultOptions are the caps the spec sets.
+//
+// The per-document and per-meeting caps are 30: at 8, many meetings that
+// discussed a document were proposed and never judged. Raising them took
+// the meetings found for 16 specs, of 80 their checked references name,
+// from 16 to 23 with the measured judge, and a blind check found 24 of 30
+// of the added relations right. The per-run cap still bounds what one sync
+// spends.
 func DefaultOptions() Options {
-	return Options{K: 5, MaxPerSubject: 8, MaxPerMeeting: 8, MaxPairs: 200}
+	return Options{K: 5, MaxPerSubject: 30, MaxPerMeeting: 30, MaxPairs: 200}
 }
 
 // Candidate is a proposed (document, meeting) pair and why it was proposed.

@@ -139,7 +139,7 @@ def main():
     ap.add_argument("--reps", type=int, default=1)
     ap.add_argument("--model", default="sonnet")
     ap.add_argument("--max-turns", type=int, default=15)
-    ap.add_argument("--max-budget", type=float, default=1.0, help="dollars per answer; 0 for none")
+    ap.add_argument("--max-budget", type=float, default=0.10, help="dollars per answer; 0 for none")
     ap.add_argument("--oracle-model", default="opus")
     ap.add_argument("--oracle-turns", type=int, default=60)
     ap.add_argument("--concurrency", type=int, default=3)

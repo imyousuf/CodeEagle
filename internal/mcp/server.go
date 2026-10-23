@@ -46,6 +46,9 @@ type initializeResult struct {
 	ProtocolVersion string         `json:"protocolVersion"`
 	ServerInfo      serverInfo     `json:"serverInfo"`
 	Capabilities    capabilitiesOb `json:"capabilities"`
+	// Instructions tell the client's model how to use the tools well; MCP
+	// clients pass them to the model alongside the tool definitions.
+	Instructions string `json:"instructions,omitempty"`
 }
 
 type serverInfo struct {
@@ -83,9 +86,10 @@ type toolCallParams struct {
 
 // Server handles JSON-RPC 2.0 requests over stdio for MCP.
 type Server struct {
-	registry *agents.Registry
-	scanner  *bufio.Scanner
-	writer   io.Writer
+	instructions string
+	registry     *agents.Registry
+	scanner      *bufio.Scanner
+	writer       io.Writer
 }
 
 // NewServer creates an MCP server that reads from stdin and writes to stdout.
@@ -160,8 +164,13 @@ func (s *Server) handleInitialize(req *jsonRPCRequest) {
 		Capabilities: capabilitiesOb{
 			Tools: map[string]any{},
 		},
+		Instructions: s.instructions,
 	})
 }
+
+// SetInstructions sets what the server tells a client's model about using
+// its tools.
+func (s *Server) SetInstructions(text string) { s.instructions = text }
 
 // handleToolsList returns the list of available tools.
 func (s *Server) handleToolsList(req *jsonRPCRequest) {

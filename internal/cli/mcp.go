@@ -110,6 +110,7 @@ This command is typically invoked automatically by the Claude CLI via
 			}
 
 			server := mcp.NewServer(registry)
+			server.SetInstructions(verbInstructions)
 
 			// Handle signals for graceful shutdown.
 			ctx, cancel := context.WithCancel(context.Background())

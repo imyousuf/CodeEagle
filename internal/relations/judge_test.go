@@ -87,7 +87,8 @@ func candidatesFor(subjects []*Subject, meetings map[string]*Meeting) []*Candida
 func TestJudgeAsksOneYesNoQuestionPerPair(t *testing.T) {
 	subjects, meetings := corpus()
 	asker := &scriptedAsker{p: map[string]float64{"Retry cap": 0.84}}
-	judgments, report, err := NewJudge(asker, spokenStub{}).Judge(context.Background(), candidatesFor(subjects, meetings))
+	batched := JudgeOptions{BatchSize: 10}
+	judgments, report, err := NewJudgeWithOptions(asker, spokenStub{}, batched).Judge(context.Background(), candidatesFor(subjects, meetings))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +121,7 @@ func TestJudgeAsksOneYesNoQuestionPerPair(t *testing.T) {
 func TestJudgeHalvesARequestTooLarge(t *testing.T) {
 	subjects, meetings := corpus()
 	asker := &scriptedAsker{refuseOnce: true}
-	judgments, _, err := NewJudge(asker, nil).Judge(context.Background(), candidatesFor(subjects, meetings))
+	judgments, _, err := NewJudgeWithOptions(asker, nil, JudgeOptions{BatchSize: 10}).Judge(context.Background(), candidatesFor(subjects, meetings))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,5 +267,19 @@ func TestRelevantStretchFindsWhereTheDocumentComesUp(t *testing.T) {
 	}
 	if none := relevantStretch(turns, map[string]bool{"payroll": true}, 160); len(none) != len(turns) {
 		t.Errorf("with no shared words the segment is returned whole, got %d turns", len(none))
+	}
+}
+
+// TestJudgeAsksAboutEachPairAlone covers the measured default: pairs judged
+// in one request moved each other's probabilities, so each is asked alone.
+func TestJudgeAsksAboutEachPairAlone(t *testing.T) {
+	subjects, meetings := corpus()
+	asker := &scriptedAsker{p: map[string]float64{"Retry cap": 0.84}}
+	judgments, _, err := NewJudge(asker, spokenStub{}).Judge(context.Background(), candidatesFor(subjects, meetings))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(judgments) != 2 || asker.calls != 2 {
+		t.Errorf("%d judgments in %d calls; want each pair in its own request", len(judgments), asker.calls)
 	}
 }

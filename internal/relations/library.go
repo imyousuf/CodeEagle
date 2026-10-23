@@ -67,6 +67,7 @@ func (l *Library) Brief(rel *Relation, budget int, since time.Time, sinceLabel s
 		SinceLabel: sinceLabel,
 		Meetings:   l.Meetings,
 		Flags:      Freshness(rel, l.Subjects[rel.SubjectPath], l.Meetings),
+		Subject:    l.Subjects[rel.SubjectPath],
 	})
 }
 
@@ -456,6 +457,9 @@ func (l *Library) ShowSpan(m *Meeting, start, end float64, from int, id string) 
 // meetings and when, and any freshness flags.
 func (l *Library) FinderLine(r *Relation) string {
 	head := "no brief yet"
+	if len(r.Accepted()) == 0 {
+		head = "no meeting confirmed"
+	}
 	if r.Brief != nil && r.Brief.Headline.Text != "" {
 		head = r.Brief.Headline.Text
 	}

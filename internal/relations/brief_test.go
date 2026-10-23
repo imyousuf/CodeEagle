@@ -111,3 +111,28 @@ func TestRevisionHistoryIsBounded(t *testing.T) {
 		t.Error("the newest revision was not kept")
 	}
 }
+
+// TestRenderSaysWhatTheGraphKnows covers the parts of a brief that come from
+// the graph: the document's opening, the confirmed meetings, and the closest
+// unconfirmed ones, labelled as such.
+func TestRenderSaysWhatTheGraphKnows(t *testing.T) {
+	rel, meetings := renderFixture()
+	rel.Links["s-fin"] = &Verdict{SessionID: "s-fin", P: 0.72}
+	subj := &Subject{Path: rel.SubjectPath, Preamble: "**Status:** Draft, 2026-10-04.\n\nRetry budgets for clients."}
+	out := Render(rel, RenderOptions{Budget: MaxBriefBudget, Meetings: meetings, Subject: subj})
+	for _, want := range []string{
+		"document: **Status:** Draft, 2026-10-04. Retry budgets for clients.",
+		"meetings that discussed it, newest first:\n- 2026-10-14 Platform sync",
+		"possibly also, below the gate and not confirmed:\n- 2026-08-14 Finance review",
+		"p=0.72",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("brief lacks %q:\n%s", want, out)
+		}
+	}
+
+	none := New("docs/quiet.md")
+	if out := Render(none, RenderOptions{Meetings: meetings}); !strings.Contains(out, "that does not mean none did") {
+		t.Errorf("a document with no confirmed meeting reads as never discussed:\n%s", out)
+	}
+}

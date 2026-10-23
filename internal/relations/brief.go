@@ -11,7 +11,7 @@ import (
 
 // Budgets for a rendered brief, in estimated tokens.
 const (
-	DefaultBriefBudget = 400
+	DefaultBriefBudget = 800
 	MaxBriefBudget     = 2000
 )
 
@@ -41,7 +41,19 @@ type RenderOptions struct {
 	Meetings map[string]*Meeting
 	// Flags are the freshness flags to show.
 	Flags []string
+	// Subject is the document as it is now, for its opening.
+	Subject *Subject
 }
+
+// Bounds on the parts of a brief that come from the graph rather than the
+// writer.
+const (
+	maxDocumentLine   = 320
+	maxMeetingTitle   = 70
+	maxUnconfirmed    = 3
+	minUnconfirmedP   = 0.5
+	keepMeetingsLines = 5
+)
 
 // briefPart is one block of a rendered brief, with how much of it may be
 // dropped under a tight budget.
@@ -78,11 +90,58 @@ func Render(rel *Relation, o RenderOptions) string {
 		header += fmt.Sprintf(" · @r%d", rel.Revision)
 	}
 
+	// What the graph knows without the writer: the document's opening,
+	// every meeting confirmed to discuss it, and the closest ones that were
+	// not. Answers lost most points for missing meetings and leaving the
+	// document out, and an agent told nothing about the unconfirmed ones
+	// reported that no meeting discussed the document.
+	docLine := ""
+	if o.Subject != nil && o.Subject.Preamble != "" {
+		docLine = "document: " + clip(strings.Join(strings.Fields(o.Subject.Preamble), " "), maxDocumentLine)
+	}
+	meetingsPart := briefPart{title: "meetings that discussed it, newest first:", keep: keepMeetingsLines}
+	byDate := append([]*Verdict(nil), accepted...)
+	sort.SliceStable(byDate, func(i, j int) bool {
+		return meetingDate(o.Meetings, byDate[i]).After(meetingDate(o.Meetings, byDate[j]))
+	})
+	for _, v := range byDate {
+		if m := o.Meetings[v.SessionID]; m != nil {
+			meetingsPart.lines = append(meetingsPart.lines, fmt.Sprintf("- %s %s (%s)", m.Date.Format("2006-01-02"), clip(m.Title, maxMeetingTitle), ShortID(m.NodeID)))
+		}
+	}
+	unconfirmed := briefPart{title: "possibly also, below the gate and not confirmed:", keep: 2}
+	var near []*Verdict
+	for _, v := range rel.Links {
+		if !v.Accepted && v.P >= minUnconfirmedP && o.Meetings[v.SessionID] != nil {
+			near = append(near, v)
+		}
+	}
+	sort.SliceStable(near, func(i, j int) bool { return near[i].P > near[j].P })
+	for i, v := range near {
+		if i >= maxUnconfirmed {
+			break
+		}
+		m := o.Meetings[v.SessionID]
+		unconfirmed.lines = append(unconfirmed.lines, fmt.Sprintf("- %s %s (%s) p=%.2f", m.Date.Format("2006-01-02"), clip(m.Title, maxMeetingTitle), ShortID(m.NodeID), v.P))
+	}
+
 	b := rel.Brief
 	if b == nil {
-		lines := []string{header, "no brief yet"}
-		if len(accepted) == 0 {
-			lines[1] = "no meeting has been judged to discuss it"
+		lines := []string{header}
+		if docLine != "" {
+			lines = append(lines, docLine)
+		}
+		switch {
+		case len(meetingsPart.lines) > 0:
+			lines = append(lines, "no brief written yet")
+			lines = append(lines, meetingsPart.title)
+			lines = append(lines, meetingsPart.lines...)
+		default:
+			lines = append(lines, "no meeting confirmed to discuss it; that does not mean none did")
+		}
+		if len(unconfirmed.lines) > 0 {
+			lines = append(lines, unconfirmed.title)
+			lines = append(lines, unconfirmed.lines...)
 		}
 		if len(o.Flags) > 0 {
 			lines = append(lines, "fresh: "+strings.Join(o.Flags, ", "))
@@ -160,12 +219,15 @@ func Render(rel *Relation, o RenderOptions) string {
 	expand += fmt.Sprintf("brief %s --since @r%d", ShortID(RelationID(rel.SubjectPath)), rel.Revision)
 	tail = append(tail, expand)
 
-	parts := []*briefPart{&current, &conflicts, &unresolved, &delta}
+	parts := []*briefPart{&current, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &delta}
 	if !o.Since.IsZero() {
-		parts = []*briefPart{&delta, &current, &conflicts, &unresolved}
+		parts = []*briefPart{&delta, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed}
 	}
 	render := func() string {
 		out := []string{header, headline}
+		if docLine != "" {
+			out = append(out, docLine)
+		}
 		for _, p := range parts {
 			if len(p.lines) == 0 {
 				continue
@@ -180,7 +242,8 @@ func Render(rel *Relation, o RenderOptions) string {
 	for _, trim := range []struct {
 		p    *briefPart
 		keep int
-	}{{&delta, 0}, {&unresolved, 2}, {&current, 3}, {&conflicts, 2}, {&unresolved, 0}, {&current, 1}} {
+	}{{&delta, 0}, {&unconfirmed, 2}, {&unresolved, 2}, {&meetingsPart, keepMeetingsLines}, {&current, 3}, {&conflicts, 2},
+		{&unresolved, 0}, {&unconfirmed, 0}, {&meetingsPart, 3}, {&current, 1}} {
 		if EstimateTokens(render()) <= o.Budget {
 			break
 		}
@@ -206,6 +269,13 @@ func clip(s string, n int) string {
 		cut = n
 	}
 	return s[:cut] + "…"
+}
+
+func meetingDate(meetings map[string]*Meeting, v *Verdict) time.Time {
+	if m := meetings[v.SessionID]; m != nil {
+		return m.Date
+	}
+	return time.Time{}
 }
 
 func cites(ids []string) string {

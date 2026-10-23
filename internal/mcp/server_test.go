@@ -289,3 +289,17 @@ func TestToolsCallWithArguments(t *testing.T) {
 		t.Errorf("expected 'found 5 nodes', got %q", result.Content[0].Text)
 	}
 }
+
+// TestInitializeCarriesInstructions covers the guidance a client's model is
+// given on using the tools.
+func TestInitializeCarriesInstructions(t *testing.T) {
+	var out bytes.Buffer
+	s := NewServerWithIO(setupTestRegistry(), strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`+"\n"), &out)
+	s.SetInstructions("answer from the brief")
+	if err := s.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"instructions":"answer from the brief"`) {
+		t.Errorf("initialize = %s", out.String())
+	}
+}

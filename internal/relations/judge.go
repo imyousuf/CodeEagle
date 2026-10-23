@@ -40,12 +40,12 @@ type JudgeReport struct {
 
 // Bounds on one request and on how many run at once.
 const (
-	maxJudgePairs      = 10
+	defaultJudgeBatch  = 1
 	maxDocExcerpts     = 3
 	maxDocExcerptChars = 500
 	maxOutline         = 20
 	maxSaidChars       = 400
-	maxSpokenChars     = 400
+	maxSpokenChars     = 1500
 	maxDecisionChars   = 200
 	judgeConcurrency   = 4
 )
@@ -58,13 +58,18 @@ type Judge struct {
 }
 
 // JudgeOptions tune what the decision model is shown. The zero value is the
-// measured default.
+// measured default: one pair per request, and the 1,500 characters of a
+// segment that share the most words with the document. On 160 labelled
+// pairs that took the area under the curve from 0.971 to 0.987, and at the
+// 0.8 gate precision from 0.86 to 0.89-0.96 and recall from 0.67 to 0.89:
+// pairs batched together moved each other's probabilities by up to 0.39,
+// and a long segment's opening is rarely where the document comes up.
 type JudgeOptions struct {
 	// BatchSize is how many pairs about one document share a request.
 	BatchSize int
-	// RelevantWords shows the stretch of a segment whose words overlap most
-	// with the document's, rather than the segment's opening.
-	RelevantWords bool
+	// Opening shows a segment from its start rather than the stretch that
+	// shares the document's words, as the judge did before it was measured.
+	Opening bool
 	// SpokenChars bounds the speakers' own words shown per segment.
 	SpokenChars int
 }
@@ -79,7 +84,7 @@ func NewJudge(asker jev.Asker, transcripts Transcripts) *Judge {
 // say.
 func NewJudgeWithOptions(asker jev.Asker, transcripts Transcripts, opts JudgeOptions) *Judge {
 	if opts.BatchSize <= 0 {
-		opts.BatchSize = maxJudgePairs
+		opts.BatchSize = defaultJudgeBatch
 	}
 	if opts.SpokenChars <= 0 {
 		opts.SpokenChars = maxSpokenChars
@@ -262,7 +267,7 @@ func (j *Judge) buildState(batch []*Candidate) (*judgeState, jev.Questions) {
 	}
 
 	var terms map[string]bool
-	if j.opts.RelevantWords {
+	if !j.opts.Opening {
 		terms = documentTerms(batch)
 	}
 	segID := make(map[*Segment]string)

@@ -17,6 +17,9 @@ import (
 // says too little for a meeting to have discussed it.
 const minSubjectText = 400
 
+// maxPreamble bounds the opening of a document kept for its brief.
+const maxPreamble = 600
+
 // Subject is a document that relations can be about, with its sections.
 type Subject struct {
 	Path      string
@@ -30,6 +33,9 @@ type Subject struct {
 	Topics []string
 	// TextLen is how much text the document holds in all.
 	TextLen int
+	// Preamble is the document's opening, before its first heading: where a
+	// spec states its status, date and owner when it states them at all.
+	Preamble string
 }
 
 // Section is one section of a subject.
@@ -132,6 +138,7 @@ func loadSubjects(ctx context.Context, store graph.Store, keep SubjectFilter, fo
 				Hash:      n.Properties[graph.PropContentHash],
 				UpdatedAt: n.UpdatedAt,
 				TextLen:   len(n.DocComment),
+				Preamble:  excerpt(n.DocComment, maxPreamble),
 			}
 		case n.Properties["kind"] == "section":
 			sections = append(sections, n)

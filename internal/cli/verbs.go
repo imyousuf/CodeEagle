@@ -438,7 +438,10 @@ func (v *verbs) briefByID(ctx context.Context, lib *relations.Library, prefix st
 			out, err := render(lib, rel)
 			return out, true, err
 		}
-		return fmt.Sprintf("%s: no meeting has been judged to discuss it", n.FilePath), true, nil
+		if subj := lib.Subjects[n.FilePath]; subj != nil {
+			return fmt.Sprintf("no meeting confirmed to discuss it yet; find may still turn some up\n%s", lib.Outline(subj)), true, nil
+		}
+		return fmt.Sprintf("%s: no meeting confirmed to discuss it yet; find may still turn some up", n.FilePath), true, nil
 	case graph.NodeMeeting, graph.NodeTopicSegment, graph.NodeDecision, graph.NodeActionItem:
 		if m := lib.Meetings[n.Properties[graph.PropMeetingID]]; m != nil {
 			return lib.MeetingBrief(ctx, m, budget), true, nil

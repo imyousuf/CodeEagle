@@ -100,10 +100,10 @@ again, so the next runs pay to rebuild what was there.`,
 	cmd.Flags().BoolVar(&reset, "reset", false, "delete every relation, verdict and brief")
 	// Experiments on what the judge is shown, measured with --measure.
 	cmd.Flags().IntVar(&jopts.BatchSize, "judge-batch", 0, "with --measure: pairs per decision-model request")
-	cmd.Flags().BoolVar(&jopts.RelevantWords, "judge-relevant", false, "with --measure: show the part of a segment that shares the document's words")
+	cmd.Flags().BoolVar(&jopts.Opening, "judge-opening", false, "show a segment from its start, as before the judge was measured")
 	cmd.Flags().IntVar(&jopts.SpokenChars, "judge-spoken", 0, "with --measure: characters of the speakers' words shown per segment")
 	cmd.Flags().StringVar(&scoredOut, "scored-out", "", "with --measure: where to write per-pair probabilities")
-	for _, f := range []string{"judge-batch", "judge-relevant", "judge-spoken", "scored-out"} {
+	for _, f := range []string{"judge-batch", "judge-opening", "judge-spoken", "scored-out"} {
 		_ = cmd.Flags().MarkHidden(f)
 	}
 	return cmd
