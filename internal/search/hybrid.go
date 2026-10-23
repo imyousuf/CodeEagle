@@ -2,7 +2,6 @@ package search
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
@@ -33,6 +32,9 @@ type HybridOptions struct {
 
 // HybridResult is a ranked search.
 type HybridResult struct {
+	// VectorErr is set when the vector search failed and only words were
+	// matched.
+	VectorErr error
 	// Results are the ranked results, at most Limit of them.
 	Results []vectorstore.SearchResult
 	// Ranked is how many results there were before the limit, so a caller
@@ -66,11 +68,16 @@ func Hybrid(ctx context.Context, store graph.Store, vs VectorSearcher, query str
 	}
 
 	results, err := vs.Search(ctx, query, fetchK)
+	res := &HybridResult{Fetched: fetchK}
 	if err != nil {
-		return nil, fmt.Errorf("search failed: %w", err)
+		// The embedding service is a separate process that can fail or
+		// time out under load; words still find what they match, and an
+		// agent stuck on a failed search spends turns retrying.
+		results, res.VectorErr = nil, err
+	} else {
+		stale := vs.StaleInLastSearch()
+		res.Examined, res.Stale = stale+len(results), stale
 	}
-	stale := vs.StaleInLastSearch()
-	res := &HybridResult{Fetched: fetchK, Examined: stale + len(results), Stale: stale}
 
 	results = DeduplicateResults(results)
 	results = filterResults(results, func(n *graph.Node) bool {

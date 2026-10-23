@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/llmjson"
+	"github.com/imyousuf/CodeEagle/internal/search"
 	"github.com/imyousuf/CodeEagle/internal/transcript"
 	"github.com/imyousuf/CodeEagle/pkg/jev"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
@@ -17,7 +18,7 @@ import (
 
 // BriefVersion is bumped when what a brief is written from, or how, changes,
 // so existing briefs are written again.
-const BriefVersion = 5
+const BriefVersion = 6
 
 // BriefOptions bound brief writing.
 type BriefOptions struct {
@@ -27,6 +28,10 @@ type BriefOptions struct {
 	// read in the speakers' own words; earlier ones contribute only their
 	// decisions and follow-ups.
 	LatestMeetings int
+	// TimelineMeetings is how many linked meetings in all are read in the
+	// speakers' own words for the timeline: the latest in full, the rest as
+	// the stretch where the document comes up.
+	TimelineMeetings int
 	// ConflictGate is the decision model's probability at or above which
 	// a reported conflict is shown as one.
 	ConflictGate float64
@@ -37,7 +42,7 @@ type BriefOptions struct {
 
 // DefaultBriefOptions are the bounds the spec sets.
 func DefaultBriefOptions() BriefOptions {
-	return BriefOptions{MaxInputChars: 48000, LatestMeetings: 4, ConflictGate: 0.7, Settle: 30 * time.Minute}
+	return BriefOptions{MaxInputChars: 48000, LatestMeetings: 4, TimelineMeetings: 15, ConflictGate: 0.7, Settle: 30 * time.Minute}
 }
 
 // BriefWriter writes relation briefs with a language model, verifies every
@@ -221,17 +226,28 @@ func (w *BriefWriter) snippets(subj *Subject, accepted []*Verdict, meetings map[
 	}
 	sort.SliceStable(linkedMeetings, func(i, j int) bool { return linkedMeetings[i].Date.After(linkedMeetings[j].Date) })
 	n := 0
+	terms := subjectTerms(subj, accepted)
 	for mi, m := range linkedMeetings {
 		date := m.Date.Format("2006-01-02")
-		if mi < w.opts.LatestMeetings && w.transcripts != nil {
+		if mi < max(w.opts.LatestMeetings, w.opts.TimelineMeetings) && w.transcripts != nil {
+			// The latest meetings in full; earlier ones as the stretch where
+			// the document comes up, so every one can have its line in the
+			// timeline. Answers lost the most points for missing meetings.
+			limit := 3000
+			if mi >= w.opts.LatestMeetings {
+				limit = timelineChars
+			}
 			for _, rg := range verdictOf[m].Ranges {
 				turns, err := w.transcripts.Span(m, rg.Start, rg.End)
 				if err != nil || len(turns) == 0 {
 					continue
 				}
+				if mi >= w.opts.LatestMeetings {
+					turns = relevantStretch(turns, terms, limit)
+				}
 				n++
 				add(&snippet{Label: fmt.Sprintf("M%d", n), Kind: EvidenceSaid, meeting: m, turns: turns, date: date,
-					Text: w.renderTurns(m, date, turns, 3000)})
+					Text: w.renderTurns(m, date, turns, limit)})
 			}
 		}
 		for _, d := range m.Decisions {
@@ -295,6 +311,8 @@ Write:
 - events: dated changes, newest first, at most five.
 - unresolved: questions raised and not settled, follow-ups still open, at most five.
 - conflicts: only where the document says one thing and a later meeting decided or stated something different. Leave it empty otherwise. Never present vocabulary differences as conflicts.
+- document: what the document itself says, in three to five lines: its status and date if it states them, what it proposes, and the choices that matter. Quote only D snippets.
+- timeline: one line for each meeting snippet (M), newest first, saying what was said or decided there about this document: who reported what, what was demoed, asked, agreed or deferred. Every meeting the snippets show gets its line.
 
 Rules:
 - Every line carries its support: one or more entries, each a snippet label and words copied exactly from that snippet. Copy, do not paraphrase or tidy: quotes are checked character for character against the snippet named beside them, and a line none of whose quotes check out is removed. A conflict's doc support must quote a D snippet and its said support a meeting snippet.
@@ -341,6 +359,15 @@ type briefReply struct {
 		Doc            support `json:"doc"`
 		Said           support `json:"said"`
 	} `json:"conflicts"`
+	Document []struct {
+		Text    string    `json:"text"`
+		Support []support `json:"support"`
+	} `json:"document"`
+	Timeline []struct {
+		Date    string    `json:"date"`
+		Text    string    `json:"text"`
+		Support []support `json:"support"`
+	} `json:"timeline"`
 }
 
 var briefSchema = func() *llm.JSONSchema {
@@ -359,6 +386,8 @@ var briefSchema = func() *llm.JSONSchema {
 			"conflicts": map[string]any{"type": "array", "items": llmjson.Object(map[string]any{
 				"doc_says": str, "discussion_says": str, "date": str, "doc": sup, "said": sup,
 			})},
+			"document": map[string]any{"type": "array", "items": line},
+			"timeline": map[string]any{"type": "array", "items": llmjson.Object(map[string]any{"date": str, "text": str, "support": sups})},
 		}),
 	}
 }()
@@ -471,6 +500,23 @@ func ground(r briefReply, snips []*snippet, relID string, speakers SpeakerNamer)
 			DocSays: c.DocSays, DiscussionSays: c.DiscussionSays, Date: c.Date, DocCite: docID, SaidCite: saidID,
 		})
 	}
+	for _, l := range r.Document {
+		// What the document says must rest on the document.
+		var docOnly []support
+		for _, sp := range l.Support {
+			if s := byLabel[sp.Label]; s != nil && s.Kind == EvidenceDoc {
+				docOnly = append(docOnly, sp)
+			}
+		}
+		if ids := cite(l.Text, docOnly); len(ids) > 0 {
+			b.Points = append(b.Points, Line{Text: l.Text, Cites: ids})
+		}
+	}
+	for _, e := range r.Timeline {
+		if ids := cite(e.Text, e.Support); len(ids) > 0 {
+			b.Timeline = append(b.Timeline, Event{Date: e.Date, Text: e.Text, Cites: ids})
+		}
+	}
 	// A headline that did not check out is replaced by the first current
 	// line that did, rather than leaving the brief without one.
 	if b.Headline.Text == "" && len(b.Current) > 0 {
@@ -479,6 +525,34 @@ func ground(r briefReply, snips []*snippet, relID string, speakers SpeakerNamer)
 	fixDates(b, evidence, snips)
 	b.Dropped = dropped
 	return b, evidence, dropped, unverified
+}
+
+// timelineChars bounds what an earlier meeting contributes to a brief.
+const timelineChars = 900
+
+// subjectTerms are the words of a document's title and of the sections its
+// meetings were linked on.
+func subjectTerms(subj *Subject, accepted []*Verdict) map[string]bool {
+	linked := make(map[string]bool)
+	for _, v := range accepted {
+		for _, key := range v.Sections {
+			linked[key] = true
+		}
+	}
+	terms := make(map[string]bool)
+	add := func(text string) {
+		for _, t := range search.QueryTerms(text) {
+			terms[t] = true
+		}
+	}
+	add(subj.Title)
+	for _, sec := range subj.Sections {
+		if linked[sectionKey(sec)] {
+			add(sec.HeadingPath)
+			add(excerpt(sec.Text, maxDocExcerptChars))
+		}
+	}
+	return terms
 }
 
 // fixDates sets the date of each conflict, and of each event that cites a
@@ -503,18 +577,21 @@ func fixDates(b *Brief, evidence []Evidence, snips []*snippet) {
 			b.Conflicts[i].Date = d
 		}
 	}
-	for i := range b.Events {
-		var dates []string
-		for _, c := range b.Events[i].Cites {
-			if d := meetingDate[c]; d != "" {
-				dates = append(dates, d)
+	for _, list := range [][]Event{b.Events, b.Timeline} {
+		for i := range list {
+			var dates []string
+			for _, c := range list[i].Cites {
+				if d := meetingDate[c]; d != "" {
+					dates = append(dates, d)
+				}
+			}
+			if len(dates) > 0 && !contains(dates, list[i].Date) {
+				sort.Strings(dates)
+				list[i].Date = dates[len(dates)-1]
 			}
 		}
-		if len(dates) > 0 && !contains(dates, b.Events[i].Date) {
-			sort.Strings(dates)
-			b.Events[i].Date = dates[len(dates)-1]
-		}
 	}
+	sort.SliceStable(b.Timeline, func(i, j int) bool { return b.Timeline[i].Date > b.Timeline[j].Date })
 }
 
 func containsEvidence(list []Evidence, id string) bool {

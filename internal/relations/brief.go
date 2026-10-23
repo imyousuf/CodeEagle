@@ -11,7 +11,7 @@ import (
 
 // Budgets for a rendered brief, in estimated tokens.
 const (
-	DefaultBriefBudget = 800
+	DefaultBriefBudget = 1200
 	MaxBriefBudget     = 2000
 )
 
@@ -43,6 +43,9 @@ type RenderOptions struct {
 	Flags []string
 	// Subject is the document as it is now, for its opening.
 	Subject *Subject
+	// Unconfirmed, when set, are lines for the closest meetings below the
+	// gate, with what was said there; otherwise they are listed by title.
+	Unconfirmed []string
 }
 
 // Bounds on the parts of a brief that come from the graph rather than the
@@ -53,6 +56,7 @@ const (
 	maxUnconfirmed    = 3
 	minUnconfirmedP   = 0.5
 	keepMeetingsLines = 5
+	keepTimelineLines = 8
 )
 
 // briefPart is one block of a rendered brief, with how much of it may be
@@ -124,6 +128,9 @@ func Render(rel *Relation, o RenderOptions) string {
 		m := o.Meetings[v.SessionID]
 		unconfirmed.lines = append(unconfirmed.lines, fmt.Sprintf("- %s %s (%s) p=%.2f", m.Date.Format("2006-01-02"), clip(m.Title, maxMeetingTitle), ShortID(m.NodeID), v.P))
 	}
+	if o.Unconfirmed != nil {
+		unconfirmed.lines = o.Unconfirmed
+	}
 
 	b := rel.Brief
 	if b == nil {
@@ -150,6 +157,33 @@ func Render(rel *Relation, o RenderOptions) string {
 	}
 
 	headline := b.Headline.Text + cites(b.Headline.Cites)
+	points := briefPart{title: "the document says:", keep: 3}
+	for _, l := range b.Points {
+		points.lines = append(points.lines, "- "+l.Text+cites(l.Cites))
+	}
+	// With a timeline, each meeting is a line of what was said there; the
+	// meetings it does not cover are still listed by title.
+	if len(b.Timeline) > 0 {
+		sessionOf := make(map[string]string, len(rel.Evidence))
+		for _, e := range rel.Evidence {
+			sessionOf[e.ID] = e.SessionID
+		}
+		covered := make(map[string]bool)
+		var lines []string
+		for _, e := range b.Timeline {
+			for _, c := range e.Cites {
+				covered[sessionOf[c]] = true
+			}
+			lines = append(lines, fmt.Sprintf("- %s %s%s", e.Date, e.Text, cites(e.Cites)))
+		}
+		for _, v := range byDate {
+			if m := o.Meetings[v.SessionID]; m != nil && !covered[v.SessionID] {
+				lines = append(lines, fmt.Sprintf("- %s %s (%s)", m.Date.Format("2006-01-02"), clip(m.Title, maxMeetingTitle), ShortID(m.NodeID)))
+			}
+		}
+		meetingsPart.lines = lines
+		meetingsPart.keep = keepTimelineLines
+	}
 	current := briefPart{title: "current:", keep: 3}
 	for _, l := range b.Current {
 		current.lines = append(current.lines, "- "+l.Text+cites(l.Cites))
@@ -219,9 +253,9 @@ func Render(rel *Relation, o RenderOptions) string {
 	expand += fmt.Sprintf("brief %s --since @r%d", ShortID(RelationID(rel.SubjectPath)), rel.Revision)
 	tail = append(tail, expand)
 
-	parts := []*briefPart{&current, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &delta}
+	parts := []*briefPart{&points, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &delta}
 	if !o.Since.IsZero() {
-		parts = []*briefPart{&delta, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed}
+		parts = []*briefPart{&delta, &points, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed}
 	}
 	render := func() string {
 		out := []string{header, headline}
@@ -242,8 +276,8 @@ func Render(rel *Relation, o RenderOptions) string {
 	for _, trim := range []struct {
 		p    *briefPart
 		keep int
-	}{{&delta, 0}, {&unconfirmed, 2}, {&unresolved, 2}, {&meetingsPart, keepMeetingsLines}, {&current, 3}, {&conflicts, 2},
-		{&unresolved, 0}, {&unconfirmed, 0}, {&meetingsPart, 3}, {&current, 1}} {
+	}{{&delta, 0}, {&unconfirmed, 2}, {&unresolved, 2}, {&meetingsPart, meetingsPart.keep}, {&points, 3}, {&current, 3},
+		{&conflicts, 2}, {&unresolved, 0}, {&unconfirmed, 0}, {&meetingsPart, 3}, {&points, 1}, {&current, 1}} {
 		if EstimateTokens(render()) <= o.Budget {
 			break
 		}
@@ -307,6 +341,12 @@ func allCites(b *Brief) []string {
 		add(u.Cites)
 	}
 	for _, e := range b.Events {
+		add(e.Cites)
+	}
+	for _, l := range b.Points {
+		add(l.Cites)
+	}
+	for _, e := range b.Timeline {
 		add(e.Cites)
 	}
 	return out

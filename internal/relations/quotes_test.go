@@ -186,3 +186,31 @@ func TestMeetingBriefSaysWhatTheMeetingSettled(t *testing.T) {
 		}
 	}
 }
+
+// TestBriefTimelineAndDocumentPoints covers the timeline, a line per meeting,
+// and the document's points, which must cite the document itself.
+func TestBriefTimelineAndDocumentPoints(t *testing.T) {
+	rel, subj, meetings := briefFixture()
+	reply := draft(t, map[string]any{
+		"headline": map[string]any{"text": "cap is five now",
+			"support": []map[string]any{{"label": "M1", "quote": "make the retry cap five"}}},
+		"current": []any{}, "events": []any{}, "unresolved": []any{}, "conflicts": []any{},
+		"document": []map[string]any{
+			{"text": "Clients retry at most three times", "support": []map[string]any{{"label": "D1", "quote": "at most three times"}}},
+			{"text": "a point resting on a meeting", "support": []map[string]any{{"label": "M1", "quote": "make the retry cap five"}}},
+		},
+		"timeline": []map[string]any{
+			{"date": "2026-01-01", "text": "Ana proposed a cap of five", "support": []map[string]any{{"label": "M1", "quote": "make the retry cap five"}}},
+		},
+	})
+	if _, err := newWriter(&stubLLM{reply: reply}, nil, day).Update(context.Background(), rel, subj, meetings); err != nil {
+		t.Fatal(err)
+	}
+	b := rel.Brief
+	if len(b.Points) != 1 || b.Points[0].Text != "Clients retry at most three times" {
+		t.Errorf("points = %+v; want only the one citing the document", b.Points)
+	}
+	if len(b.Timeline) != 1 || b.Timeline[0].Date != "2026-10-14" {
+		t.Errorf("timeline = %+v; want one line dated from its meeting", b.Timeline)
+	}
+}

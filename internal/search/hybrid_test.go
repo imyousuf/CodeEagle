@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
@@ -113,5 +114,26 @@ func TestHybridMinScoreAppliesAfterReranking(t *testing.T) {
 		if r.Score < 0.99 {
 			t.Errorf("%s scored %.2f, under the minimum", r.Node.ID, r.Score)
 		}
+	}
+}
+
+// failingVectors stands in for an embedding service that is down.
+type failingVectors struct{}
+
+func (failingVectors) Search(context.Context, string, int) ([]vectorstore.SearchResult, error) {
+	return nil, errors.New("embed query: connection refused")
+}
+func (failingVectors) StaleInLastSearch() int { return 0 }
+
+// TestHybridFallsBackToWordsWhenVectorsFail covers the embedding service
+// failing under load: the words still match.
+func TestHybridFallsBackToWordsWhenVectorsFail(t *testing.T) {
+	store, _ := hybridFixture(t)
+	res, err := Hybrid(context.Background(), store, failingVectors{}, "retry policy", HybridOptions{Limit: 5})
+	if err != nil {
+		t.Fatalf("Hybrid failed outright: %v", err)
+	}
+	if res.VectorErr == nil || len(res.Results) == 0 {
+		t.Errorf("VectorErr %v, %d results; want the error noted and keyword results", res.VectorErr, len(res.Results))
 	}
 }

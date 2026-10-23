@@ -164,6 +164,11 @@ type Brief struct {
 	Events     []Event    `json:"events,omitempty"`
 	Unresolved []Open     `json:"unresolved,omitempty"`
 	Conflicts  []Conflict `json:"conflicts,omitempty"`
+	// Points are what the document itself says, citing the document.
+	Points []Line `json:"document,omitempty"`
+	// Timeline has a line per meeting, newest first: what was said or
+	// decided there about the document.
+	Timeline []Event `json:"timeline,omitempty"`
 	// Dropped counts lines the writer produced whose citations did not
 	// check out, so a brief that lost most of its lines says so.
 	Dropped int `json:"unverified_dropped,omitempty"`

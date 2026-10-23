@@ -62,14 +62,78 @@ func LoadLibrary(ctx context.Context, store graph.Store, resolve func(string) st
 // Brief renders a relation's brief with its freshness as of now.
 func (l *Library) Brief(rel *Relation, budget int, since time.Time, sinceLabel string) string {
 	return Render(rel, RenderOptions{
-		Budget:     budget,
-		Since:      since,
-		SinceLabel: sinceLabel,
-		Meetings:   l.Meetings,
-		Flags:      Freshness(rel, l.Subjects[rel.SubjectPath], l.Meetings),
-		Subject:    l.Subjects[rel.SubjectPath],
+		Budget:      budget,
+		Since:       since,
+		SinceLabel:  sinceLabel,
+		Meetings:    l.Meetings,
+		Flags:       Freshness(rel, l.Subjects[rel.SubjectPath], l.Meetings),
+		Subject:     l.Subjects[rel.SubjectPath],
+		Unconfirmed: l.unconfirmed(rel),
 	})
 }
+
+// unconfirmed lists the closest meetings below the gate with what was said
+// in the part judged, so an agent can weigh them without opening each. With
+// few confirmed meetings it reaches further down, since then they are most
+// of what is known; an agent given nothing went looking, and spent its
+// budget doing so. Without a store it returns nil and titles are listed.
+func (l *Library) unconfirmed(rel *Relation) []string {
+	if l.Store == nil {
+		return nil
+	}
+	floor, limit := minUnconfirmedP, maxUnconfirmed
+	if len(rel.Accepted()) < 3 {
+		floor, limit = sparseUnconfirmedP, sparseUnconfirmed
+	}
+	var near []*Verdict
+	for _, v := range rel.Links {
+		if !v.Accepted && v.P >= floor && l.Meetings[v.SessionID] != nil {
+			near = append(near, v)
+		}
+	}
+	sort.SliceStable(near, func(i, j int) bool { return near[i].P > near[j].P })
+	lines := []string{}
+	for i, v := range near {
+		if i >= limit {
+			break
+		}
+		m := l.Meetings[v.SessionID]
+		line := fmt.Sprintf("- %s %s (%s) p=%.2f", m.Date.Format("2006-01-02"), clip(m.Title, maxMeetingTitle), ShortID(m.NodeID), v.P)
+		if said := l.saidIn(m, v); said != "" {
+			line += ": " + said
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// saidIn is the summary of the part of a meeting a verdict judged.
+func (l *Library) saidIn(m *Meeting, v *Verdict) string {
+	if len(v.Ranges) == 0 {
+		return ""
+	}
+	children, err := l.Store.GetNeighbors(context.Background(), m.NodeID, graph.EdgeContains, graph.Outgoing)
+	if err != nil {
+		return ""
+	}
+	rg := v.Ranges[0]
+	for _, c := range children {
+		if c.Type != graph.NodeTopicSegment {
+			continue
+		}
+		if startOf(c) <= rg.End && endOf(c) >= rg.Start {
+			return clip(strings.Join(strings.Fields(c.Properties[graph.PropSummary]), " "), maxUnconfirmedSaid)
+		}
+	}
+	return ""
+}
+
+// Bounds on the unconfirmed meetings a brief names.
+const (
+	sparseUnconfirmedP = 0.3
+	sparseUnconfirmed  = 5
+	maxUnconfirmedSaid = 180
+)
 
 // RelationByID returns the relation whose node ID starts with prefix.
 func (l *Library) RelationByID(prefix string) *Relation {

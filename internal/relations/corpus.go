@@ -179,6 +179,11 @@ func loadSubjects(ctx context.Context, store graph.Store, keep SubjectFilter, fo
 			s.Title = titleFromSections(s)
 		}
 		sort.Slice(s.Sections, func(i, j int) bool { return s.Sections[i].Line < s.Sections[j].Line })
+		// A document that opens with its heading states its status under
+		// it, in the first section rather than before it.
+		if strings.TrimSpace(s.Preamble) == "" && len(s.Sections) > 0 {
+			s.Preamble = excerpt(s.Sections[0].Text, maxPreamble)
+		}
 		if forProposing {
 			s.Topics = outgoing(ctx, store, s.RootID, graph.EdgeHasTopic)
 		}
