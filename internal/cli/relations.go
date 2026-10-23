@@ -373,11 +373,22 @@ func runRelationsJudge(ctx context.Context, out, errOut io.Writer, cfg *config.C
 	reads := append(append([]string(nil), base.ReadBranches()...), embedded.MeetingScope, embedded.RelationScope)
 	store := base.View(embedded.RelationScope, reads)
 	vec, closeVec := openRelationVectors(cfg, base, branch)
-	defer closeVec()
+	defer func() { closeVec() }()
 
 	run, err := proposeRelations(ctx, errOut, cfg, store, vec, o)
 	if err != nil {
 		return err
+	}
+	// Proposing is the only step that reads vectors. The read-only handle
+	// is let go now, so the rewritten briefs can be embedded through a
+	// writable one at the end.
+	closeVec()
+	closeVec = func() {}
+	// Every document gets a relation, and so a brief.
+	if n, err := relations.EnsureRelations(ctx, store, run.subjects, run.existing, time.Now()); err != nil {
+		return err
+	} else if n > 0 {
+		fmt.Fprintf(out, "Created relations for %d documents not yet related to anything.\n", n)
 	}
 	if o.briefsOnly {
 		return writeRelationBriefs(ctx, out, errOut, cfg, store, run)
@@ -447,7 +458,28 @@ func writeRelationBriefs(ctx context.Context, out, errOut io.Writer, cfg *config
 		fmt.Fprintf(out, " · %d more pending, past relations.max_briefs_per_run", br.Pending)
 	}
 	fmt.Fprintln(out)
+	if n := reembedWritable(ctx, cfg, store, br.WrittenPaths); n > 0 {
+		fmt.Fprintf(out, "Re-embedded %d rewritten briefs for search.\n", n)
+	}
 	return err
+}
+
+// reembedWritable opens the vector index for writing and indexes again the
+// relations whose briefs were rewritten. The bulk command reads vectors
+// through a read-only handle, closed by now.
+func reembedWritable(ctx context.Context, cfg *config.Config, store *embedded.BranchStore, paths []string) int {
+	if len(paths) == 0 {
+		return 0
+	}
+	vs, err := openVectorStore(cfg, vectorGraphView(store), store.WriteBranch(), nil)
+	if err != nil || vs == nil {
+		return 0
+	}
+	defer vs.Close()
+	if loaded, err := vs.Load(); err != nil || !loaded {
+		return 0
+	}
+	return reembedRelations(ctx, store, vs, paths)
 }
 
 // newRelationBriefWriter builds the brief writer from configuration. The

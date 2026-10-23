@@ -7,6 +7,7 @@ import (
 
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
+	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/relations"
 )
@@ -26,7 +27,7 @@ func relationsCodeScope(repos []string) (string, bool) {
 // is reported, and whatever did not finish is picked up by the next run.
 func autoRelations(ctx context.Context, cfg *config.Config, store *embedded.BranchStore, repos []string,
 	vec relations.Vectors, logFn, warnFn func(string, ...any)) {
-	if !cfg.RelationsEnabled() || vec == nil {
+	if !cfg.RelationsEnabled() {
 		return
 	}
 	code, ok := relationsCodeScope(repos)
@@ -59,12 +60,41 @@ func autoRelations(ctx context.Context, cfg *config.Config, store *embedded.Bran
 	if err != nil {
 		warnFn("Warning: relations: %v", err)
 	}
-	if rep == nil || rep.NoVectors {
+	if rep == nil {
 		return
+	}
+	if n := reembedRelations(ctx, view, vec, rep.Rewritten); n > 0 {
+		logFn("relations: re-embedded %d rewritten briefs for search", n)
 	}
 	if rep.SubjectsConsidered+rep.MeetingsConsidered+rep.BriefsWritten+rep.BriefsPending > 0 {
 		logFn("%s", rep.Summary())
 	}
+}
+
+// reembedder is a vector index that can index nodes again and save.
+type reembedder interface {
+	IndexNodes(ctx context.Context, nodes []*graph.Node) error
+	Save() error
+}
+
+// reembedRelations indexes again the relations whose briefs were rewritten.
+// A relation's ID never changes, and the index only adds nodes it lacks, so
+// without this search kept matching each relation's first brief forever.
+func reembedRelations(ctx context.Context, store graph.Store, vec relations.Vectors, paths []string) int {
+	re, ok := vec.(reembedder)
+	if !ok || len(paths) == 0 {
+		return 0
+	}
+	var nodes []*graph.Node
+	for _, path := range paths {
+		if n, err := store.GetNode(ctx, relations.RelationID(path)); err == nil && n != nil {
+			nodes = append(nodes, n)
+		}
+	}
+	if len(nodes) == 0 || re.IndexNodes(ctx, nodes) != nil || re.Save() != nil {
+		return 0
+	}
+	return len(nodes)
 }
 
 // relateNewMeetings relates newly indexed meetings to the documents they

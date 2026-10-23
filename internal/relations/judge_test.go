@@ -235,8 +235,10 @@ func TestObserveRecordsWhenEachSectionChanged(t *testing.T) {
 	retry := subjects[0]
 	r := New(retry.Path)
 	r.Observe(retry, day)
-	if got := r.Sections["Retry budget design > Limits"].FirstSeen; !got.Equal(day) {
-		t.Fatalf("first seen = %v", got)
+	// The first observation is a baseline: nothing is known about when the
+	// sections were written, so none of them reads as changed.
+	if got := r.Sections["Retry budget design > Limits"].FirstSeen; !got.IsZero() {
+		t.Fatalf("first observation recorded %v, want a zero baseline", got)
 	}
 	later := day.AddDate(0, 0, 7)
 	retry.Sections[0].Hash = "limits-v2"
@@ -244,7 +246,7 @@ func TestObserveRecordsWhenEachSectionChanged(t *testing.T) {
 	if got := r.Sections["Retry budget design > Limits"].FirstSeen; !got.Equal(later) {
 		t.Errorf("an edited section kept its old first-seen time %v", got)
 	}
-	if got := r.Sections["Retry budget design > Jitter"].FirstSeen; !got.Equal(day) {
+	if got := r.Sections["Retry budget design > Jitter"].FirstSeen; !got.IsZero() {
 		t.Errorf("an unchanged section's first-seen time moved to %v", got)
 	}
 }

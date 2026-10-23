@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
 )
@@ -88,6 +89,9 @@ type IncrementalReport struct {
 	BriefTokensIn      int
 	BriefTokensOut     int
 	Dropped            int
+	// Rewritten are the documents whose briefs were rewritten; their
+	// relations need embedding again for search to see the new text.
+	Rewritten []string
 }
 
 // Incremental considers what is new or changed: documents whose content and
@@ -138,11 +142,44 @@ func incremental(ctx context.Context, store graph.Store, p *Proposer, subjects [
 			o.MaxMeetings = d.MaxMeetings
 		}
 	}
-	if !p.HasVectors() {
+	// Every document gets a relation, and so a brief, whether or not a
+	// meeting discussed it; judging needs vectors, briefs do not.
+	if _, err := EnsureRelations(ctx, store, subjects, existing, time.Now()); err != nil {
+		return rep, err
+	}
+	if p.HasVectors() {
+		if err := judgePending(ctx, store, p, subjects, meetings, existing, state, judge, gate, o, rep); err != nil {
+			return rep, err
+		}
+	} else {
 		rep.NoVectors = true
-		return rep, nil
 	}
 
+	// Briefs whose inputs changed, up to the bound.
+	if writer != nil {
+		by := make(map[string]*Subject, len(subjects))
+		for _, s := range subjects {
+			by[s.Path] = s
+		}
+		maxBriefs := o.MaxBriefs
+		if maxBriefs <= 0 {
+			maxBriefs = DefaultIncrementalOptions().MaxBriefs
+		}
+		br, err := WriteBriefs(ctx, store, writer, existing, by, meetings, maxBriefs, DefaultBriefWorkers)
+		rep.BriefsWritten, rep.BriefsPending, rep.Dropped = br.Written, br.Pending, br.Dropped
+		rep.Rewritten = br.WrittenPaths
+		rep.BriefTokensIn, rep.BriefTokensOut = br.TokensIn, br.TokensOut
+		if err != nil {
+			return rep, err
+		}
+	}
+	return rep, nil
+}
+
+// judgePending considers what is new or changed, judges its candidates and
+// records what finished in the scan state.
+func judgePending(ctx context.Context, store graph.Store, p *Proposer, subjects []*Subject, meetings map[string]*Meeting,
+	existing map[string]*Relation, state *ScanState, judge *Judge, gate float64, o IncrementalOptions, rep *IncrementalReport) error {
 	// What is pending, newest first.
 	var pendingSubjects []*Subject
 	for _, s := range subjects {
@@ -215,7 +252,7 @@ func incremental(ctx context.Context, store graph.Store, p *Proposer, subjects [
 		stats, err := relater.Judge(ctx, prop.Candidates, existing)
 		rep.Judged = stats
 		if err != nil {
-			return rep, err
+			return err
 		}
 		for _, c := range prop.Candidates {
 			if v, ok := existing[c.Subject.Path]; !ok || !v.Judged(c.Meeting.SessionID, c.SigDoc(), c.SigMeeting()) {
@@ -255,27 +292,10 @@ func incremental(ctx context.Context, store graph.Store, p *Proposer, subjects [
 		}
 	}
 	if err := state.Save(ctx, store); err != nil {
-		return rep, fmt.Errorf("save relation scan state: %w", err)
+		return fmt.Errorf("save relation scan state: %w", err)
 	}
 
-	// Briefs whose inputs changed, up to the bound.
-	if writer != nil {
-		by := make(map[string]*Subject, len(subjects))
-		for _, s := range subjects {
-			by[s.Path] = s
-		}
-		maxBriefs := o.MaxBriefs
-		if maxBriefs <= 0 {
-			maxBriefs = DefaultIncrementalOptions().MaxBriefs
-		}
-		br, err := WriteBriefs(ctx, store, writer, existing, by, meetings, maxBriefs, DefaultBriefWorkers)
-		rep.BriefsWritten, rep.BriefsPending, rep.Dropped = br.Written, br.Pending, br.Dropped
-		rep.BriefTokensIn, rep.BriefTokensOut = br.TokensIn, br.TokensOut
-		if err != nil {
-			return rep, err
-		}
-	}
-	return rep, nil
+	return nil
 }
 
 // selectFairly splits the per-run cap between the candidates pending
@@ -340,7 +360,7 @@ func dedupe(cands []*Candidate) []*Candidate {
 
 // Summary is the run's one-line cost report.
 func (r *IncrementalReport) Summary() string {
-	if r.NoVectors {
+	if r.NoVectors && r.BriefsWritten == 0 {
 		return "relations: waiting for documents and meetings to be embedded"
 	}
 	if r.Proposal == nil {

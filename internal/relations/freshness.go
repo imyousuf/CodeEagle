@@ -50,7 +50,7 @@ func Freshness(rel *Relation, subj *Subject, meetings map[string]*Meeting) []str
 		}
 	}
 
-	if len(rel.Accepted()) > 0 && (rel.Brief == nil || InputsHash(rel, subj, rel.BriefModel) != rel.BriefInputsHash) {
+	if rel.Brief == nil || InputsHash(rel, subj, rel.BriefModel) != rel.BriefInputsHash {
 		flags = append(flags, FlagBriefPending)
 	}
 

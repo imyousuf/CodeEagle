@@ -26,6 +26,9 @@ type BriefRun struct {
 	// Failed counts briefs that could not be written; the next run retries
 	// them.
 	Failed int
+	// WrittenPaths are the documents whose briefs were rewritten, so their
+	// relations can be embedded again.
+	WrittenPaths []string
 }
 
 // WriteBriefs rewrites the briefs of relations whose inputs changed, at most
@@ -37,22 +40,29 @@ func WriteBriefs(ctx context.Context, store graph.Store, w *BriefWriter, rels ma
 	if workers <= 0 {
 		workers = DefaultBriefWorkers
 	}
-	paths := make([]string, 0, len(rels))
-	for path := range rels {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
+	// Briefs whose meetings changed come first, then the most recently
+	// changed documents: within a run's bound, what was just discussed or
+	// just edited is what a reader is likeliest to ask about.
 	var due []string
-	for _, path := range paths {
-		rel, subj := rels[path], subjects[path]
-		if subj == nil || len(rel.Accepted()) == 0 || InputsHash(rel, subj, w.client.Model()) == rel.BriefInputsHash {
-			continue
+	for path, rel := range rels {
+		if subj := subjects[path]; subj != nil && InputsHash(rel, subj, w.client.Model()) != rel.BriefInputsHash {
+			due = append(due, path)
 		}
-		if limit > 0 && len(due) >= limit {
-			run.Pending++
-			continue
+	}
+	sort.Slice(due, func(i, j int) bool {
+		a, b := rels[due[i]], rels[due[j]]
+		am, bm := len(a.Accepted()) > 0, len(b.Accepted()) > 0
+		if am != bm {
+			return am
 		}
-		due = append(due, path)
+		if ta, tb := subjects[due[i]].UpdatedAt, subjects[due[j]].UpdatedAt; !ta.Equal(tb) {
+			return ta.After(tb)
+		}
+		return due[i] < due[j]
+	})
+	if limit > 0 && len(due) > limit {
+		run.Pending = len(due) - limit
+		due = due[:limit]
 	}
 
 	relater := NewRelater(store, nil, RelaterOptions{})
@@ -86,6 +96,7 @@ func WriteBriefs(ctx context.Context, store graph.Store, w *BriefWriter, rels ma
 					}
 				case rep.Written:
 					run.Written++
+					run.WrittenPaths = append(run.WrittenPaths, path)
 					run.Dropped += rep.Dropped
 					if len(rep.Unverified) > 0 {
 						run.Unverified[path] = rep.Unverified

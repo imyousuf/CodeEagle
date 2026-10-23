@@ -109,10 +109,6 @@ type snippet struct {
 func (w *BriefWriter) Update(ctx context.Context, rel *Relation, subj *Subject, meetings map[string]*Meeting) (BriefReport, error) {
 	var rep BriefReport
 	accepted := rel.Accepted()
-	if len(accepted) == 0 {
-		rep.Reason = "no meeting discusses it"
-		return rep, nil
-	}
 	hash := InputsHash(rel, subj, w.client.Model())
 	if hash == rel.BriefInputsHash {
 		rep.Reason = "unchanged"

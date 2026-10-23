@@ -119,14 +119,24 @@ func (r *Relater) Judge(ctx context.Context, cands []*Candidate, existing map[st
 // Observe records the subject's current state: its hash, and for each
 // section, when its present text was first seen. This is the document's
 // change history, which the graph does not otherwise keep.
+//
+// The first observation is a baseline: its sections get a zero FirstSeen,
+// since nothing is known about when they were written, and recording the
+// moment they were first indexed made "what changed since" report every
+// section of every document as new.
 func (rel *Relation) Observe(subj *Subject, now time.Time) {
+	baseline := len(rel.Sections) == 0
 	rel.SubjectHash = subj.Hash
 	present := make(map[string]bool, len(subj.Sections))
 	for _, sec := range subj.Sections {
 		key := sectionKey(sec)
 		present[key] = true
 		if st, ok := rel.Sections[key]; !ok || st.Hash != sec.Hash {
-			rel.Sections[key] = SectionState{Hash: sec.Hash, FirstSeen: now}
+			seen := now
+			if baseline {
+				seen = time.Time{}
+			}
+			rel.Sections[key] = SectionState{Hash: sec.Hash, FirstSeen: seen}
 		}
 	}
 	for key := range rel.Sections {
@@ -199,4 +209,26 @@ func (r *Relater) Write(ctx context.Context, rel *Relation, subj *Subject) error
 		}
 	}
 	return nil
+}
+
+// EnsureRelations gives every subject a relation, so every document has a
+// brief whether or not a meeting discussed it: a spec with no confirmed
+// meeting had nothing to say about itself, and answers left its content out.
+// It returns how many relations it created.
+func EnsureRelations(ctx context.Context, store graph.Store, subjects []*Subject, existing map[string]*Relation, now time.Time) (int, error) {
+	relater := NewRelater(store, nil, RelaterOptions{})
+	created := 0
+	for _, s := range subjects {
+		if existing[s.Path] != nil {
+			continue
+		}
+		rel := New(s.Path)
+		rel.Observe(s, now)
+		if err := relater.Write(ctx, rel, s); err != nil {
+			return created, fmt.Errorf("create relation for %s: %w", s.Path, err)
+		}
+		existing[s.Path] = rel
+		created++
+	}
+	return created, nil
 }

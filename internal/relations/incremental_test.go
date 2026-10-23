@@ -272,3 +272,30 @@ func TestIncrementalForgetsWhatLeftTheCorpus(t *testing.T) {
 		t.Error("a deleted document stayed in the record")
 	}
 }
+
+// TestEveryDocumentGetsABrief covers a document no meeting discussed: it gets
+// a relation, and a brief written from its own text.
+func TestEveryDocumentGetsABrief(t *testing.T) {
+	store, _ := incrementalStore(t)
+	ctx := context.Background()
+	subjects, err := LoadSubjects(ctx, store, nil)
+	if err != nil || len(subjects) != 1 {
+		t.Fatalf("subjects = %d, %v", len(subjects), err)
+	}
+	existing := map[string]*Relation{}
+	if n, err := EnsureRelations(ctx, store, subjects, existing, day); err != nil || n != 1 {
+		t.Fatalf("created %d, %v", n, err)
+	}
+	llm := &stubLLM{reply: `{"headline":{"text":"three retries at most","support":[{"label":"D2","quote":"retry at most three times"}]},` +
+		`"current":[],"events":[],"unresolved":[],"conflicts":[],"timeline":[],` +
+		`"document":[{"text":"Clients retry at most three times","support":[{"label":"D2","quote":"retry at most three times"}]}]}`}
+	w := NewBriefWriter(llm, nil, spokenStub{}, nil, BriefOptions{}, func() time.Time { return day })
+	rel := existing["docs/retry.md"]
+	rep, err := w.Update(ctx, rel, subjects[0], map[string]*Meeting{})
+	if err != nil || !rep.Written {
+		t.Fatalf("a document with no meeting got no brief: %+v, %v", rep, err)
+	}
+	if len(rel.Brief.Points) != 1 {
+		t.Errorf("points = %+v", rel.Brief.Points)
+	}
+}

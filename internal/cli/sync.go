@@ -234,6 +234,10 @@ func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, v
 		// Relate what changed to what was discussed, now that both can be
 		// found by meaning.
 		autoRelations(cmdCtx, cfg, store, paths, vs, logFn, warnFn)
+	} else {
+		// Without vectors nothing is judged, but documents still get
+		// their briefs.
+		autoRelations(cmdCtx, cfg, store, paths, nil, logFn, warnFn)
 	}
 
 	// Cleanup stale branches.
