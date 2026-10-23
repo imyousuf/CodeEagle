@@ -416,6 +416,10 @@ func (v *verbs) brief(ctx context.Context, arg string, budget int, render render
 		}
 		return strings.Join(outs, "\n\n---\n\n"), nil
 	}
+	// A path, as find and every brief print them, names its document.
+	if rel := lib.Relations[arg]; rel != nil {
+		return render(lib, rel, budget)
+	}
 	if hexPrefix.MatchString(arg) {
 		if out, ok, err := v.briefByID(ctx, lib, arg, budget, render); ok || err != nil {
 			return out, err

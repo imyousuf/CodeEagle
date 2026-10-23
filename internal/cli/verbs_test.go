@@ -199,4 +199,12 @@ func TestBriefTakesSeveralIDs(t *testing.T) {
 	if !strings.Contains(out, "about docs/a.md") || !strings.Contains(out, "about docs/b.md") {
 		t.Errorf("brief of two IDs = %q", out)
 	}
+
+	out, err = v.Brief(ctx, "docs/b.md", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "about docs/b.md") || strings.Contains(out, "about docs/a.md") {
+		t.Errorf("brief of a path = %q", out)
+	}
 }

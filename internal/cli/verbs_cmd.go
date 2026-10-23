@@ -47,15 +47,16 @@ func newBriefCmd() *cobra.Command {
 		all     bool
 	)
 	cmd := &cobra.Command{
-		Use:   "brief <id | words>",
+		Use:   "brief <id | path | words>",
 		Short: "Where a document stands: what holds now, what changed, what is open, with citations",
 		Long: `Print the brief of a document and the meetings that discussed it: a headline,
 what holds now, where the document and a later meeting disagree, what is
 unresolved, and freshness flags. Every line ends with the evidence IDs it
 rests on; show expands one.
 
-Give an ID from find, or words. Words that clearly name one document are
-briefed; words that match several list them instead.
+Give an ID from find, a document's path as find prints it, or words. Words
+that clearly name one document are briefed; words that match several list
+them instead.
 
 --budget caps the output in estimated tokens (default 1500, at most 2000);
 lines are dropped in a fixed order to fit. --since adds what changed after a
@@ -165,7 +166,7 @@ func verbTools(v *verbs) []agents.Tool {
 			name: "brief",
 			desc: "Where a document stands (headline, what holds now, conflicts, open items, freshness; lines cite evidence IDs), or a meeting's summary, decisions, topics and follow-ups.",
 			params: map[string]any{
-				"target": map[string]any{"type": "string", "description": "An ID from find, several IDs separated by commas to brief them in one call, or words naming the document."},
+				"target": map[string]any{"type": "string", "description": "An ID from find, several IDs separated by commas to brief them in one call, a document's path, or words naming the document."},
 				"budget": map[string]any{"type": "integer", "description": "Most tokens to return (default 1500, max 2000)."},
 				"since":  map[string]any{"type": "string", "description": "Also what changed after: a date, 7d, or @rN from a previous brief."},
 			},
