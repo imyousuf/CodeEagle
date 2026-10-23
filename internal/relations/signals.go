@@ -294,10 +294,14 @@ func (p *Proposer) HasVectors() bool {
 // Select scores candidates, sets aside pairs already judged, and applies the
 // caps, best first.
 //
-// A pair that nothing near in meaning proposed is set aside when the
-// document's sections have vectors: on 160 labelled pairs, the 32 proposed
-// by a name or an identifier alone held no related pair at all. Without
-// vectors those signals are all there is, so they still propose.
+// A pair proposed only by a name or an identifier is judged like any other.
+// It used to be set aside where the document had vectors: with the judge
+// shown a segment's opening in batches, the 32 such labelled pairs held no
+// related one. Shown the relevant stretch alone, the judge puts all 32 at
+// 0.40 or below, while 5 of the 80 meetings the checked references name were
+// proposed only so; one carried the latest state of its spec. They start
+// from a lower score than a pair near in meaning, so within the caps they
+// are mostly judged after those.
 func (p *Proposer) Select(cands []*Candidate, judged func(*Candidate) bool) *Proposal {
 	maxPairs := p.opts.MaxPairs
 	if maxPairs <= 0 {
@@ -310,22 +314,7 @@ func (p *Proposer) Select(cands []*Candidate, judged func(*Candidate) bool) *Pro
 // configured one; a negative cap means none. It reorders cands.
 func (p *Proposer) SelectWithin(cands []*Candidate, judged func(*Candidate) bool, maxPairs int) *Proposal {
 	p.prepare()
-	embedded := make(map[*Subject]bool)
-	for _, sv := range p.secVecs {
-		embedded[sv.subj] = true
-	}
-	kept := cands[:0]
-	unsupported := 0
-	for _, c := range cands {
-		if c.Signals&SignalSaid == 0 && embedded[c.Subject] {
-			unsupported++
-			c.Status = StatusUnsupported
-			continue
-		}
-		kept = append(kept, c)
-	}
-	prop := &Proposal{Proposed: len(cands), BySignal: make(map[string]int), Unsupported: unsupported}
-	cands = kept
+	prop := &Proposal{Proposed: len(cands), BySignal: make(map[string]int)}
 	for _, c := range cands {
 		c.Score = score(c)
 		for _, n := range c.Signals.Names() {

@@ -226,25 +226,19 @@ func TestNameNeedsThePhraseInOrder(t *testing.T) {
 	}
 }
 
-// TestNameAloneDoesNotProposeWhenVectorsExist covers the measured finding
-// that pairs proposed by a name or identifier alone were never related on
-// the labelled sample: with vectors to consult, meaning must support a pair.
-func TestNameAloneDoesNotProposeWhenVectorsExist(t *testing.T) {
+// TestNameAloneIsJudgedAfterMeaning covers pairs proposed only by a name or
+// an identifier: judged, since the measured judge rejects the unrelated ones
+// on its own, and ranked after a pair meaning supports well.
+func TestNameAloneIsJudgedAfterMeaning(t *testing.T) {
 	subjects, meetings := corpus()
 	retry := subjects[0]
 	vec := fakeVectors{"sec-limits": {1, 0, 0}, "seg-lunch": {0, 1, 0}}
 	p := NewProposer(subjects, meetings, vec, DefaultOptions())
 	nameOnly := &Candidate{Subject: retry, Meeting: meetings["s-plat"], Signals: SignalName, NameScore: 1}
-	said := &Candidate{Subject: retry, Meeting: meetings["s-fin"], Signals: SignalSaid, Cosine: 0.4}
+	said := &Candidate{Subject: retry, Meeting: meetings["s-fin"], Signals: SignalSaid, Cosine: 0.75}
 
 	prop := p.Select([]*Candidate{nameOnly, said}, nil)
-	if prop.Unsupported != 1 || len(prop.Candidates) != 1 || prop.Candidates[0] != said {
-		t.Errorf("selected %d (unsupported %d); want only the pair meaning proposed", len(prop.Candidates), prop.Unsupported)
-	}
-
-	// Without vectors for the document, a name is all there is to go on.
-	p = NewProposer(subjects, meetings, nil, DefaultOptions())
-	if prop := p.Select([]*Candidate{nameOnly}, nil); len(prop.Candidates) != 1 {
-		t.Error("with no vectors, a named title no longer proposed the pair")
+	if len(prop.Candidates) != 2 || prop.Candidates[0] != said {
+		t.Errorf("selected %d, first %v; want both, meaning first", len(prop.Candidates), prop.Candidates)
 	}
 }

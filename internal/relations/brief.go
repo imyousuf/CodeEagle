@@ -11,7 +11,7 @@ import (
 
 // Budgets for a rendered brief, in estimated tokens.
 const (
-	DefaultBriefBudget = 1200
+	DefaultBriefBudget = 1500
 	MaxBriefBudget     = 2000
 )
 
@@ -53,10 +53,10 @@ type RenderOptions struct {
 const (
 	maxDocumentLine   = 320
 	maxMeetingTitle   = 70
-	maxUnconfirmed    = 3
+	maxUnconfirmed    = 5
 	minUnconfirmedP   = 0.5
 	keepMeetingsLines = 5
-	keepTimelineLines = 8
+	keepTimelineLines = 12
 )
 
 // briefPart is one block of a rendered brief, with how much of it may be

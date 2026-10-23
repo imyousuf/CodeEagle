@@ -131,7 +131,7 @@ func (l *Library) saidIn(m *Meeting, v *Verdict) string {
 // Bounds on the unconfirmed meetings a brief names.
 const (
 	sparseUnconfirmedP = 0.3
-	sparseUnconfirmed  = 5
+	sparseUnconfirmed  = 6
 	maxUnconfirmedSaid = 180
 )
 
