@@ -36,6 +36,10 @@ func newRelationsCmd() *cobra.Command {
 		reset      bool
 		jopts      relations.JudgeOptions
 		scoredOut  string
+		docs       bool
+		limitDocs  int
+		sampleDocs string
+		measureDoc string
 	)
 
 	cmd := &cobra.Command{
@@ -72,7 +76,11 @@ again, so the next runs pay to rebuild what was there.`,
 			}
 			o := relationsPlanOptions{
 				doc: doc, meeting: meeting, sampleOut: sampleOut, sampleSize: sampleSize, top: top, limit: limit,
-				briefsOnly: briefsOnly, judge: jopts,
+				briefsOnly: briefsOnly, judge: jopts, docs: docs || sampleDocs != "", limitDocs: limitDocs,
+			}
+			o.sampleDocs = sampleDocs
+			if measureDoc != "" {
+				return runRelationsMeasureDocs(cmd.Context(), cmd.OutOrStdout(), cfg, measureDoc, scoredOut)
 			}
 			if reset {
 				return runRelationsReset(cmd.OutOrStdout(), cfg)
@@ -98,6 +106,10 @@ again, so the next runs pay to rebuild what was there.`,
 	cmd.Flags().Float64Var(&target, "target-precision", 0.95, "precision the suggested gate must reach, with --measure")
 	cmd.Flags().BoolVar(&briefsOnly, "briefs-only", false, "rewrite briefs whose inputs changed, without judging new pairs")
 	cmd.Flags().BoolVar(&reset, "reset", false, "delete every relation, verdict and brief")
+	cmd.Flags().BoolVar(&docs, "docs", false, "also propose and judge how documents relate to each other (changes, replaces, records, companion)")
+	cmd.Flags().IntVar(&limitDocs, "limit-docs", 0, "judge at most this many document pairs (default: relations.max_doc_pairs_per_run)")
+	cmd.Flags().StringVar(&sampleDocs, "sample-out-docs", "", "with --plan: write a stratified sample of document pairs to label into this directory")
+	cmd.Flags().StringVar(&measureDoc, "measure-docs", "", "judge labelled document pairs (from --sample-out-docs) and report how the answers match")
 	// Experiments on what the judge is shown, measured with --measure.
 	cmd.Flags().IntVar(&jopts.BatchSize, "judge-batch", 0, "with --measure: pairs per decision-model request")
 	cmd.Flags().BoolVar(&jopts.Opening, "judge-opening", false, "show a segment from its start, as before the judge was measured")
@@ -132,6 +144,9 @@ type relationsPlanOptions struct {
 	doc, meeting, sampleOut string
 	sampleSize, top, limit  int
 	judge                   relations.JudgeOptions
+	limitDocs               int
+	docs                    bool
+	sampleDocs              string
 	briefsOnly              bool
 }
 
@@ -170,6 +185,10 @@ type relationsRun struct {
 	hasVec   bool
 	// focused is set when the run is limited to one document or meeting.
 	focused bool
+	// storeView is where verdicts are written; docs are the document pairs
+	// proposed alongside.
+	storeView *embedded.BranchStore
+	docs      *docRun
 }
 
 // proposeRelations loads the corpus from store and proposes candidates.
@@ -237,6 +256,28 @@ func runRelationsPlan(ctx context.Context, out, errOut io.Writer, cfg *config.Co
 		return err
 	}
 	printProposal(out, run, o.top)
+	if o.docs {
+		// References are recomputed in memory: a plan writes nothing.
+		resolver := relations.NewResolver(subjectPaths(run.subjects))
+		for _, subj := range run.subjects {
+			if rel := run.existing[subj.Path]; rel != nil {
+				rel.Refs = relations.References(subj, resolver)
+			} else {
+				rel := relations.New(subj.Path)
+				rel.Refs = relations.References(subj, resolver)
+				run.existing[subj.Path] = rel
+			}
+		}
+		dr := proposeDocPairs(cfg, run, vec, o)
+		printDocProposal(out, dr, o.top)
+		if o.sampleDocs != "" {
+			n, err := relations.WriteDocSample(o.sampleDocs, dr.cands, o.sampleSize)
+			if err != nil {
+				return fmt.Errorf("write document sample: %w", err)
+			}
+			fmt.Fprintf(out, "\nWrote %d document pairs to label to %s/pairs.jsonl (instructions in README.txt).\n", n, o.sampleDocs)
+		}
+	}
 
 	if o.sampleOut != "" {
 		n, err := relations.WriteSample(o.sampleOut, run.cands, o.sampleSize)
@@ -254,6 +295,15 @@ func newRelationJudge(cfg *config.Config) (*relations.Judge, error) {
 }
 
 func newRelationJudgeWith(cfg *config.Config, opts relations.JudgeOptions) (*relations.Judge, error) {
+	client, err := newJevAsker(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return relations.NewJudgeWithOptions(client, relations.NewFileTranscripts(), opts), nil
+}
+
+// newJevAsker builds the decision-model client, or explains why it cannot.
+func newJevAsker(cfg *config.Config) (*jev.Client, error) {
 	key := strings.TrimSpace(cfg.Transcripts.JevAPIKey)
 	if key == "" {
 		return nil, fmt.Errorf("judging needs a decision model: set transcripts.jev_api_key (a relation is never asserted on similarity alone)")
@@ -266,7 +316,7 @@ func newRelationJudgeWith(cfg *config.Config, opts relations.JudgeOptions) (*rel
 	if err != nil {
 		return nil, fmt.Errorf("decision model: %w", err)
 	}
-	return relations.NewJudgeWithOptions(client, relations.NewFileTranscripts(), opts), nil
+	return client, nil
 }
 
 // runRelationsMeasure judges a labelled sample and reports how well the
@@ -379,6 +429,13 @@ func runRelationsJudge(ctx context.Context, out, errOut io.Writer, cfg *config.C
 	if err != nil {
 		return err
 	}
+	run.storeView = store
+	if _, err := relations.RefreshReferences(ctx, store, run.subjects, run.existing); err != nil {
+		return err
+	}
+	if o.docs {
+		run.docs = proposeDocPairs(cfg, run, vec, o)
+	}
 	// Proposing is the only step that reads vectors. The read-only handle
 	// is let go now, so the rewritten briefs can be embedded through a
 	// writable one at the end.
@@ -390,15 +447,16 @@ func runRelationsJudge(ctx context.Context, out, errOut io.Writer, cfg *config.C
 	} else if n > 0 {
 		fmt.Fprintf(out, "Created relations for %d documents not yet related to anything.\n", n)
 	}
-	if n, err := relations.RefreshReferences(ctx, store, run.subjects, run.existing); err != nil {
-		return err
-	} else if n > 0 {
-		fmt.Fprintf(out, "Resolved the documents %d documents name.\n", n)
-	}
 	if o.briefsOnly {
 		return writeRelationBriefs(ctx, out, errOut, cfg, store, run)
 	}
 	printProposal(out, run, 0)
+	if run.docs != nil {
+		printDocProposal(out, run.docs, 0)
+		if err := judgeDocPairsRun(ctx, out, cfg, run, run.docs); err != nil {
+			return err
+		}
+	}
 	if len(run.prop.Candidates) == 0 {
 		fmt.Fprintln(out, "\nNothing to judge.")
 		return writeRelationBriefs(ctx, out, errOut, cfg, store, run)
@@ -602,4 +660,12 @@ func signalCounts(by map[string]int) string {
 		parts = append(parts, fmt.Sprintf("%s %d", name, by[name]))
 	}
 	return strings.Join(parts, " · ")
+}
+
+func subjectPaths(subjects []*relations.Subject) []string {
+	out := make([]string, len(subjects))
+	for i, s := range subjects {
+		out[i] = s.Path
+	}
+	return out
 }

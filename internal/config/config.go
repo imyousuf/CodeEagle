@@ -87,6 +87,12 @@ type RelationsConfig struct {
 	// ConflictGate is the decision model's probability at or above which a
 	// disagreement between a document and a meeting is shown as a conflict.
 	ConflictGate float64 `mapstructure:"conflict_gate" yaml:"conflict_gate,omitempty"`
+	// MaxDocPairsPerRun caps the document pairs one run judges, one
+	// decision-model request each. Zero uses the package default of 60.
+	MaxDocPairsPerRun int `mapstructure:"max_doc_pairs_per_run" yaml:"max_doc_pairs_per_run,omitempty"`
+	// DocGates are the probabilities at or above which each kind of
+	// document relation is accepted; zero keeps the package default.
+	DocGates DocGatesConfig `mapstructure:"doc_gates" yaml:"doc_gates,omitempty"`
 	// MaxBriefsPerRun caps the briefs one run writes.
 	MaxBriefsPerRun int `mapstructure:"max_briefs_per_run" yaml:"max_briefs_per_run,omitempty"`
 	// MaxBriefInputTokens bounds what one brief is written from.
@@ -98,6 +104,14 @@ type RelationsConfig struct {
 	// Empty uses the transcripts provider and model.
 	Provider string `mapstructure:"provider" yaml:"provider,omitempty"`
 	Model    string `mapstructure:"model" yaml:"model,omitempty"`
+}
+
+// DocGatesConfig holds the gates for document relations.
+type DocGatesConfig struct {
+	Related  float64 `mapstructure:"related" yaml:"related,omitempty"`
+	Changes  float64 `mapstructure:"changes" yaml:"changes,omitempty"`
+	Replaces float64 `mapstructure:"replaces" yaml:"replaces,omitempty"`
+	Records  float64 `mapstructure:"records" yaml:"records,omitempty"`
 }
 
 // RelationsEnabled reports whether relations are discovered automatically
