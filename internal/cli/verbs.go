@@ -525,20 +525,32 @@ func briefJSON(lib *relations.Library, rel *relations.Relation) (string, error) 
 		P       float64 `json:"p"`
 	}
 	out := struct {
-		ID        string               `json:"id"`
-		Subject   string               `json:"subject"`
-		Revision  int                  `json:"revision"`
-		BriefedAt time.Time            `json:"briefed_at,omitzero"`
-		Model     string               `json:"model,omitempty"`
-		Fresh     []string             `json:"fresh,omitempty"`
-		Meetings  []meeting            `json:"meetings"`
-		Brief     *relations.Brief     `json:"brief"`
-		Evidence  []relations.Evidence `json:"evidence"`
+		ID        string                    `json:"id"`
+		Subject   string                    `json:"subject"`
+		Type      string                    `json:"type,omitempty"`
+		Status    string                    `json:"status,omitempty"`
+		Date      string                    `json:"date,omitempty"`
+		Revision  int                       `json:"revision"`
+		BriefedAt time.Time                 `json:"briefed_at,omitzero"`
+		Model     string                    `json:"model,omitempty"`
+		Fresh     []string                  `json:"fresh,omitempty"`
+		Meetings  []meeting                 `json:"meetings"`
+		Brief     *relations.Brief          `json:"brief"`
+		Evidence  []relations.Evidence      `json:"evidence"`
+		Decisions []relations.DecisionEntry `json:"decisions,omitempty"`
+		Links     []relations.DocLink       `json:"links,omitempty"`
+		Refs      []relations.Reference     `json:"refs,omitempty"`
 	}{
 		ID: relations.ShortID(relations.RelationID(rel.SubjectPath)), Subject: rel.SubjectPath,
 		Revision: rel.Revision, BriefedAt: rel.BriefedAt, Model: rel.BriefModel,
-		Fresh: relations.Freshness(rel, lib.Subjects[rel.SubjectPath], lib.Meetings),
-		Brief: rel.Brief, Evidence: rel.Evidence,
+		Fresh: append(relations.Freshness(rel, lib.Subjects[rel.SubjectPath], lib.Meetings), lib.DocFlags(rel.SubjectPath)...),
+		Brief: rel.Brief, Evidence: rel.Evidence, Decisions: rel.Decisions,
+		Links: lib.DocLinks(rel.SubjectPath), Refs: rel.Refs,
+	}
+	if subj := lib.Subjects[rel.SubjectPath]; subj != nil {
+		asset, _ := relations.ClassifyAsset(subj)
+		out.Type = string(asset)
+		out.Status, out.Date = relations.DocStatus(subj)
 	}
 	for _, vd := range rel.Accepted() {
 		m := meeting{Session: vd.SessionID, P: vd.P}

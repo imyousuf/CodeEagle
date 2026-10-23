@@ -131,6 +131,10 @@ func (l *Library) docLinksOf(path string) []DocLink {
 	return l.doclinks[path]
 }
 
+// DocLinks lists the accepted links between path and other documents, in
+// either direction.
+func (l *Library) DocLinks(path string) []DocLink { return l.docLinksOf(path) }
+
 // DocFlags are the flags other documents put on this one, e.g.
 // superseded_by:3fa9c2.
 func (l *Library) DocFlags(path string) []string {
