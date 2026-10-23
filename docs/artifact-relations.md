@@ -43,9 +43,11 @@ when the spec is stale.
 ## Non-goals (this round)
 
 - Document ↔ document relations, and code entities as relation endpoints
-  (spec ↔ code ↔ meeting). Both build on this round's model; see Deferred.
-- Verbatim text for non-markdown documents (PDF, DOCX): the graph holds an
-  LLM summary for them, not their text, so quotes cannot be checked yet.
+  (spec ↔ code ↔ meeting). Both build on this round's model; document links
+  are phase 2 (below), code endpoints are deferred.
+- Verbatim text for non-markdown documents (PDF, DOCX): the graph held an
+  LLM summary for them, not their text, so quotes could not be checked.
+  Phase 2 keeps their text in sections.
 - Deploying to a hosted personal-file store.
 
 ## Vocabulary
@@ -727,12 +729,153 @@ needed before any gate is tuned to two decimals.
 8. CLI latency: expand credentials only when used (0.5 s of 2.3 s) and keep
    a library snapshot keyed by the database's state (most of the rest).
 
+## Phase 2: every document, typed, linked and dated
+
+Phase 1 related markdown specs to meetings and briefed only the specs a
+meeting was confirmed to discuss. Graded as the answer, a brief scored 0.47
+and none was fully right; the causes were missed meetings, no brief at all
+for a document without a confirmed meeting, no links between documents, no
+dated record of decisions, and only markdown being a subject at all.
+
+### A brief for every document, shaped by its type
+
+`EnsureRelations` gives every eligible subject a relation, so the brief
+writer runs whether or not a meeting was confirmed; with none, the brief is
+the document's own state.
+
+A document's type is decided deterministically from the words of its path
+(counted double, since authors name files for what they are) and its
+headings: `spec`, `adr`, `incident`, `meeting_notes`, `notes`, `report`,
+`reference`, or `other` when nothing wins outright. A slide deck (`.pptx`,
+`.odp`) is a `deck` by its format, whatever it is about. Status and date are
+read from the document's opening (`**Status:** Draft, 2026-10-04`, `Last
+updated:`), never written by the model. Besides the common parts (headline,
+the document's own points, current state, decisions, unresolved, conflicts,
+timeline) each type has its own, and the writer is told which it may use:
+
+| type | parts |
+|---|---|
+| adr | context, decision, consequences |
+| incident | impact, root_cause, incident_timeline, follow_ups |
+| meeting_notes | agreed, follow_ups |
+| notes | entries, open_loops |
+| report | findings, recommendations |
+| deck | purpose, claims, asks |
+| reference | purpose, how_to |
+
+Parts under any other name are dropped after grounding.
+
+### References are facts
+
+Links, backtick paths and bare paths in a document's sections are resolved
+relative to the document first, then by the unique longest suffix across the
+corpus (a Companions block names `docs/tech-spec/...` repository paths); an
+ambiguous basename resolves to nothing rather than to a guess. Resolved
+references are stored on the relation (`refs_json`) with the sentence they
+appear in, written as `References` edges, and shown as "links to" and
+"linked from". No judge is involved.
+
+### Document ↔ document links
+
+Four kinds, each asked as its own yes/no question, because a six-way relation
+type failed when measured (51%):
+
+| kind | meaning | direction |
+|---|---|---|
+| changes | A changes part of what B specifies | A → B |
+| replaces | B as a whole is no longer the account to follow; implies changes | A → B |
+| records | A is an account of something that happened (incident, review, meeting, conversation) involving B | A → B |
+| companion | related, and no directional kind accepted | symmetric |
+
+Pairs are proposed by resolved references, title mentions in order, version
+and rename patterns in file names, shared rare identifiers, and section
+vectors at cosine 0.75 or above (3 nearest), at most 12 per document and 60
+per run, with the deferred-versus-cut semantics of meeting pairs. Each pair
+is judged in its own request: two document cards (type, status, date,
+outline, excerpts) and the literal facts that proposed it, asked whether the
+two are related and, in both directions, whether one changes, replaces or
+records the other. Default gates: related 0.8, changes 0.85, replaces 0.95,
+records 0.85. Where both directions clear a gate, the later stated date wins;
+with no dates to tell them apart neither direction is kept. `replaces` needs
+`changes` in the same direction. Every tie falls back to the weaker claim,
+because a wrong "replaced by" hides a document someone needs.
+
+The verdict is stored once, on the relation of the lower path
+(`doc_links_json`), keyed by the other path and the content hashes of both,
+so a pair is asked about again only when one side changes. Accepted kinds are
+written as `Changes`, `Supersedes`, `Records` and `CompanionOf` edges. Briefs
+gain `superseded_by` and `amended_by` freshness flags, computed when read and
+never trimmed, and a related-documents part.
+
+`relations --docs --plan` lists the proposals; `--sample-out-docs DIR`
+writes a stratified sample for labelling; `--measure-docs labels.jsonl`
+reports related AUC, precision and recall per gate, and per-kind precision
+and recall with direction included. Document pairs run only from the
+`relations` command until the gates are calibrated on labelled pairs and a
+blind check of accepted links; only then do they join the automatic pass.
+
+### A dated decision ledger
+
+Each relation keeps `decisions_json`, entries kept by ID across brief
+rewrites so a decision recorded once stays in the history:
+
+- **meetings**, deterministically: a meeting decision whose topic is the
+  topic of a stretch the judge accepted, dated by the meeting and cited by
+  its verbatim quote;
+- **the document**: dated lines in its decision, changelog, history or
+  revision sections, dated as stated;
+- **the writer**: decisions found in the snippets, kept only with a verified
+  quote and a date that appears in the quote or its snippet header, and
+  checked by the decision model as settled or merely proposed.
+
+Each entry records its date basis (stated, meeting, undated) and status
+(decided, proposed). A brief shows the ledger newest first, with the
+decisions of documents that change this one inherited and marked as such;
+`brief --since D` lists those after D, and the latest three are in the
+relation's searchable text.
+
+### Non-markdown documents
+
+PDFs, decks, word-processor files and plain text were one node each, holding
+a model's two-sentence summary that also overwrote the text. Now:
+
+- **Sections.** The generic parser always extracts the text of prose formats
+  (`.pdf .docx .pptx .odt .odp .txt .rst .adoc .org` and similar wiki
+  markup) and stores it in child section nodes, like markdown's: PDF pages,
+  with pages under 1,500 characters merged into the next; slides, titled by
+  their first line; otherwise runs of paragraphs of about 4,000 characters.
+  At most 200 sections per file and 6,000 characters per section. Ligatures
+  and words hyphenated across a line end are repaired once, where sections
+  are made, so stored text and the quotes checked against it agree.
+  Spreadsheets, data, configuration and code get no sections and are never
+  subjects. The file's own node keeps its summary, for search.
+- **The summary no longer clobbers the text.** Enrichment updated every node
+  with the file's path; it now leaves sections alone. A cached summary no
+  longer skips text extraction either.
+- **Backfill.** Documents indexed before are re-parsed quietly (not reported
+  as changed, so nothing downstream is set off), in the scope being written
+  only, at most 200 files or two minutes per sync, resuming where the last
+  sync stopped, under a `DocumentSectionsVersion` flag kept per branch. A
+  cached summary is reused, so no model is called again.
+- **Subjects.** Such a document is a subject like a markdown one. Its title
+  is its file name; its opening is its first page, slide or part, never the
+  summary. `show` and `brief` read the indexed text, since the file cannot
+  be read as lines, and name the page or slide instead of line numbers.
+
+### Readers do not fetch credentials
+
+Configuration values may run a command, typically to read a key from the
+keyring. `find`, `brief`, `show` and the MCP server only read the index, so
+they leave values under keys ending in `api_key`, `token`, `secret` or
+`password` unexpanded rather than spend half a second per call fetching a
+credential they never use.
+
 ## Deferred
 
-- Document ↔ document relations (an issue in a tracker export and a spec).
 - Code endpoints: spec ↔ code ↔ meeting, through existing `Documents` and
   `Mentions` edges.
-- Verbatim text for non-markdown documents.
+- Chat logs as subjects, sectioned by day and thread (phase 2, M9).
+- Images and spreadsheets as subjects; PDF transcripts as meetings.
 - Rename detection by content hash, so a moved document keeps its relation.
 - Document deltas from git history.
 - The people-and-time proposer.

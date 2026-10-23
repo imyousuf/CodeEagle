@@ -82,6 +82,28 @@ func SyncFiles(ctx context.Context, idx *Indexer, paths []string, configDir stri
 		}
 	}
 
+	// Bring prose documents indexed before their text was kept in sections
+	// up to date, a bounded share per sync.
+	if bs := state.GetBranchState(branch); bs.DocumentSectionsVersion < DocumentSectionsVersion {
+		count, next, err := BackpopDocumentSections(ctx, idx, paths, bs.DocumentSectionsResume)
+		if err != nil {
+			idx.log("Warning: document sections backfill: %v", err)
+		} else {
+			if count > 0 {
+				more := ""
+				if next != "" {
+					more = "; more on the next sync"
+				}
+				idx.log("Backfilled sections for %d documents%s", count, more)
+			}
+			bs.DocumentSectionsResume = next
+			if next == "" {
+				bs.DocumentSectionsVersion = DocumentSectionsVersion
+			}
+			_ = state.Save(statePath)
+		}
+	}
+
 	for _, repoPath := range paths {
 		if IsGitRepo(repoPath) {
 			if err := syncGitRepo(ctx, idx, repoPath, state, full, branch); err != nil {

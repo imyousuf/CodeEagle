@@ -1,6 +1,7 @@
 package relations
 
 import (
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -19,6 +20,7 @@ const (
 	AssetMeetingNotes AssetType = "meeting_notes"
 	AssetNotes        AssetType = "notes"
 	AssetReport       AssetType = "report"
+	AssetDeck         AssetType = "deck"
 	AssetReference    AssetType = "reference"
 	AssetOther        AssetType = "other"
 )
@@ -60,11 +62,19 @@ var assetSignals = map[AssetType]struct{ path, headings []string }{
 
 var wordRe = regexp.MustCompile(`[a-z0-9]+`)
 
+// deckFormats are the slide formats.
+var deckFormats = map[string]bool{".pptx": true, ".odp": true}
+
 // ClassifyAsset decides a document's type from its path and headings, and
 // says what decided it. It is deterministic and costs nothing; a document
 // whose words point nowhere in particular is "other", and its brief still
 // has every common part.
 func ClassifyAsset(s *Subject) (AssetType, string) {
+	// A slide deck is a deck whatever it is about: it argues for something
+	// in a few claims, which is what its brief must say.
+	if deckFormats[strings.ToLower(path.Ext(s.Path))] {
+		return AssetDeck, "format"
+	}
 	pathWords := make(map[string]bool)
 	for _, w := range wordRe.FindAllString(strings.ToLower(s.Path), -1) {
 		pathWords[w] = true
@@ -152,6 +162,7 @@ var assetParts = map[AssetType][]string{
 	AssetMeetingNotes: {"agreed", "follow_ups"},
 	AssetNotes:        {"entries", "open_loops"},
 	AssetReport:       {"findings", "recommendations"},
+	AssetDeck:         {"purpose", "claims", "asks"},
 	AssetReference:    {"purpose", "how_to"},
 }
 
@@ -163,6 +174,7 @@ var assetGuide = map[AssetType]string{
 	AssetMeetingNotes: "These are notes of a meeting. In parts, give what was agreed and the follow-ups with owners if named.",
 	AssetNotes:        "These are working notes or a journal. In parts, give the dated entries that matter and the open loops still unresolved.",
 	AssetReport:       "This is a report or analysis. In parts, give its findings and its recommendations.",
+	AssetDeck:         "This is a slide deck. In parts, give its purpose (who it is for and what it wants of them), its main claims with the figures it gives, and its asks. Cite slides by their snippet.",
 	AssetReference:    "This is reference material. In parts, give its purpose and how it is used.",
 	AssetOther:        "",
 }

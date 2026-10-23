@@ -36,6 +36,11 @@ type Subject struct {
 	// Preamble is the document's opening, before its first heading: where a
 	// spec states its status, date and owner when it states them at all.
 	Preamble string
+	// TextOnly is a document whose sections carry no line numbers: a PDF,
+	// a deck or a word-processor file, whose file cannot be read as text,
+	// or plain text split into runs of paragraphs. Its sections are pages,
+	// slides or parts, and what is shown is the indexed text.
+	TextOnly bool
 }
 
 // Section is one section of a subject.
@@ -46,8 +51,11 @@ type Section struct {
 	Ordinal     int
 	Line        int
 	EndLine     int
-	Text        string
-	Hash        string
+	// Position orders the sections of a document: the line it starts on,
+	// or for a text-only document its place among the pages or slides.
+	Position int
+	Text     string
+	Hash     string
 }
 
 // Meeting is a recorded meeting, the discussion side of a relation.
@@ -120,28 +128,40 @@ func loadSubjects(ctx context.Context, store graph.Store, keep SubjectFilter, fo
 	if err != nil {
 		return nil, err
 	}
+	textOnly, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeDocument, Language: documentLanguage})
+	if err != nil {
+		return nil, err
+	}
+	nodes = append(nodes, textOnly...)
 	byPath := make(map[string]*Subject)
 	var sections []*graph.Node
 	for _, n := range nodes {
 		switch {
-		case n.Name == n.FilePath && n.Properties["kind"] == "":
+		case n.Properties["kind"] == "section":
+			sections = append(sections, n)
+		case isSubjectRoot(n):
 			if n.Properties[graph.PropIsTranscript] == "true" {
 				continue
 			}
 			if keep != nil && !keep(n.FilePath) {
 				continue
 			}
-			byPath[n.FilePath] = &Subject{
+			s := &Subject{
 				Path:      n.FilePath,
 				Title:     subjectTitle(n),
 				RootID:    n.ID,
 				Hash:      n.Properties[graph.PropContentHash],
 				UpdatedAt: n.UpdatedAt,
-				TextLen:   len(n.DocComment),
-				Preamble:  excerpt(n.DocComment, maxPreamble),
 			}
-		case n.Properties["kind"] == "section":
-			sections = append(sections, n)
+			// A text-only document's own node holds a summary, which is
+			// not the document's words; its sections are.
+			if n.Language == documentLanguage {
+				s.TextOnly = true
+			} else {
+				s.TextLen = len(n.DocComment)
+				s.Preamble = excerpt(n.DocComment, maxPreamble)
+			}
+			byPath[n.FilePath] = s
 		}
 	}
 	for _, n := range sections {
@@ -154,6 +174,10 @@ func loadSubjects(ctx context.Context, store graph.Store, keep SubjectFilter, fo
 		if hp == "" {
 			hp = n.Name
 		}
+		pos := n.Line
+		if s.TextOnly {
+			pos, _ = strconv.Atoi(n.Properties["position"])
+		}
 		s.Sections = append(s.Sections, &Section{
 			NodeID:      n.ID,
 			Heading:     n.Name,
@@ -161,6 +185,7 @@ func loadSubjects(ctx context.Context, store graph.Store, keep SubjectFilter, fo
 			Ordinal:     ord,
 			Line:        n.Line,
 			EndLine:     n.EndLine,
+			Position:    pos,
 			Text:        n.DocComment,
 			Hash:        n.Properties["section_hash"],
 		})
@@ -178,7 +203,7 @@ func loadSubjects(ctx context.Context, store graph.Store, keep SubjectFilter, fo
 		if s.Title == "" {
 			s.Title = titleFromSections(s)
 		}
-		sort.Slice(s.Sections, func(i, j int) bool { return s.Sections[i].Line < s.Sections[j].Line })
+		sort.Slice(s.Sections, func(i, j int) bool { return s.Sections[i].Position < s.Sections[j].Position })
 		// A document that opens with its heading states its status under
 		// it, in the first section rather than before it.
 		if strings.TrimSpace(s.Preamble) == "" && len(s.Sections) > 0 {
@@ -384,5 +409,23 @@ func outgoing(ctx context.Context, store graph.Store, id string, t graph.EdgeTyp
 	return out
 }
 
-// markdownLanguage is parser.LangMarkdown.
-const markdownLanguage = "markdown"
+// markdownLanguage is parser.LangMarkdown; documentLanguage is
+// generic.LangDocument, the PDFs, decks and other prose files whose text is
+// kept in sections.
+const (
+	markdownLanguage = "markdown"
+	documentLanguage = "document"
+)
+
+// isSubjectRoot reports whether a node is a document's own node rather than
+// one of its sections: a markdown file's is named by its path, a text-only
+// document's by its file name.
+func isSubjectRoot(n *graph.Node) bool {
+	if n.Properties["kind"] == "section" {
+		return false
+	}
+	if n.Language == documentLanguage {
+		return n.Name == path.Base(n.FilePath)
+	}
+	return n.Name == n.FilePath && n.Properties["kind"] == ""
+}

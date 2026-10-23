@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
 )
@@ -337,6 +338,7 @@ func (l *Library) Evidence(id string) (*Relation, *Evidence) {
 const (
 	maxShowLines        = 60
 	maxShowChars        = 2500
+	showWrap            = 400
 	maxShowSaidChars    = 1500
 	showContextSeconds  = 15
 	showTurnsBefore     = 2
@@ -391,7 +393,7 @@ func (l *Library) ShowSection(path string, sec *Section, from int) string {
 func (l *Library) renderSection(path string, sec *Section, note string, from int, id string) string {
 	header := fmt.Sprintf("%s § %s", path, sec.HeadingPath)
 	var lines []string
-	if l.Resolve != nil {
+	if l.Resolve != nil && sec.Line > 0 {
 		if abs := l.Resolve(path); abs != "" {
 			lines = readLines(abs, sec.Line, sec.EndLine)
 		}
@@ -401,6 +403,9 @@ func (l *Library) renderSection(path string, sec *Section, note string, from int
 		// still the section.
 		lines = strings.Split(sec.Text, "\n")
 	}
+	// A page of extracted text is often one line; shown whole it would not
+	// fit, and --from could not continue into it.
+	lines = wrapLines(lines, showWrap)
 	if from > 0 && from < len(lines) {
 		lines = lines[from:]
 	}
@@ -418,8 +423,37 @@ func (l *Library) renderSection(path string, sec *Section, note string, from int
 	if rest := len(lines) - shown; rest > 0 {
 		more = fmt.Sprintf("\n… %d more lines: show %s --from %d", rest, id, from+shown)
 	}
-	return fmt.Sprintf("%s (lines %d–%d)%s\n\n%s%s", header, sec.Line, sec.EndLine, note,
-		strings.TrimRight(b.String(), "\n"), more)
+	return fmt.Sprintf("%s%s%s\n\n%s%s", header, lineSpan(sec), note, strings.TrimRight(b.String(), "\n"), more)
+}
+
+// wrapLines breaks lines longer than width at the last space before it.
+func wrapLines(lines []string, width int) []string {
+	var out []string
+	for _, ln := range lines {
+		for len(ln) > width {
+			cut := strings.LastIndexByte(ln[:width], ' ')
+			if cut <= 0 {
+				cut = width
+				for cut > 1 && !utf8.RuneStart(ln[cut]) {
+					cut--
+				}
+			}
+			out = append(out, ln[:cut])
+			ln = strings.TrimLeft(ln[cut:], " ")
+		}
+		out = append(out, ln)
+	}
+	return out
+}
+
+// lineSpan is where a section sits in its file, or nothing for a page,
+// slide or part of a text-only document, whose heading already says where
+// it is.
+func lineSpan(sec *Section) string {
+	if sec.Line == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (lines %d–%d)", sec.Line, sec.EndLine)
 }
 
 // maxOutlineSections bounds an outline.
@@ -432,13 +466,17 @@ func (l *Library) Outline(subj *Subject) string {
 	for _, sec := range subj.Sections {
 		last = max(last, sec.EndLine)
 	}
-	lines := []string{fmt.Sprintf("%s: %s (%s, lines 1–%d)", subj.Path, subj.Title, plural(len(subj.Sections), "section"), last)}
+	size := fmt.Sprintf("%s, lines 1–%d", plural(len(subj.Sections), "section"), last)
+	if subj.TextOnly {
+		size = plural(len(subj.Sections), "section") + ", text as indexed"
+	}
+	lines := []string{fmt.Sprintf("%s: %s (%s)", subj.Path, subj.Title, size)}
 	for i, sec := range subj.Sections {
 		if i >= maxOutlineSections {
 			lines = append(lines, fmt.Sprintf("… %d more sections", len(subj.Sections)-i))
 			break
 		}
-		lines = append(lines, fmt.Sprintf("%s § %s (lines %d–%d)", ShortID(sec.NodeID), sec.HeadingPath, sec.Line, sec.EndLine))
+		lines = append(lines, fmt.Sprintf("%s § %s%s", ShortID(sec.NodeID), sec.HeadingPath, lineSpan(sec)))
 	}
 	lines = append(lines, "expand: show <id>")
 	return strings.Join(lines, "\n")
