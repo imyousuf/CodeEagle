@@ -197,6 +197,9 @@ func (r *Relater) Write(ctx context.Context, rel *Relation, subj *Subject) error
 	if err := r.writeReferences(ctx, node.ID, rel); err != nil {
 		return err
 	}
+	if err := r.writeDocLinks(ctx, rel); err != nil {
+		return err
+	}
 	for meetingID, v := range want {
 		if err := r.store.AddEdge(ctx, &graph.Edge{
 			ID:       graph.NewNodeID("edge", node.ID, meetingID+":"+string(graph.EdgeDiscussedIn)),
@@ -299,4 +302,57 @@ func RefreshReferences(ctx context.Context, store graph.Store, subjects []*Subje
 		changed++
 	}
 	return changed, nil
+}
+
+// docLinkEdge is the edge type of each accepted kind.
+var docLinkEdge = map[string]graph.EdgeType{
+	DocChanges:   graph.EdgeChanges,
+	DocReplaces:  graph.EdgeSupersedes,
+	DocRecords:   graph.EdgeRecords,
+	DocCompanion: graph.EdgeCompanionOf,
+}
+
+// writeDocLinks rewrites the edges for the document pairs this relation
+// holds verdicts on: one per accepted link, and none left over for links no
+// longer accepted.
+func (r *Relater) writeDocLinks(ctx context.Context, rel *Relation) error {
+	id := RelationID(rel.SubjectPath)
+	for other, v := range rel.DocLinks {
+		otherID := RelationID(other)
+		want := make(map[string]bool)
+		for _, l := range v.Links {
+			want[graph.NewNodeID("edge", RelationID(l.From), RelationID(l.To)+":"+string(docLinkEdge[l.Kind]))] = true
+		}
+		for _, t := range docLinkEdge {
+			current, err := r.store.GetEdges(ctx, id, t)
+			if err != nil {
+				return err
+			}
+			for _, e := range current {
+				pairEdge := (e.SourceID == id && e.TargetID == otherID) || (e.SourceID == otherID && e.TargetID == id)
+				if pairEdge && !want[e.ID] {
+					if err := r.store.DeleteEdge(ctx, e.ID); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		for _, l := range v.Links {
+			t := docLinkEdge[l.Kind]
+			from, to := RelationID(l.From), RelationID(l.To)
+			if err := r.store.AddEdge(ctx, &graph.Edge{
+				ID:       graph.NewNodeID("edge", from, to+":"+string(t)),
+				Type:     t,
+				SourceID: from,
+				TargetID: to,
+				Properties: map[string]string{
+					"probability": fmt.Sprintf("%.3f", l.P),
+					"judge":       v.Judge,
+				},
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

@@ -212,6 +212,18 @@ const (
 	// subject names, by a link or a written path: a fact the author wrote,
 	// resolved to the document it means.
 	EdgeReferences EdgeType = "References"
+	// EdgeChanges links the Relation of a document to the Relation of one it
+	// changes part of, as the decision model judged.
+	EdgeChanges EdgeType = "Changes"
+	// EdgeSupersedes links the Relation of a document to the Relation of one
+	// it replaces as a whole.
+	EdgeSupersedes EdgeType = "Supersedes"
+	// EdgeRecords links the Relation of an account of events (an incident
+	// report, a review, notes) to the Relation of what it is about.
+	EdgeRecords EdgeType = "Records"
+	// EdgeCompanionOf links the Relations of two documents about the same
+	// work with no direction, from the lower id to the higher.
+	EdgeCompanionOf EdgeType = "CompanionOf"
 )
 
 // MeetingNodeTypes lists the node types produced by meeting transcript indexing.

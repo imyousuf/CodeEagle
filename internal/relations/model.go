@@ -37,6 +37,7 @@ const (
 	propRevision     = "revision"
 	propRevisions    = "revisions_json"
 	propRefs         = "refs_json"
+	propDocLinks     = "doc_links_json"
 	propRelationKind = "kind"
 )
 
@@ -68,6 +69,9 @@ type Relation struct {
 	Revision int
 	// Refs are the documents the subject names, resolved.
 	Refs []Reference
+	// DocLinks are the decision model's verdicts on pairs with documents of
+	// higher path, keyed by that path; a pair is stored once, on the lower.
+	DocLinks map[string]*DocVerdict
 	// Revisions records when recent revisions were written, so "since
 	// revision N" can be turned into a time.
 	Revisions []RevisionStamp
@@ -275,6 +279,7 @@ func (r *Relation) Node() (*graph.Node, error) {
 		propEvidence:  r.Evidence,
 		propRevisions: r.Revisions,
 		propRefs:      r.Refs,
+		propDocLinks:  r.DocLinks,
 	} {
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -339,6 +344,9 @@ func FromNode(n *graph.Node) (*Relation, error) {
 		return nil, err
 	}
 	if err := decode(propRefs, &r.Refs); err != nil {
+		return nil, err
+	}
+	if err := decode(propDocLinks, &r.DocLinks); err != nil {
 		return nil, err
 	}
 	if raw := n.Properties[propBrief]; raw != "" {

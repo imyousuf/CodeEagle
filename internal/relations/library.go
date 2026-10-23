@@ -28,6 +28,7 @@ type Library struct {
 	Now     func() time.Time
 
 	backrefs map[string][]string
+	doclinks map[string][]DocLink
 }
 
 // LoadLibrary reads the corpus and the relations from store. resolve turns a
@@ -68,12 +69,110 @@ func (l *Library) Brief(rel *Relation, budget int, since time.Time, sinceLabel s
 		Since:       since,
 		SinceLabel:  sinceLabel,
 		Meetings:    l.Meetings,
-		Flags:       Freshness(rel, l.Subjects[rel.SubjectPath], l.Meetings),
+		Flags:       append(Freshness(rel, l.Subjects[rel.SubjectPath], l.Meetings), l.DocFlags(rel.SubjectPath)...),
 		Subject:     l.Subjects[rel.SubjectPath],
 		Unconfirmed: l.unconfirmed(rel),
 		LinksTo:     l.linkLines(refTargets(rel.Refs)),
 		LinkedFrom:  l.linkLines(l.linkedFrom(rel.SubjectPath)),
+		Related:     l.relatedLines(rel.SubjectPath),
 	})
+}
+
+// Freshness flags from other documents.
+const (
+	// FlagSupersededBy: another document replaces this one as a whole.
+	FlagSupersededBy = "superseded_by"
+	// FlagAmendedBy: another document changes part of this one.
+	FlagAmendedBy = "amended_by"
+)
+
+// docLinksOf lists the accepted links involving path, from the verdicts
+// stored on whichever relation holds each pair; built once per library.
+func (l *Library) docLinksOf(path string) []DocLink {
+	if l.doclinks == nil {
+		l.doclinks = make(map[string][]DocLink)
+		for _, rel := range l.Relations {
+			for _, v := range rel.DocLinks {
+				for _, link := range v.Links {
+					l.doclinks[link.From] = append(l.doclinks[link.From], link)
+					l.doclinks[link.To] = append(l.doclinks[link.To], link)
+				}
+			}
+		}
+	}
+	return l.doclinks[path]
+}
+
+// DocFlags are the flags other documents put on this one, e.g.
+// superseded_by:3fa9c2.
+func (l *Library) DocFlags(path string) []string {
+	var flags []string
+	replaced := false
+	for _, link := range l.docLinksOf(path) {
+		if link.To == path && link.Kind == DocReplaces {
+			flags = append(flags, FlagSupersededBy+":"+ShortID(RelationID(link.From)))
+			replaced = true
+		}
+	}
+	if !replaced {
+		for _, link := range l.docLinksOf(path) {
+			if link.To == path && link.Kind == DocChanges {
+				flags = append(flags, FlagAmendedBy+":"+ShortID(RelationID(link.From)))
+			}
+		}
+	}
+	return flags
+}
+
+// relatedLines describes the documents linked to path by a judged kind, with
+// the direction read from path's side.
+func (l *Library) relatedLines(path string) []string {
+	var lines []string
+	seen := make(map[string]bool)
+	replacedPair := make(map[string]bool) // a replacement says it changed too
+	for _, link := range l.docLinksOf(path) {
+		if link.Kind == DocReplaces {
+			replacedPair[link.From+"\x00"+link.To] = true
+		}
+	}
+	for _, link := range l.docLinksOf(path) {
+		if link.Kind == DocChanges && replacedPair[link.From+"\x00"+link.To] {
+			continue
+		}
+		other, how := link.To, ""
+		switch {
+		case link.Kind == DocReplaces && link.To == path:
+			other, how = link.From, "replaced by"
+		case link.Kind == DocReplaces:
+			how = "replaces"
+		case link.Kind == DocChanges && link.To == path:
+			other, how = link.From, "changed by"
+		case link.Kind == DocChanges:
+			how = "changes"
+		case link.Kind == DocRecords && link.To == path:
+			other, how = link.From, "recorded in"
+		case link.Kind == DocRecords:
+			how = "records"
+		default:
+			how = "companion of"
+			if link.To == path {
+				other = link.From
+			}
+		}
+		if seen[how+other] {
+			continue
+		}
+		seen[how+other] = true
+		line := fmt.Sprintf("- %s %s (%s)", how, other, ShortID(RelationID(other)))
+		if rel := l.Relations[other]; rel != nil && rel.Brief != nil && rel.Brief.Headline.Text != "" {
+			line += ": " + clip(rel.Brief.Headline.Text, maxHeadlineInFinder)
+		}
+		lines = append(lines, line)
+		if len(lines) >= maxLinkLines {
+			break
+		}
+	}
+	return lines
 }
 
 // maxLinkLines bounds each list of linked documents in a brief.
@@ -588,7 +687,7 @@ func (l *Library) FinderLine(r *Relation) string {
 	}
 	line := fmt.Sprintf("%s doc %s: %s (%s %s)", ShortID(RelationID(r.SubjectPath)), r.SubjectPath, head,
 		plural(len(r.Accepted()), "mtg"), strings.TrimSuffix(strings.TrimPrefix(lastSeen(last), "("), ")"))
-	if flags := Freshness(r, l.Subjects[r.SubjectPath], l.Meetings); len(flags) > 0 {
+	if flags := append(Freshness(r, l.Subjects[r.SubjectPath], l.Meetings), l.DocFlags(r.SubjectPath)...); len(flags) > 0 {
 		line += " !" + strings.Join(flags, " !")
 	}
 	return line

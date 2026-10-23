@@ -49,6 +49,9 @@ type RenderOptions struct {
 	// LinksTo and LinkedFrom are lines for the documents the subject names
 	// and the documents that name it.
 	LinksTo, LinkedFrom []string
+	// Related are lines for the documents linked to the subject by a judged
+	// kind: replaced by, changes, records, companion of.
+	Related []string
 }
 
 // Bounds on the parts of a brief that come from the graph rather than the
@@ -168,7 +171,7 @@ func Render(rel *Relation, o RenderOptions) string {
 		for _, part := range []struct {
 			title string
 			lines []string
-		}{{"links to:", o.LinksTo}, {"linked from:", o.LinkedFrom}} {
+		}{{"related documents:", o.Related}, {"links to:", o.LinksTo}, {"linked from:", o.LinkedFrom}} {
 			if len(part.lines) > 0 {
 				lines = append(lines, part.title)
 				lines = append(lines, part.lines...)
@@ -294,11 +297,12 @@ func Render(rel *Relation, o RenderOptions) string {
 	expand += fmt.Sprintf("brief %s --since @r%d", ShortID(RelationID(rel.SubjectPath)), rel.Revision)
 	tail = append(tail, expand)
 
+	related := briefPart{title: "related documents:", keep: 3, lines: o.Related}
 	linksTo := briefPart{title: "links to:", keep: 3, lines: o.LinksTo}
 	linkedFrom := briefPart{title: "linked from:", keep: 3, lines: o.LinkedFrom}
-	parts := []*briefPart{&points, &partsPart, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &linksTo, &linkedFrom, &delta}
+	parts := []*briefPart{&related, &points, &partsPart, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &linksTo, &linkedFrom, &delta}
 	if !o.Since.IsZero() {
-		parts = []*briefPart{&delta, &points, &partsPart, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &linksTo, &linkedFrom}
+		parts = []*briefPart{&delta, &related, &points, &partsPart, &current, &conflicts, &unresolved, &meetingsPart, &unconfirmed, &linksTo, &linkedFrom}
 	}
 	render := func() string {
 		out := []string{header, headline}
