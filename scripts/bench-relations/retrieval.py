@@ -36,7 +36,8 @@ def relation_id(path):
 
 
 def run(args, *cmd):
-    p = subprocess.run([args.codeeagle, *cmd], cwd=args.corpus, capture_output=True, text=True, timeout=300)
+    p = subprocess.run([args.codeeagle, *cmd], cwd=args.corpus, capture_output=True, text=True, errors="replace",
+                       timeout=300)
     return p.stdout
 
 
