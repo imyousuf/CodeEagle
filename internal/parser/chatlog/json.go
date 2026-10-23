@@ -256,10 +256,12 @@ func teamsLog(msgs []teamsMessage) *Log {
 		if text == "" {
 			continue
 		}
-		who := ""
-		if m.From != nil && m.From.User != nil {
-			who = m.From.User.DisplayName
+		// A message has a sender; other Graph lists with a body and a
+		// creation time (calendar events, posts by an app) do not.
+		if m.From == nil || m.From.User == nil {
+			continue
 		}
+		who := m.From.User.DisplayName
 		t, _ := time.Parse(time.RFC3339Nano, m.Created)
 		log.Messages = append(log.Messages, Message{Time: t, Speaker: who, Text: text})
 	}

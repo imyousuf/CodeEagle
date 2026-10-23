@@ -899,6 +899,16 @@ decision model reads two documents as each recording the other, a chat,
 incident write-up, notes, meeting notes or report is taken as the record;
 when neither or both are, no `records` link is kept.
 
+### Meeting recall: what was not pursued
+
+A proposer over the raw words of transcripts (60-second windows scored
+against a document's title and distinctive headings) was planned for the
+meetings no signal proposes. It is deferred: the meeting index keeps
+summaries rather than what was said, so the proposer would parse 2 GB of
+transcripts per run, and the measured ceiling is low. The raw transcripts
+held only 3 of the 10 never-proposed reference meetings, which is the most
+it could find, at the edge of the bar set for adopting it.
+
 ### Readers do not fetch credentials
 
 Configuration values may run a command, typically to read a key from the

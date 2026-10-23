@@ -144,6 +144,11 @@ The second is the property reading.
 Suggested next step: a call this week.
 Regards`},
 		"config json": {"config/app.json", `[{"name":"a","ts":"x","value":1}]`},
+		"graph calendar events": {"exports/events.json", `{"value":[` +
+			`{"createdDateTime":"2026-06-01T10:00:00Z","subject":"Sync","body":{"contentType":"html","content":"<p>agenda one</p>"},"organizer":{"emailAddress":{"name":"Kevin"}}},` +
+			`{"createdDateTime":"2026-06-02T10:00:00Z","subject":"Sync","body":{"contentType":"html","content":"<p>agenda two</p>"},"organizer":{"emailAddress":{"name":"Kevin"}}},` +
+			`{"createdDateTime":"2026-06-03T10:00:00Z","subject":"Sync","body":{"contentType":"html","content":"<p>agenda three</p>"},"organizer":{"emailAddress":{"name":"Kevin"}}},` +
+			`{"createdDateTime":"2026-06-04T10:00:00Z","subject":"Sync","body":{"contentType":"html","content":"<p>agenda four</p>"},"organizer":{"emailAddress":{"name":"Kevin"}}}]}`},
 		"data jsonl":  {"data/rows.jsonl", `{"id":1,"name":"a"}` + "\n" + `{"id":2,"name":"b"}`},
 		"too short":   {"notes/two.txt", "[10:32] Kevin: hi\n[10:33] Mona: hello"},
 		"plain prose": {"notes/plan.txt", "The plan is to time out prefill at 30 seconds.\nThen alert on queue age."},
