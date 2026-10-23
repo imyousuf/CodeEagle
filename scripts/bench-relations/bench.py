@@ -24,7 +24,7 @@ in the repository:
 Runs are resumable: an answer already on disk is not asked again.
 
   bench.py --bench-dir DIR --corpus DIR --codeeagle PATH [--sessions DIR]
-           [--arms grep,mcp,verbs,all] [--reps 1] [--model sonnet]
+           [--docs DIR] [--arms grep,mcp,verbs,all] [--reps 1] [--model sonnet]
 """
 
 import argparse
@@ -52,7 +52,7 @@ ARMS = {
 }
 
 PROMPT = """You are answering a question about a team's work. Its documents are \
-under {corpus}/specs: tech specs, and under specs/home-slice work notes, \
+under {docs}: tech specs, and under {docs}/home-slice work notes, \
 incident write-ups, plans, PDFs, slide decks and a virtual teammate's \
 workspace. Its meeting transcripts are under {sessions} (one directory per \
 recording; session.json holds what was said, by whom, when). You may not \
@@ -97,6 +97,8 @@ def command(arm, spec, prompt, args, mcp_dir, out):
         cmd += ["--max-budget-usd", str(args.max_budget)]
     if spec["tools"] and args.sessions:
         cmd += ["--add-dir", args.sessions]
+    if spec["tools"] and args.docs:
+        cmd += ["--add-dir", args.docs]
     if spec["mcp"]:
         # Each answer gets its own server log: which tools it called, with
         # what, is half of explaining what it cost.
@@ -109,7 +111,8 @@ def command(arm, spec, prompt, args, mcp_dir, out):
 
 def run_one(arm, spec, q, rep, args, out, mcp_dir):
     template = ORACLE_PROMPT if spec.get("oracle") else PROMPT
-    prompt = template.format(corpus=args.corpus, sessions=args.sessions or "(not available)", question=q["question"])
+    prompt = template.format(docs=args.docs or os.path.join(args.corpus, "specs"), sessions=args.sessions or "(not available)",
+                             question=q["question"])
     started = time.time()
     proc = subprocess.run(command(arm, spec, prompt, args, mcp_dir, out), cwd=args.corpus,
                           capture_output=True, text=True, timeout=args.timeout)
@@ -140,6 +143,8 @@ def main():
     ap.add_argument("--corpus", required=True, help="the indexed project's root; agents run here")
     ap.add_argument("--codeeagle", required=True, help="the codeeagle binary the MCP arms use")
     ap.add_argument("--sessions", help="meeting transcripts directory, for the file tools")
+    ap.add_argument("--docs", help="the documents directory, when it is not <corpus>/specs (the index's project "
+                                   "root can live apart from the files it indexes)")
     ap.add_argument("--arms", default="grep,mcp,verbs,all")
     ap.add_argument("--only", help="comma-separated question ids")
     ap.add_argument("--reps", type=int, default=1)
