@@ -113,6 +113,10 @@ func loadIndexedFileTimes(ctx context.Context, store graph.Store) map[string]tim
 type indexedFileState struct {
 	times  map[string]time.Time // FilePath → UpdatedAt
 	hashes map[string]string    // FilePath → content_hash
+	// dirs are the directories with a node of their own. They are kept out
+	// of times: a walk lists files, so a directory would always look
+	// deleted, and every other sync removed every directory node.
+	dirs map[string]bool
 }
 
 // loadIndexedFileState batch-loads all file-type nodes from the DB and returns
@@ -123,6 +127,7 @@ func loadIndexedFileState(ctx context.Context, store graph.Store) indexedFileSta
 	result := indexedFileState{
 		times:  make(map[string]time.Time),
 		hashes: make(map[string]string),
+		dirs:   make(map[string]bool),
 	}
 	for _, nodeType := range fileTypeNodes {
 		nodes, err := store.QueryNodes(ctx, graph.NodeFilter{Type: nodeType})
@@ -131,6 +136,10 @@ func loadIndexedFileState(ctx context.Context, store graph.Store) indexedFileSta
 		}
 		for _, node := range nodes {
 			if node.FilePath == "" {
+				continue
+			}
+			if nodeType == graph.NodeDirectory {
+				result.dirs[node.FilePath] = true
 				continue
 			}
 			if !node.UpdatedAt.IsZero() {

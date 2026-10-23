@@ -527,6 +527,22 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, full bool)
 			deletedCount++
 		}
 	}
+	// A directory's node goes only when the directory itself is gone.
+	for dbPath := range dbState.dirs {
+		if !strings.HasPrefix(dbPath, prefix) || underAny(dbPath, skipPrefixes) {
+			continue
+		}
+		abs := filepath.Join(filepath.Dir(dirPath), filepath.FromSlash(dbPath))
+		if info, err := os.Stat(abs); err == nil && info.IsDir() {
+			continue
+		} else if err != nil && !os.IsNotExist(err) {
+			continue // unreadable is not gone
+		}
+		if err := idx.Store().DeleteByFile(ctx, dbPath); err != nil {
+			idx.log("Warning: delete %s: %v", dbPath, err)
+		}
+		deletedCount++
+	}
 	if deletedCount > 0 {
 		idx.log("Removed %d deleted file nodes from %s", deletedCount, dirPath)
 	}
