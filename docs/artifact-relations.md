@@ -935,6 +935,67 @@ they leave values under keys ending in `api_key`, `token`, `secret` or
 `password` unexpanded rather than spend half a second per call fetching a
 credential they never use.
 
+## Phase 2 results (2026-10-23)
+
+Eval v2: 42 questions in six categories (spec state, meetings, document to
+document, time-based decisions, non-markdown assets, negatives) over the
+experiment corpus plus a work-only slice of a home directory; 191 required
+key points. The 27 new references were checked against the raw sources by
+three independent verifiers (every evidence quote verbatim; negatives proven
+absent by exhaustive search). Graded blind by one judge into correctness
+(share of claims not contradicted, stale or fabricated) and completeness
+(required key points covered), plus the 0-2 grade. Three reps per arm, $0.10
+and 15 turns per answer. The baseline is the phase-1 build (65be916); both
+indexes had the same automatic syncs and bulk passes, which left the
+baseline with 1,458 confirmed meeting links and the new one with 1,570, the
+difference mostly the 20 non-markdown documents only the new one relates.
+
+| arm | answered | correctness | completeness | grade | fully right | $ median / p90 | capped |
+|---|---|---|---|---|---|---|---|
+| verbs, baseline | 69% | 0.91 | 0.29 | 0.37 | 10% | 0.074 / 0.107 | 39 of 126 |
+| all, baseline | 48% | 0.92 | 0.22 | 0.27 | 5% | 0.101 / 0.128 | 65 |
+| grep, baseline | 2% | - | 0.02 | 0.01 | 0% | 0.128 / 0.194 | 41 of 42 |
+| verbs | 91% | 0.91 | 0.42 | 0.53 | 18% | 0.058 / 0.092 | 11 |
+| all | 72% | 0.93 | 0.35 | 0.40 | 13% | 0.069 / 0.113 | 35 |
+| verbs on Haiku | 100% | 0.91 | 0.40 | 0.55 | 15% | 0.012 / 0.021 | 0 |
+
+Completeness by category, verbs baseline -> verbs -> verbs on Haiku:
+document to document 0.23 -> 0.31 -> 0.33; meetings 0.36 -> 0.40 -> 0.45;
+negatives 0.21 -> 0.58 -> 0.55 (grade 0.39 -> 0.97 -> 0.94); non-markdown
+0.22 -> 0.40 -> 0.35; spec state 0.38 -> 0.44 -> 0.39; time-based decisions
+0.31 -> 0.40 -> 0.40.
+
+What moved it:
+
+- **Answers lost to the cost cap.** A third of baseline verbs answers ran out
+  of budget at 11-18 calls before writing anything. Richer briefs and
+  instructions to answer within five or six calls cut that to 9%, and the
+  smaller model to none.
+- **What the index holds.** Graded as the answer, the briefs of each
+  question's documents went from completeness 0.30 to 0.38: time-based
+  decisions 0.29 -> 0.45 (the ledger), non-markdown 0.17 -> 0.32, negatives
+  0.02 -> 0.18. Agents now land close to that ceiling (0.40-0.42), so further
+  gains are in the index, not in the agent.
+- **The smaller model.** Verbs on Haiku match Sonnet's grade at a fifth of
+  the cost and half the wall time (15 s median): $0.012 median, $0.021 p90.
+
+Retrieval without an agent: find's top eight held 86-88% of the documents a
+question needs in both builds; the briefs of those documents named 86% of the
+required meetings and linked documents, from 78%, document to document 1.00
+from 0.67.
+
+Latency of a CLI brief by ID: 3.4 s -> 0.27 s (library snapshot keyed by the
+database's state; vector index loaded only to search). find: 3.4 s.
+
+Not reached: the target of 80% accuracy with most answers fully right. Claims
+made are right 91% of the time, but answers cover about two in five of the
+required points and 15-18% are fully right; the brief ceiling at 0.38 says
+where the rest is lost. The next levers, in order: meeting recall (the judge
+still rejects real pairs below the gate), document content kept under a
+tight budget when several briefs share it, and comparing two documents (the
+document-to-document questions mostly ask how two versions differ, which no
+brief states).
+
 ## Deferred
 
 - Code endpoints: spec ↔ code ↔ meeting, through existing `Documents` and
