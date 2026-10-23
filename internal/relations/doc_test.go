@@ -16,6 +16,7 @@ func TestDecideDirection(t *testing.T) {
 	newer := &Subject{Path: "b.md", Preamble: "Status: draft, 2026-09-14"}
 	undated := &Subject{Path: "b.md"}
 	chat := &Subject{Path: "b.jsonl", ChatFormat: "slack"}
+	postmortem := &Subject{Path: "incidents/prefill-outage-postmortem.md"}
 	for _, tt := range []struct {
 		name string
 		b    *Subject
@@ -29,7 +30,8 @@ func TestDecideDirection(t *testing.T) {
 		{"replaces needs changes", newer, DocVerdict{PRelated: 0.9, PReplaces: [2]float64{0.1, 0.97}}, []string{"companion:a.md>b.md"}},
 		{"both ways, later wins", newer, DocVerdict{PRelated: 0.9, PChanges: [2]float64{0.9, 0.9}}, []string{"changes:b.md>a.md"}},
 		{"both ways, no dates, neither", undated, DocVerdict{PRelated: 0.9, PChanges: [2]float64{0.9, 0.9}}, []string{"companion:a.md>b.md"}},
-		{"records", newer, DocVerdict{PRelated: 0.9, PRecords: [2]float64{0.1, 0.9}}, []string{"records:b.md>a.md"}},
+		{"records", postmortem, DocVerdict{PRelated: 0.9, PRecords: [2]float64{0.1, 0.9}}, []string{"records:incidents/prefill-outage-postmortem.md>a.md"}},
+		{"a spec records nothing", newer, DocVerdict{PRelated: 0.9, PRecords: [2]float64{0.1, 0.9}}, []string{"companion:a.md>b.md"}},
 		{"records both ways, undated, neither", undated, DocVerdict{PRelated: 0.9, PRecords: [2]float64{0.9, 0.9}}, []string{"companion:a.md>b.md"}},
 		{"records both ways, dated specs, neither", newer, DocVerdict{PRelated: 0.9, PRecords: [2]float64{0.9, 0.9}}, []string{"companion:a.md>b.md"}},
 		{"records both ways, the chat is the record", chat, DocVerdict{PRelated: 0.9, PRecords: [2]float64{0.9, 0.9}}, []string{"records:b.jsonl>a.md"}},
@@ -155,5 +157,19 @@ func TestIncrementalJudgesChangedDocumentPairs(t *testing.T) {
 	indexMarkdown(t, base, "docs/tracker.md", "# Tracker\n\nStatus: draft, 2026-10-09\n\nThe redesign of `retry.md`, revised. "+longBody, map[string]string{graph.PropContentHash: "sha256:tracker-v2"})
 	if rep = run(); rep.DocsConsidered != 1 || rep.DocPairs.Judged != 1 {
 		t.Errorf("after an edit: considered %d, judged %d; want 1 and 1", rep.DocsConsidered, rep.DocPairs.Judged)
+	}
+}
+
+// TestRecordsNeedARecordOfSomethingElse covers the measured failure: a later
+// review of a pull request read as a record of the earlier review.
+func TestRecordsNeedARecordOfSomethingElse(t *testing.T) {
+	older := &Subject{Path: "reviews/2026-08-26/pr-6784-review.md"}
+	later := &Subject{Path: "reviews/2026-09-09/pr-6784-review.md"}
+	v := DocVerdict{PRelated: 0.95, PRecords: [2]float64{0.3, 0.94}}
+	v.Decide(older, later, DefaultDocGates())
+	for _, l := range v.Links {
+		if l.Kind == DocRecords {
+			t.Errorf("a review recorded another review: %+v", l)
+		}
 	}
 }

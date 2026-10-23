@@ -61,8 +61,15 @@ type DocGates struct {
 // DefaultDocGates are provisional until calibrated on labelled pairs, and
 // strict where a wrong answer costs most: calling a document replaced hides
 // it from a reader who would have needed it.
+//
+// Measured on 136 pairs two blind labellers agreed on (kappa 0.86 on
+// related): related AUC 0.90, precision 0.83 at 0.8 and 0.90 at 0.9; changes
+// precision 0.89 at recall 0.47 at 0.75, against 1.00 at recall 0.14 at 0.85.
+// No pair labelled replaces scored above 0.62, so at 0.95 replaces is never
+// shown and a revision reads as "changed by", which every replacing document
+// also is.
 func DefaultDocGates() DocGates {
-	return DocGates{Related: 0.8, Changes: 0.85, Replaces: 0.95, Records: 0.85}
+	return DocGates{Related: 0.85, Changes: 0.75, Replaces: 0.95, Records: 0.85}
 }
 
 // docCard is what the decision model sees of one document.
@@ -265,18 +272,20 @@ func (v *DocVerdict) Decide(a, b *Subject, g DocGates) {
 	// kind is to record things (an incident write-up, notes, a chat) is
 	// taken as the record, and when that does not tell them apart neither
 	// is.
+	//
+	// A record is of something that is not itself a record: asked whether a
+	// later review of a pull request records the earlier review, the model
+	// said yes at 0.9, and 19 of 20 records links on labelled pairs were of
+	// that kind. So the record side must be record-like and the other side
+	// must not be.
 	records := -1
-	switch ab, ba := v.PRecords[0] >= g.Records, v.PRecords[1] >= g.Records; {
-	case ab && ba:
-		if ra, rb := recordLike(a), recordLike(b); ra != rb {
-			records = 0
-			if rb {
-				records = 1
-			}
-		}
-	case ab:
+	recordOf := func(from, to *Subject) bool { return recordLike(from) && !recordLike(to) }
+	ab := v.PRecords[0] >= g.Records && recordOf(a, b)
+	ba := v.PRecords[1] >= g.Records && recordOf(b, a)
+	switch {
+	case ab && !ba:
 		records = 0
-	case ba:
+	case ba && !ab:
 		records = 1
 	}
 	if records >= 0 {

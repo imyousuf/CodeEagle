@@ -794,8 +794,8 @@ per run, with the deferred-versus-cut semantics of meeting pairs. Each pair
 is judged in its own request: two document cards (type, status, date,
 outline, excerpts) and the literal facts that proposed it, asked whether the
 two are related and, in both directions, whether one changes, replaces or
-records the other. Default gates: related 0.8, changes 0.85, replaces 0.95,
-records 0.85. Where both directions clear a gate, the later stated date wins;
+records the other. Default gates, as calibrated below: related 0.85, changes 0.75,
+replaces 0.95, records 0.85. Where both directions clear a gate, the later stated date wins;
 with no dates to tell them apart neither direction is kept. `replaces` needs
 `changes` in the same direction. Every tie falls back to the weaker claim,
 because a wrong "replaced by" hides a document someone needs.
@@ -806,6 +806,25 @@ so a pair is asked about again only when one side changes. Accepted kinds are
 written as `Changes`, `Supersedes`, `Records` and `CompanionOf` edges. Briefs
 gain `superseded_by` and `amended_by` freshness flags, computed when read and
 never trimmed, and a related-documents part.
+
+**Calibration (2026-10-23).** 146 proposed pairs, stratified by signal, were
+labelled by two blind labellers reading the documents; they agreed on
+related for 136 (kappa 0.86) and on the direction labels for 99-100%, and
+disagreed mostly on a virtual teammate's daily digests. On those 136
+(68 related), over two runs of the decision model:
+
+| question | result |
+|---|---|
+| related | AUC 0.90; precision 0.80-0.83 at 0.8, 0.90-0.92 at 0.9, recall 0.69 at 0.9 |
+| changes, direction included | precision 1.00 at recall 0.14 at 0.85; 0.89-0.94 at recall 0.47 at 0.75 |
+| replaces | no labelled pair above 0.62; never admitted at 0.95 |
+| records | 19 of 20 links were a later review of a pull request "recording" the earlier review; with the rule below, 1 of 2 right on 3 labelled positives (too few to calibrate) |
+
+So the gates are related 0.85, changes 0.75, replaces 0.95 (in effect off:
+the seven labelled replacements, deck and spec revisions, read as "changed
+by", which every replacing document also is), records 0.85; and a records
+link needs a record-like document (incident, notes, meeting notes, chat,
+report) on the recording side and one that is not on the other.
 
 `relations --docs --plan` lists the proposals; `--sample-out-docs DIR`
 writes a stratified sample for labelling; `--measure-docs labels.jsonl`
