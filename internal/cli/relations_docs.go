@@ -193,7 +193,9 @@ func runRelationsMeasureDocs(ctx context.Context, out io.Writer, cfg *config.Con
 		b, _ := json.Marshal(map[string]any{"pair_id": labelled[i].ID, "a": labelled[i].A, "b": labelled[i].B,
 			"labels": map[string]string{"related": labelled[i].Related, "changes": labelled[i].Changes,
 				"replaces": labelled[i].Replaces, "records": labelled[i].Records}, "verdict": v})
-		f.Write(append(b, '\n'))
+		if _, err := f.Write(append(b, '\n')); err != nil {
+			return fmt.Errorf("write %s: %w", scoredOut, err)
+		}
 	}
 	fmt.Fprintf(out, "Per-pair probabilities: %s\n", scoredOut)
 	return nil

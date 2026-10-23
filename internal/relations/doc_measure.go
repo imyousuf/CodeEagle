@@ -99,7 +99,9 @@ func WriteDocSample(dir string, cands []*DocCandidate, n int) (int, error) {
 			s.BSection = append(s.BSection, sec.HeadingPath+": "+excerpt(sec.Text, 500))
 		}
 		b, _ := json.Marshal(s)
-		w.Write(append(b, '\n'))
+		if _, err := w.Write(append(b, '\n')); err != nil {
+			return 0, err
+		}
 	}
 	if err := w.Flush(); err != nil {
 		return 0, err

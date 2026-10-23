@@ -13,6 +13,7 @@ Arms:
   all    Read, Grep, Glob and every CodeEagle tool
   oracle like all, on a stronger model with many more turns; drafts the
          reference answers a person then checks
+  verbs-haiku  the three verbs on a cheaper model
 
 Everything the benchmark reads and writes lives in the bench directory, never
 in the repository:
@@ -45,12 +46,17 @@ ARMS = {
     "verbs": {"tools": "", "mcp": "verbs"},
     "all": {"tools": FILE_TOOLS, "mcp": "all"},
     "oracle": {"tools": FILE_TOOLS, "mcp": "all", "oracle": True},
+    # The three verbs on a cheaper model: whether briefs carry enough that a
+    # small model answers as well, for a fraction of the cost.
+    "verbs-haiku": {"tools": "", "mcp": "verbs", "model": "haiku"},
 }
 
-PROMPT = """You are answering a question about a team's work. Its tech specs are \
-under {corpus}/specs, and its meeting transcripts under {sessions} (one \
-directory per recording; session.json holds what was said, by whom, when). \
-You may not have tools that read those files directly; use the tools you have.
+PROMPT = """You are answering a question about a team's work. Its documents are \
+under {corpus}/specs: tech specs, and under specs/home-slice work notes, \
+incident write-ups, plans, PDFs, slide decks and a virtual teammate's \
+workspace. Its meeting transcripts are under {sessions} (one directory per \
+recording; session.json holds what was said, by whom, when). You may not \
+have tools that read those files directly; use the tools you have.
 
 Answer concisely. Cite the source of each claim: a document's path and \
 section, or a meeting's date and title. Say what is current, and say so when \
@@ -84,7 +90,7 @@ def command(arm, spec, prompt, args, mcp_dir, out):
         "--restricted", "--strict-mcp-config",
         "--permission-mode", "dontAsk",
         "--tools", spec["tools"],
-        "--model", args.oracle_model if oracle else args.model,
+        "--model", args.oracle_model if oracle else spec.get("model", args.model),
         "--max-turns", str(args.oracle_turns if oracle else args.max_turns),
     ]
     if args.max_budget and not oracle:
