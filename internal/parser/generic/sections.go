@@ -150,6 +150,8 @@ func Sectionize(path, text string) []TextSection {
 				}
 			}
 		}
+	} else if secs := byHeadings(path, text); len(secs) > 0 {
+		out = secs
 	} else {
 		// Plain text: groups of paragraphs.
 		var buf strings.Builder
@@ -181,6 +183,74 @@ func Sectionize(path, text string) []TextSection {
 	out = kept
 	if len(out) > maxSections {
 		out = out[:maxSections]
+	}
+	return out
+}
+
+// Heading lines of the light markup plain text is written in: "# Title"
+// (also in .txt), AsciiDoc "== Title", Org "* Title", and reStructuredText's
+// title over a line of =, - or ~.
+var (
+	hashHeading = regexp.MustCompile(`^#{1,4}\s+(\S.{0,100})$`)
+	adocHeading = regexp.MustCompile(`^={1,4}\s+(\S.{0,100})$`)
+	orgHeading  = regexp.MustCompile(`^\*{1,4}\s+(\S.{0,100})$`)
+	rstRule     = regexp.MustCompile(`^(={3,}|-{3,}|~{3,})\s*$`)
+)
+
+// minHeadings is the fewest headings that make text sectioned by them.
+const minHeadings = 2
+
+// byHeadings splits text at its headings, or returns nil when it has fewer
+// than minHeadings. Text before the first heading is kept as a section of its
+// own when there is enough of it to matter.
+func byHeadings(path, text string) []TextSection {
+	ext := strings.ToLower(filepath.Ext(path))
+	lines := strings.Split(text, "\n")
+	type mark struct {
+		line    int // first line of the section's body
+		heading string
+	}
+	var marks []mark
+	for i, ln := range lines {
+		ln = strings.TrimRight(ln, " \t\r")
+		var m []string
+		switch ext {
+		case ".org":
+			m = orgHeading.FindStringSubmatch(ln)
+		case ".adoc", ".asciidoc":
+			m = adocHeading.FindStringSubmatch(ln)
+		case ".rst":
+			if i > 0 && rstRule.MatchString(ln) && strings.TrimSpace(lines[i-1]) != "" && !rstRule.MatchString(lines[i-1]) &&
+				len(strings.TrimSpace(lines[i-1])) <= len(ln)+2 {
+				m = []string{"", strings.TrimSpace(lines[i-1])}
+				// The title line belongs to the heading, not the section
+				// before it.
+				lines[i-1] = ""
+			}
+		default:
+			m = hashHeading.FindStringSubmatch(ln)
+		}
+		if m != nil {
+			marks = append(marks, mark{line: i + 1, heading: strings.TrimSpace(m[1])})
+		}
+	}
+	if len(marks) < minHeadings {
+		return nil
+	}
+	var out []TextSection
+	if pre := strings.TrimSpace(strings.Join(lines[:max(0, marks[0].line-1)], "\n")); len(pre) >= 200 {
+		out = append(out, TextSection{Heading: "Opening", Text: pre})
+	}
+	for i, mk := range marks {
+		end := len(lines)
+		if i+1 < len(marks) {
+			end = marks[i+1].line - 1
+		}
+		body := strings.TrimSpace(strings.Join(lines[min(mk.line, end):end], "\n"))
+		if body == "" {
+			continue
+		}
+		out = append(out, TextSection{Heading: mk.heading, Text: body})
 	}
 	return out
 }
