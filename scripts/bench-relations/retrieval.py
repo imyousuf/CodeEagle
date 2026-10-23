@@ -20,12 +20,19 @@ questions.jsonl records carry "sources": {"docs": [paths as indexed],
 """
 
 import argparse
+import hashlib
 import json
 import os
 import pathlib
 import re
 import statistics
 import subprocess
+
+
+def relation_id(path):
+    """The relation's node ID, as graph.NewNodeID("Relation", "", "doc:"+path) makes it, so any
+    version of the verbs can be asked for it by ID."""
+    return hashlib.sha256(f"Relation::doc:{path}".encode()).hexdigest()[:24]
 
 
 def run(args, *cmd):
@@ -50,7 +57,7 @@ def main():
             continue
         found = run(args, "find", q["question"])
         find_hit = [d for d in docs if d in found]
-        briefs = "".join(run(args, "brief", d, "--budget", "2000") for d in docs)
+        briefs = "".join(run(args, "brief", relation_id(d)[:12], "--budget", "2000") for d in docs)
         reach_meet = [m for m in meetings if m in briefs]
         linked = [d for d in docs[1:] if d in briefs]
         r = {
