@@ -6,7 +6,10 @@ import (
 	"hash/fnv"
 	"math"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/dgraph-io/badger/v4"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
 )
@@ -101,4 +104,44 @@ func TestReembeddingSurvivesASaveAndLoad(t *testing.T) {
 		t.Fatalf("search after re-embedding: %v, %d results", err, len(res))
 	}
 	vs.Close()
+}
+
+// TestReconcileReembedsChangedText covers a node whose text changed after it
+// was embedded, as a relation's does when its brief is rewritten: reconcile
+// embeds it again, and leaves unchanged nodes alone.
+func TestReconcileReembedsChangedText(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	store := newMockGraphStore()
+	rel := &graph.Node{ID: "r1", Type: graph.NodeRelation, Name: "relation", DocComment: "first brief: the cap is three"}
+	doc := &graph.Node{ID: "d1", Type: graph.NodeDocument, Name: "doc", DocComment: "retry policy"}
+	_ = store.AddNode(ctx, rel)
+	_ = store.AddNode(ctx, doc)
+	vs, err := New(store, spreadEmbedder{}, "test", filepath.Join(dir, "vec.idx"), filepath.Join(dir, "vec.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vs.Close()
+	if added, _, err := vs.Reconcile(ctx, 0); err != nil || added != 2 {
+		t.Fatalf("first reconcile added %d, %v", added, err)
+	}
+	if added, _, _ := vs.Reconcile(ctx, 0); added != 0 {
+		t.Errorf("an unchanged index re-embedded %d nodes", added)
+	}
+	rel.DocComment = "rewritten brief: the cap is five"
+	if added, _, _ := vs.Reconcile(ctx, 0); added != 1 {
+		t.Errorf("after a rewrite, reconcile embedded %d nodes, want the relation", added)
+	}
+	if got := vs.getChunkText("r1", 0); !strings.Contains(got, "five") {
+		t.Errorf("relation chunk = %q, want the rewritten brief", got)
+	}
+
+	// Indexed before hashes were kept: a relation is embedded again once,
+	// anything else is left as it is.
+	for _, id := range []string{"r1", "d1"} {
+		_ = vs.vecDB.Update(func(txn *badger.Txn) error { return txn.Delete([]byte(prefixText + id)) })
+	}
+	if added, _, _ := vs.Reconcile(ctx, 0); added != 1 {
+		t.Errorf("legacy index: reconcile embedded %d nodes, want only the relation", added)
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"os"
 	"sort"
@@ -24,6 +25,9 @@ const (
 	// Key prefixes for vector BadgerDB.
 	prefixChunk = "chunk:" // chunk:<nodeID>:<chunkIndex> → ChunkEntry JSON
 	prefixMeta  = "meta:"  // meta:<branch> → VectorIndexMeta JSON
+	// prefixText records, per node, a hash of the text its vectors were made
+	// from, so a node whose text changed is embedded again.
+	prefixText = "text:" // text:<nodeID> → hash of the embedded text
 
 	// HNSW tuning parameters.
 	hnswM  = 16 // max neighbors per node
@@ -390,7 +394,8 @@ func (vs *VectorStore) Staleness(ctx context.Context) (stale, missing int, err e
 
 // Reconcile closes the gap between the index and the graph in place: it drops
 // the vectors of nodes the graph no longer has and embeds up to limit
-// embeddable nodes it lacks, most recently updated first. Zero means no limit.
+// embeddable nodes it lacks or whose text changed since they were embedded,
+// most recently updated first. Zero means no limit.
 //
 // Until now only a full rebuild embedded anything, so a document indexed after
 // the last rebuild was invisible to search by meaning. Reconciling on every
@@ -460,6 +465,11 @@ func (vs *VectorStore) gaps(ctx context.Context, types []graph.NodeType) (stale 
 		return nil, nil, fmt.Errorf("scan chunks: %w", err)
 	}
 
+	hashes, err := vs.textHashes()
+	if err != nil {
+		return nil, nil, fmt.Errorf("scan text hashes: %w", err)
+	}
+
 	if len(types) == 0 {
 		types = EmbeddableTypes
 	}
@@ -471,7 +481,14 @@ func (vs *VectorStore) gaps(ctx context.Context, types []graph.NodeType) (stale 
 		}
 		for _, n := range nodes {
 			present[n.ID] = true
-			if !indexed[n.ID] && IsEmbeddable(n.Type) && EmbeddableText(n) != "" {
+			if !IsEmbeddable(n.Type) {
+				continue
+			}
+			text := EmbeddableText(n)
+			if text == "" {
+				continue
+			}
+			if !indexed[n.ID] || changedText(n, hashes[n.ID], text) {
 				missing = append(missing, n)
 			}
 		}
@@ -535,8 +552,7 @@ func (vs *VectorStore) IndexNode(ctx context.Context, node *graph.Node) error {
 			return fmt.Errorf("store chunk %s: %w", key, err)
 		}
 	}
-
-	return nil
+	return vs.putTextHashes(map[string]string{node.ID: textHash(text)})
 }
 
 // EmbedBatchSize is how many chunks are sent for embedding in one request.
@@ -557,6 +573,21 @@ func (vs *VectorStore) IndexNodes(ctx context.Context, nodes []*graph.Node) erro
 	return vs.indexNodes(ctx, nodes, nil)
 }
 
+// changedText reports whether an indexed node's text has changed since its
+// vectors were made. A relation's brief is rewritten in place, and the vectors
+// search matched it by were its first brief's until something re-embedded
+// it; a run that stopped between writing briefs and re-embedding them left
+// them so for good. A node indexed before hashes were recorded has none: a
+// relation is embedded again once, since relations are few and the ones
+// rewritten; anything else is taken as current rather than re-embedding the
+// whole index on upgrade.
+func changedText(n *graph.Node, stored, text string) bool {
+	if stored == "" {
+		return n.Type == graph.NodeRelation
+	}
+	return stored != textHash(text)
+}
+
 // pendingChunk is one chunk waiting to be embedded, and where it belongs.
 type pendingChunk struct {
 	nodeID string
@@ -570,6 +601,7 @@ func (vs *VectorStore) indexNodes(
 ) error {
 	var batch []pendingChunk
 	indexed := 0
+	hashes := make(map[string]string)
 
 	flush := func() error {
 		if len(batch) == 0 {
@@ -619,6 +651,7 @@ func (vs *VectorStore) indexNodes(
 		vs.mu.Lock()
 		vs.removeNodeVectors(node.ID)
 		vs.mu.Unlock()
+		hashes[node.ID] = textHash(text)
 
 		for i, chunk := range Chunk(text, vs.chunk) {
 			batch = append(batch, pendingChunk{nodeID: node.ID, index: i, text: chunk})
@@ -634,7 +667,10 @@ func (vs *VectorStore) indexNodes(
 			progress(indexed, len(nodes))
 		}
 	}
-	return flush()
+	if err := flush(); err != nil {
+		return err
+	}
+	return vs.putTextHashes(hashes)
 }
 
 // RemoveNode removes all vectors for a node.
@@ -962,6 +998,9 @@ func (vs *VectorStore) removeNodeVectors(nodeID string) {
 	// Remove chunk entries from BadgerDB.
 	prefix := []byte(prefixChunk + nodeID + ":")
 	vs.deleteByPrefix(prefix)
+	if vs.vecDB != nil {
+		_ = vs.vecDB.Update(func(txn *badger.Txn) error { return txn.Delete([]byte(prefixText + nodeID)) })
+	}
 }
 
 // newGraph returns an empty vector graph with the index's settings.
@@ -1006,8 +1045,52 @@ func (vs *VectorStore) putChunkEntry(key string, entry ChunkEntry) error {
 	})
 }
 
+// putTextHashes records the text each node's vectors were made from.
+func (vs *VectorStore) putTextHashes(hashes map[string]string) error {
+	if len(hashes) == 0 || vs.vecDB == nil {
+		return nil
+	}
+	wb := vs.vecDB.NewWriteBatch()
+	defer wb.Cancel()
+	for id, h := range hashes {
+		if err := wb.Set([]byte(prefixText+id), []byte(h)); err != nil {
+			return fmt.Errorf("store text hash of %s: %w", id, err)
+		}
+	}
+	return wb.Flush()
+}
+
+// textHashes reads every recorded text hash, by node ID.
+func (vs *VectorStore) textHashes() (map[string]string, error) {
+	out := make(map[string]string)
+	err := vs.vecDB.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = []byte(prefixText)
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		for it.Seek(opts.Prefix); it.Valid(); it.Next() {
+			item := it.Item()
+			v, err := item.ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+			out[strings.TrimPrefix(string(item.Key()), prefixText)] = string(v)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// textHash identifies the text a node's vectors were made from.
+func textHash(text string) string {
+	h := fnv.New64a()
+	h.Write([]byte(text))
+	return strconv.FormatUint(h.Sum64(), 16)
+}
+
 func (vs *VectorStore) clearAllChunks() error {
 	vs.deleteByPrefix([]byte(prefixChunk))
+	vs.deleteByPrefix([]byte(prefixText))
 	return nil
 }
 
