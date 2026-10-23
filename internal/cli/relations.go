@@ -88,7 +88,9 @@ again, so the next runs pay to rebuild what was there.`,
 			if measure != "" {
 				return runRelationsMeasure(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cfg, measure, target, jopts, scoredOut)
 			}
-			if plan {
+			// Writing a sample is read-only; asked for without --plan it
+			// used to be ignored, and a full judging run went ahead instead.
+			if plan || sampleOut != "" || sampleDocs != "" {
 				return runRelationsPlan(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cfg, o)
 			}
 			return runRelationsJudge(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), cfg, o)
@@ -98,7 +100,7 @@ again, so the next runs pay to rebuild what was there.`,
 	cmd.Flags().BoolVar(&plan, "plan", false, "show what a run would do; write nothing")
 	cmd.Flags().StringVar(&doc, "doc", "", "only propose for this document (its path as indexed)")
 	cmd.Flags().StringVar(&meeting, "meeting", "", "only propose for this meeting (its session ID)")
-	cmd.Flags().StringVar(&sampleOut, "sample-out", "", "write a stratified sample of candidates to label into this directory")
+	cmd.Flags().StringVar(&sampleOut, "sample-out", "", "write a stratified sample of candidates to label into this directory (implies --plan)")
 	cmd.Flags().IntVar(&sampleSize, "sample-size", 200, "how many candidates --sample-out writes")
 	cmd.Flags().IntVar(&top, "top", 10, "how many of the best candidates to list")
 	cmd.Flags().IntVar(&limit, "limit", 0, "judge at most this many pairs (default: relations.max_pairs_per_run)")
@@ -108,7 +110,7 @@ again, so the next runs pay to rebuild what was there.`,
 	cmd.Flags().BoolVar(&reset, "reset", false, "delete every relation, verdict and brief")
 	cmd.Flags().BoolVar(&docs, "docs", false, "also propose and judge how documents relate to each other (changes, replaces, records, companion)")
 	cmd.Flags().IntVar(&limitDocs, "limit-docs", 0, "judge at most this many document pairs (default: relations.max_doc_pairs_per_run)")
-	cmd.Flags().StringVar(&sampleDocs, "sample-out-docs", "", "with --plan: write a stratified sample of document pairs to label into this directory")
+	cmd.Flags().StringVar(&sampleDocs, "sample-out-docs", "", "write a stratified sample of document pairs to label into this directory (implies --plan)")
 	cmd.Flags().StringVar(&measureDoc, "measure-docs", "", "judge labelled document pairs (from --sample-out-docs) and report how the answers match")
 	// Experiments on what the judge is shown, measured with --measure.
 	cmd.Flags().IntVar(&jopts.BatchSize, "judge-batch", 0, "with --measure: pairs per decision-model request")
