@@ -28,6 +28,11 @@ Build and maintain a rich knowledge graph that captures:
 - PDF files (pure Go via `github.com/dslipak/pdf`, BSD-3, by default;
   poppler via `-tags poppler` where the system library is present, which
   `make build` detects and is ~50x faster on a long document)
+- Prose documents other than markdown (PDF, DOCX, PPTX, ODT, ODP, plain text)
+  keep their text in section nodes: pages (short ones merged), slides, or
+  runs of paragraphs. The file's own node keeps its summary, for search
+- Chat logs (assistant histories and sessions, ChatGPT, Slack and Teams
+  exports, conversations pasted into text or a PDF), sectioned by day
 - Images: PNG, JPG, GIF, WebP, BMP, TIFF (LLM-described when provider available)
 - Inline doc comments (godoc, JSDoc, Python docstrings)
 - Architecture diagrams (reference/link tracking)
@@ -624,7 +629,8 @@ codeeagle/
 │   │   ├── shell/          # Shell parser (tree-sitter bash)
 │   │   ├── terraform/      # Terraform parser (tree-sitter HCL)
 │   │   ├── yaml/           # YAML parser (GHA, Ansible, generic)
-│   │   ├── generic/        # Generic fallback parser for non-code files (text, images, directories, document formats)
+│   │   ├── generic/        # Generic fallback parser for non-code files (text, images, directories, document formats); prose sections
+│   │   ├── chatlog/        # Chat log detection (JSONL histories, ChatGPT, Slack, Teams, pasted) and day sections
 │   │   └── manifest/       # Manifest parser (go.mod, package.json, pyproject.toml, requirements.txt)
 │   ├── faces/              # Face detection & recognition (OpenCV DNN, Caffe SSD + ONNX SFace, agglomerative clustering, KNN classification)
 │   ├── relations/          # Discovered document <-> meeting relations: proposal signals, Jev judging,
