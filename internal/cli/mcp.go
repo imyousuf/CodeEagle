@@ -51,7 +51,7 @@ This command is typically invoked automatically by the Claude CLI via
 --mcp-config, not run directly by users.`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load()
+			cfg, err := config.LoadForReading()
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}

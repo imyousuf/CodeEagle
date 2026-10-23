@@ -507,3 +507,23 @@ func TestRelationsEnabledFollowsTheDecisionModel(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadForReadingLeavesCommandSecretsAlone covers the readers' load: a
+// credential fetched by a command is not fetched, other values are expanded.
+func TestLoadForReadingLeavesCommandSecretsAlone(t *testing.T) {
+	cfg := &Config{}
+	cfg.Transcripts.JevAPIKey = "$(echo secret)"
+	cfg.Transcripts.Provider = "$(echo baseten)"
+	cfg.Transcripts.Model = "${CODEEAGLE_TEST_UNSET:-flash}"
+	if err := expandConfigWith(cfg, true); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Transcripts.JevAPIKey != "" || cfg.Transcripts.Provider != "baseten" || cfg.Transcripts.Model != "flash" {
+		t.Errorf("key %q provider %q model %q", cfg.Transcripts.JevAPIKey, cfg.Transcripts.Provider, cfg.Transcripts.Model)
+	}
+	full := &Config{}
+	full.Transcripts.JevAPIKey = "$(echo secret)"
+	if err := expandConfigWith(full, false); err != nil || full.Transcripts.JevAPIKey != "secret" {
+		t.Errorf("a full load did not fetch the key: %q, %v", full.Transcripts.JevAPIKey, err)
+	}
+}

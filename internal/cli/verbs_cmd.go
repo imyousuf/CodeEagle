@@ -138,7 +138,7 @@ that node. Never a whole file.`,
 }
 
 func loadVerbs() (*verbs, error) {
-	cfg, err := config.Load()
+	cfg, err := config.LoadForReading()
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}

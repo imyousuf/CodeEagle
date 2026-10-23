@@ -518,6 +518,16 @@ func ExportFilePath(confDir string, conf *ProjectConf) string {
 //  3. Walk up from CWD for .CodeEagle/config.yaml
 //  4. Registry lookup by CWD path
 func Load() (*Config, error) {
+	return load(false)
+}
+
+// LoadForReading is Load for commands that only read the index: credentials
+// fetched by a command are left empty rather than fetched.
+func LoadForReading() (*Config, error) {
+	return load(true)
+}
+
+func load(deferSecrets bool) (*Config, error) {
 	v := viper.New()
 	setDefaults(v)
 
@@ -605,7 +615,7 @@ func Load() (*Config, error) {
 	// Resolve ${VAR} and $(command) references before anything reads a value,
 	// so a credential can live in the environment or the system keyring
 	// rather than in a file that gets committed.
-	if err := expandConfig(&cfg); err != nil {
+	if err := expandConfigWith(&cfg, deferSecrets); err != nil {
 		return nil, fmt.Errorf("error expanding config: %w", err)
 	}
 
