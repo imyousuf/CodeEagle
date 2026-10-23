@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
 )
@@ -203,5 +204,14 @@ func TestGarbled(t *testing.T) {
 	}
 	if secs := Sectionize("x.pdf", "--- Page 1 ---\n"+strings.Repeat("û®:ÆËÆËTË**®ÙË*p8L®TË&", 10)); len(secs) != 0 {
 		t.Errorf("a garbled page became %d sections", len(secs))
+	}
+}
+
+func TestSectionCapsKeepCharactersWhole(t *testing.T) {
+	text := strings.Repeat("停滞的队列 ", 1500) // multi-byte, well past the cap
+	for _, sec := range Sectionize("notes.txt", text) {
+		if !utf8.ValidString(sec.Text) || !utf8.ValidString(sec.Heading) {
+			t.Errorf("section %q is not valid UTF-8", sec.Heading)
+		}
 	}
 }

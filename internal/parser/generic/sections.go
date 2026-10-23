@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/imyousuf/CodeEagle/internal/parser/chatlog"
 )
@@ -176,7 +177,7 @@ func Sectionize(path, text string) []TextSection {
 			continue
 		}
 		if len(sec.Text) > maxSectionTextLen {
-			sec.Text = sec.Text[:maxSectionTextLen]
+			sec.Text = cutRunes(sec.Text, maxSectionTextLen)
 		}
 		kept = append(kept, sec)
 	}
@@ -301,7 +302,18 @@ func firstLine(text string) string {
 	}
 	line = strings.Join(strings.Fields(line), " ")
 	if len(line) > 60 {
-		line = line[:60] + "…"
+		line = cutRunes(line, 60) + "…"
 	}
 	return line
+}
+
+// cutRunes cuts s to at most n bytes on a character boundary.
+func cutRunes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

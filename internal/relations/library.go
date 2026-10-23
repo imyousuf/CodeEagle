@@ -744,9 +744,7 @@ func (l *Library) FinderLine(r *Relation) string {
 	if r.Brief != nil && r.Brief.Headline.Text != "" {
 		head = r.Brief.Headline.Text
 	}
-	if len(head) > maxHeadlineInFinder {
-		head = head[:maxHeadlineInFinder] + "…"
-	}
+	head = clip(head, maxHeadlineInFinder)
 	var last time.Time
 	for _, v := range r.Accepted() {
 		if m := l.Meetings[v.SessionID]; m != nil && m.Date.After(last) {

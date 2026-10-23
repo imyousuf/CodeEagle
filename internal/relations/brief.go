@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Budgets for a rendered brief, in estimated tokens.
@@ -361,6 +362,9 @@ func clip(s string, n int) string {
 	cut := strings.LastIndex(s[:n], " ")
 	if cut < n/2 {
 		cut = n
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
 	}
 	return s[:cut] + "…"
 }

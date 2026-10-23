@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/graph"
@@ -629,7 +630,7 @@ func (v *verbs) Show(ctx context.Context, arg string, from int) (string, error) 
 	}
 	text := strings.TrimSpace(n.DocComment)
 	if len(text) > maxShowNodeChars {
-		text = text[:maxShowNodeChars] + "…"
+		text = clipText(text, maxShowNodeChars)
 	}
 	return fmt.Sprintf("%s %s %s\n%s\n\n%s", relations.ShortID(n.ID), n.Type, n.Name, where, text), nil
 }
@@ -638,7 +639,19 @@ func (v *verbs) Show(ctx context.Context, arg string, from int) (string, error) 
 func clipFind(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	if len(s) > 70 {
-		return s[:70] + "…"
+		return clipText(s, 70)
 	}
 	return s
+}
+
+// clipText cuts s to at most n bytes on a character boundary, marking the
+// cut.
+func clipText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
 }
