@@ -44,8 +44,9 @@ type verbs struct {
 	vs      *vectorstore.VectorStore
 	vsTried bool
 	// store is open for the duration of a call, and nil between calls or
-	// when a sync holds the database.
-	store *embedded.BranchStore
+	// when a sync holds the database; branch is the branch it reads.
+	store  *embedded.BranchStore
+	branch string
 }
 
 func newVerbs(cfg *config.Config) *verbs { return &verbs{cfg: cfg} }
@@ -136,7 +137,12 @@ func (v *verbs) begin(ctx context.Context) (*relations.Library, func(), error) {
 	v.store = store
 	v.lib.Store = store
 	v.lib.Speakers = relations.NewStoreSpeakers(ctx, store)
-	v.attachVectors(store, branch)
+	// The vector index is loaded only by a call that searches: loading it
+	// was most of what a brief or show by ID cost, and neither uses it.
+	v.branch = branch
+	if v.vs != nil {
+		v.vs.UseGraph(store)
+	}
 	return v.lib, release, nil
 }
 
@@ -221,6 +227,7 @@ func (v *verbs) findings(ctx context.Context, lib *relations.Library, query stri
 	if v.store == nil {
 		return nil, embedded.ErrBusy
 	}
+	v.attachVectors(v.store, v.branch)
 	vec := v.vectors()
 	docs, err := search.Hybrid(ctx, v.store, vec, query, search.HybridOptions{Limit: 20, Types: findDocTypes})
 	if err != nil {
