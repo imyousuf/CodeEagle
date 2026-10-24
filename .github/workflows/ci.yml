@@ -17,6 +17,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      # A pull request is checked out as a detached merge commit with no
+      # local main, but internal/gitutil's tests read this checkout and
+      # expect what a developer has: a named branch and a local main.
+      - name: Check out the pull request as a branch
+        if: github.event_name == 'pull_request'
+        run: |
+          git checkout -B "$HEAD_REF"
+          git branch -f main origin/main
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
