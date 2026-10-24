@@ -979,6 +979,14 @@ What moved it:
 - **The smaller model.** Verbs on Haiku match Sonnet's grade at a fifth of
   the cost and half the wall time (15 s median): $0.012 median, $0.021 p90.
 
+**Other agent models** (one repetition each, through
+`scripts/bench-relations/bench_openai.py`; the full table and how to read it
+are in `docs/models.md`, "Answering with the verbs"): GLM 5.3 Flash grade 0.56,
+completeness 0.52 at $0.0014 median; DeepSeek V4.1 Flash completeness 0.56
+(0.57-0.64 on every answerable category, 24% fully right) at $0.006 but poor
+at unanswerable questions; Kimi K3 0.50 at $0.023; Gemini 3.5 Flash-Lite 0.40
+at $0.004; GPT-OSS 120B correctness 0.74, the only model below 0.90.
+
 Retrieval without an agent: find's top eight held 86-88% of the documents a
 question needs in both builds; the briefs of those documents named 86% of the
 required meetings and linked documents, from 78%, document to document 1.00
