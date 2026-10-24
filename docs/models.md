@@ -155,8 +155,9 @@ What to take from it:
 - **DeepSeek V4.1 Flash gives the most complete answers** to questions the
   sources can answer (0.57-0.64 in every such category, 24% fully right), but
   is poor at unanswerable ones: it keeps searching until the call limit
-  rather than concluding the sources are silent. Four of its six misses were
-  that. GLM 5.3 and DeepSeek V4 Pro do the same.
+  rather than concluding the sources are silent: all four answers it lost
+  were unanswerable questions, four of the six. GLM 5.3 (three of three) and
+  DeepSeek V4 Pro (five of six) do the same.
 - **Kimi K3** is complete and declines correctly, at about twice Haiku's
   cost.
 - **GPT-OSS 120B is cheap but unreliable**: a quarter of its claims were
