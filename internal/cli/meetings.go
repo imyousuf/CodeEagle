@@ -119,6 +119,15 @@ meetings costs nothing for the ones already done.`,
 			// rather than per meeting.
 			if report.Stats.Meetings > 0 {
 				linkMeetingsToCode(cmd.Context(), out, pipeline.store)
+
+				// The topic relater's read-only handle on the vector index is
+				// released first, so the index can be opened for writing.
+				if pipeline.closeVectors != nil {
+					pipeline.closeVectors()
+					pipeline.closeVectors = nil
+				}
+				embedMissingMeetings(pipeline.cfg, pipeline.store, pipeline.branch, out)
+				relateNewMeetings(cmd.Context(), pipeline.cfg, pipeline.store, out)
 			}
 
 			// Failures are reported per recording so one bad file cannot end a
@@ -406,6 +415,7 @@ const maxTaxonomyLines = 150
 
 // meetingPipeline bundles everything needed to index transcripts.
 type meetingPipeline struct {
+	cfg      *config.Config
 	client   llm.Client
 	store    *embedded.BranchStore
 	branch   string
@@ -579,6 +589,7 @@ func buildMeetingPipeline(cmd *cobra.Command, ov meetingPipelineOverrides) (*mee
 	})
 
 	return &meetingPipeline{
+		cfg:          cfg,
 		client:       client,
 		store:        store,
 		branch:       embedded.MeetingScope,

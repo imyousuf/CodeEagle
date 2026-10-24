@@ -56,6 +56,15 @@ const (
 	NodeDecision NodeType = "Decision"
 	// NodeActionItem is a follow-up/TODO arising from a meeting.
 	NodeActionItem NodeType = "ActionItem"
+
+	// NodeRelation holds what was discovered about one subject document: the
+	// meetings judged to discuss it, the evidence quoted from both, and a
+	// brief of where it stands. It lives in the relations scope.
+	NodeRelation NodeType = "Relation"
+	// NodeRelationScan records which documents and meetings have been
+	// considered for relations, and under what content, so each run picks
+	// up only what is new or changed.
+	NodeRelationScan NodeType = "RelationScan"
 )
 
 // Well-known property keys used for architectural classification.
@@ -192,6 +201,29 @@ const (
 	// is recorded, including those found unrelated, so a reader must always
 	// apply a probability threshold.
 	EdgeRelatedTo EdgeType = "RelatedTo"
+
+	// EdgeAbout links a Relation to the document it is about.
+	EdgeAbout EdgeType = "About"
+	// EdgeDiscussedIn links a Relation to a Meeting judged to discuss its
+	// subject, carrying the decision model's probability. Only accepted
+	// verdicts get an edge; rejected ones are kept on the Relation itself.
+	EdgeDiscussedIn EdgeType = "DiscussedIn"
+	// EdgeReferences links a Relation to the Relation of a document its
+	// subject names, by a link or a written path: a fact the author wrote,
+	// resolved to the document it means.
+	EdgeReferences EdgeType = "References"
+	// EdgeChanges links the Relation of a document to the Relation of one it
+	// changes part of, as the decision model judged.
+	EdgeChanges EdgeType = "Changes"
+	// EdgeSupersedes links the Relation of a document to the Relation of one
+	// it replaces as a whole.
+	EdgeSupersedes EdgeType = "Supersedes"
+	// EdgeRecords links the Relation of an account of events (an incident
+	// report, a review, notes) to the Relation of what it is about.
+	EdgeRecords EdgeType = "Records"
+	// EdgeCompanionOf links the Relations of two documents about the same
+	// work with no direction, from the lower id to the higher.
+	EdgeCompanionOf EdgeType = "CompanionOf"
 )
 
 // MeetingNodeTypes lists the node types produced by meeting transcript indexing.

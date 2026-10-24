@@ -6,11 +6,13 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/imyousuf/CodeEagle/internal/agents"
 	"github.com/imyousuf/CodeEagle/internal/config"
+	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/mcp"
 )
 
@@ -25,8 +27,16 @@ func newMCPCmd() *cobra.Command {
 	return mcpCmd
 }
 
+// leaseIdle is how long the MCP tools keep the graph open after their last
+// use: long enough for one tool's burst of queries to share a handle, short
+// against an agent's pause between tool calls.
+const leaseIdle = 500 * time.Millisecond
+
 func newMCPServeCmd() *cobra.Command {
-	var logFile string
+	var (
+		logFile string
+		tools   string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -41,31 +51,45 @@ This command is typically invoked automatically by the Claude CLI via
 --mcp-config, not run directly by users.`,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load()
+			cfg, err := config.LoadForReading()
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
-
-			store, _, err := openReadOnlyBranchStore(cfg)
-			if err != nil {
-				return err
+			if tools != "" {
+				cfg.MCP.Tools = tools
 			}
-			defer store.Close()
-
-			var repoPaths []string
-			for _, repo := range cfg.Repositories {
-				repoPaths = append(repoPaths, repo.Path)
+			if t := cfg.MCP.Tools; t != "" && t != "all" && t != "verbs" {
+				return fmt.Errorf("mcp tools %q: want all or verbs", t)
 			}
-			ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
 
 			registry := agents.NewRegistry()
-			for _, tool := range agents.NewPlannerTools(ctxBuilder) {
+			// No tool holds the graph open between calls: a read-only handle
+			// keeps every writer out while it is open, so one kept for the
+			// session would stop the worker syncing until the session ended.
+			v := newVerbs(cfg)
+			defer v.Close()
+			for _, tool := range verbTools(v) {
 				registry.Register(tool)
 			}
-			// Meeting tools appear only when meetings are indexed: a tool whose
-			// only possible answer is "nothing is indexed" wastes an agent's turns.
-			for _, tool := range agents.NewMeetingTools(context.Background(), store) {
-				registry.Register(tool)
+			if cfg.MCP.Tools != "verbs" {
+				store := embedded.NewLeased(func() (*embedded.BranchStore, error) {
+					s, _, err := openReadOnlyBranchStore(cfg)
+					return s, err
+				}, leaseIdle)
+				defer store.Close()
+				var repoPaths []string
+				for _, repo := range cfg.Repositories {
+					repoPaths = append(repoPaths, repo.Path)
+				}
+				ctxBuilder := agents.NewContextBuilder(store, repoPaths...)
+				for _, tool := range agents.NewPlannerTools(ctxBuilder) {
+					registry.Register(tool)
+				}
+				// Meeting tools appear only when meetings are indexed: a tool whose
+				// only possible answer is "nothing is indexed" wastes an agent's turns.
+				for _, tool := range agents.NewMeetingTools(context.Background(), store) {
+					registry.Register(tool)
+				}
 			}
 
 			// Set up tool call logging: to log file if --log is set, else to stderr if -v.
@@ -86,6 +110,7 @@ This command is typically invoked automatically by the Claude CLI via
 			}
 
 			server := mcp.NewServer(registry)
+			server.SetInstructions(verbInstructions)
 
 			// Handle signals for graceful shutdown.
 			ctx, cancel := context.WithCancel(context.Background())
@@ -109,6 +134,7 @@ This command is typically invoked automatically by the Claude CLI via
 	}
 
 	cmd.Flags().StringVar(&logFile, "log", "", "path to write tool call logs (used by Claude CLI verbose mode)")
+	cmd.Flags().StringVar(&tools, "tools", "", "tools to expose: all, or verbs for only find, brief and show (default: mcp.tools)")
 
 	return cmd
 }

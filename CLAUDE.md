@@ -20,12 +20,19 @@ Build and maintain a rich knowledge graph that captures:
 - Dependencies (go.mod, package.json, pyproject.toml, requirements.txt, pom.xml, build.gradle)
 
 **Documentation Entities**
-- READMEs, tech specs, design docs, ADRs
+- READMEs, tech specs, design docs, ADRs; a markdown section carries its own
+  text, heading path, ordinal and content hash, so it can be embedded, quoted
+  and noticed when it changes
 - Office documents: DOCX, PPTX, XLSX (text extracted from ZIP/XML, pure Go stdlib)
 - OpenDocument files: ODT, ODS, ODP (text extracted from content.xml)
 - PDF files (pure Go via `github.com/dslipak/pdf`, BSD-3, by default;
   poppler via `-tags poppler` where the system library is present, which
   `make build` detects and is ~50x faster on a long document)
+- Prose documents other than markdown (PDF, DOCX, PPTX, ODT, ODP, plain text)
+  keep their text in section nodes: pages (short ones merged), slides, or
+  runs of paragraphs. The file's own node keeps its summary, for search
+- Chat logs (assistant histories and sessions, ChatGPT, Slack and Teams
+  exports, conversations pasted into text or a PDF), sectioned by day
 - Images: PNG, JPG, GIF, WebP, BMP, TIFF (LLM-described when provider available)
 - Inline doc comments (godoc, JSDoc, Python docstrings)
 - Architecture diagrams (reference/link tracking)
@@ -38,6 +45,12 @@ Build and maintain a rich knowledge graph that captures:
   that subject's point of view
 - Decisions, with rationale and a verbatim supporting quote
 - Action items / follow-ups, with owner and due date
+
+**Relation Entities** (see §4d)
+- One relation per document that meetings discussed: the decision model's
+  verdict on every meeting proposed for it, accepted or not; evidence anchored
+  to its source (a section, or a span of what was said); and a brief of where
+  the document stands, every line carrying a verified quote
 
 **Relationships**
 - `CONTAINS` — repo -> service -> package -> file -> symbol
@@ -64,6 +77,9 @@ Build and maintain a rich knowledge graph that captures:
   (inferred from the participant set, which recurs more reliably than a title)
 - `RELATED_TO` — topic <-> topic, undirected, carrying the decision model's
   probability that the two are about one thing; every judged pair is stored
+- `ABOUT` — relation -> the document it is about
+- `DISCUSSED_IN` — relation -> a meeting judged to discuss the document,
+  carrying the decision model's probability
 
 **Code Quality Metrics** (attached to graph nodes)
 - Cyclomatic complexity per function
@@ -117,7 +133,21 @@ codeeagle rag <query>                   # Semantic search over the knowledge gra
 codeeagle backpop [--all]               # Run linker phases on existing graph
 codeeagle prune --path <dir> [--dry-run] # Rebuild the graph without a directory indexed by mistake
 codeeagle metrics [service|file|func]   # Show code quality metrics
-codeeagle mcp serve                     # Start MCP server (stdio transport)
+codeeagle mcp serve [--tools all|verbs] # Start MCP server (stdio transport)
+
+codeeagle find <words>                  # Documents and meetings about something: one line
+                                        # each, with an ID for brief or show
+codeeagle brief <id|path|words> [--since T] [--budget N] [--json]  # Where a document
+                                        # stands: a cited brief shaped by its type, dated
+                                        # decisions, linked documents, freshness flags
+codeeagle show <id> [--from N]          # Expand a citation: the section as it is now, or
+                                        # the turns around a quote; never a whole file
+codeeagle relations [--plan] [--doc P] [--meeting ID] [--limit N] [--briefs-only] [--reset]
+                                        # Discover which meetings discussed which documents
+codeeagle relations --docs [--limit-docs N]   # ...and how documents relate to each other
+codeeagle relations --plan --sample-out-docs DIR | --measure-docs FILE
+                                        # Label a sample of document pairs; measure the gates
+codeeagle relations --redecide-docs     # Apply changed gates to stored verdicts, at no cost
 
 codeeagle faces scan [dirs...]         # Detect, cluster, and assign faces in images
 codeeagle faces clusters               # View face clusters
@@ -398,6 +428,70 @@ same command works in a terminal. `service install` therefore writes the
 installing shell's PATH into the unit or plist rather than depending on that
 timing.
 
+### 4d. Discovered Relations
+
+A tech spec and the meetings that discussed it rarely link to each other, and
+nothing says whether the spec is still what was agreed. `internal/relations`
+discovers those links and keeps, on each, a brief of where the document
+stands, so an agent can learn the current state of something in one call of
+a few hundred tokens and expand a citation only when it needs to. The full
+design and its measurements are in `docs/artifact-relations.md`.
+
+- **Similarity proposes, the decision model decides.** Four signals propose
+  document <-> meeting pairs (what was said near a section in meaning, the
+  title said aloud, a shared identifier, a shared topic) and Jev answers one
+  yes/no per pair, one pair per request (batched pairs moved each other's
+  scores) over the stretch of the meeting that shares the document's words.
+  On 160 labelled pairs: AUC 0.987; at the default gate of 0.8, precision
+  0.89-0.96 and recall 0.89. There is no relation without a decision model.
+- **Every document has a brief, shaped by its type**: spec, ADR, incident,
+  meeting notes, notes, report, deck, chat, reference, decided from its path,
+  headings and format at no cost, each with its own parts (an incident's root
+  cause, a deck's claims, a chat's threads). Status and date are read from the
+  document, never written by the model.
+- **Documents link to each other**: references resolved deterministically,
+  and judged kinds (changes, replaces, records, companion), one yes/no each.
+  Calibrated on 136 pairs two blind labellers agreed on (kappa 0.86): related
+  AUC 0.90; changes precision about 0.9 at 0.75. Replaces never cleared its
+  gate, so revisions read as "changed by". A blind check of accepted links
+  found every companion right and no direction reversed.
+- **A dated decision ledger per document**, from the meetings that discussed
+  it (by the judged stretch), dated lines in its own changelog, and decisions
+  the writer finds, checked as settled or merely proposed; a chat's are dated
+  by the day they were said. Entries are kept across rewrites.
+- **PDFs, decks, word-processor files, plain text and chat logs are subjects
+  too**: their text is kept in sections (pages, slides, days), so they can be
+  quoted and related like markdown.
+- **One relation per document, not per pair**, so a brief can say "the
+  document says X; the latest of four meetings decided Y". Every verdict is
+  kept, rejected ones included, keyed on what each side looked like when
+  judged; no pair is asked twice while neither changes.
+- **Relations live in their own scope**, `@relations`, beside `@meetings`, so
+  re-indexing meetings never touches them and `--reset` is one scope delete.
+- **Every line of a brief carries a quote, checked against the one snippet it
+  cites**; a line whose quote is not there is dropped. A conflict is shown only
+  if the decision model confirms the two statements contradict.
+- **Freshness is computed when read, never stored**: a document edited after
+  it was discussed, discussed after it was last edited, a brief not yet
+  rewritten, a quote no longer present.
+- **Each sync takes a bounded batch.** A scan ledger records what each
+  document and meeting was last considered under; a sync considers what is new
+  or changed, newest first, and waits for anything not yet embedded. The
+  per-document and per-meeting caps keep the best few candidates; only the
+  per-run cap defers work, and meetings and documents share it so neither
+  starves the other.
+- **Readers never hold the graph.** A read-only Badger handle takes a shared
+  lock that keeps every writer out, so the MCP server opens the graph per tool
+  call; a session kept open would otherwise stop the worker from ever
+  refreshing a brief.
+- **A CLI call starts from a snapshot.** The verbs save the library they read,
+  marked with the database's state, and load the vector index only to search:
+  a brief by ID takes 0.27 s, from 3.4 s.
+- **A rewritten brief is embedded again.** The vector index keeps a hash of
+  the text each node was embedded from, and reconcile re-embeds what changed;
+  a graph that has had deletions is rebuilt before it is saved, because the
+  HNSW library's Delete leaves links that load back as nil.
+
 ### 5. Multi-Language Support
 
 Language parsing and graph extraction:
@@ -513,6 +607,24 @@ docs:
     - ".map"
     - ".wasm"
     - ".pb.go"
+  # markdown_sections: false  # heading-only sections, as before relations
+
+relations:                    # runs when transcripts.jev_api_key is set
+  # enabled: false            # turn it off; true cannot turn it on without the key
+  gate: 0.8                   # measured: precision 0.86, recall ~0.7
+  max_pairs_per_run: 200      # one sync judges at most this many pairs
+  max_briefs_per_run: 10
+  settle: 30m                 # a brief waits for its document to stop changing
+  exclude: ["notes/private/**"]
+  # auto_doc_links: false     # leave document <-> document pairs to `relations --docs`
+  max_doc_pairs_per_run: 60
+  # doc_gates: {related: 0.85, changes: 0.75, replaces: 0.95, records: 0.85}
+
+vector:
+  backfill_limit: 2000        # nodes one sync embeds while catching up
+
+mcp:
+  tools: all                  # all | verbs (only find, brief and show)
 ```
 
 ## Architecture
@@ -529,7 +641,7 @@ codeeagle/
 │   ├── indexer/            # Orchestrates parsing -> graph updates + LLM summarization
 │   ├── decide/             # Bounded decisions with calibrated confidence (Jev-backed); speaker adjudication
 │   ├── docs/               # Document content extraction providers (Ollama, Vertex AI, Baseten) with topic extraction + caching
-│   ├── linker/             # Cross-service linker (11 phases: services, endpoints, API calls, deps, imports, implements, tests, calls, documents, duplicates, symlinks)
+│   ├── linker/             # Cross-service linker (14 phases: services, endpoints, API calls, deps, imports, implements, tests, calls, documents, meeting mentions, attendance, series, duplicates, symlinks)
 │   ├── llm/                # LLM provider implementations (Anthropic, Vertex AI, Claude CLI)
 │   ├── mcp/                # MCP server (JSON-RPC over stdio)
 │   ├── metrics/            # Code quality metric calculators
@@ -549,9 +661,14 @@ codeeagle/
 │   │   ├── shell/          # Shell parser (tree-sitter bash)
 │   │   ├── terraform/      # Terraform parser (tree-sitter HCL)
 │   │   ├── yaml/           # YAML parser (GHA, Ansible, generic)
-│   │   ├── generic/        # Generic fallback parser for non-code files (text, images, directories, document formats)
+│   │   ├── generic/        # Generic fallback parser for non-code files (text, images, directories, document formats); prose sections
+│   │   ├── chatlog/        # Chat log detection (JSONL histories, ChatGPT, Slack, Teams, pasted) and day sections
 │   │   └── manifest/       # Manifest parser (go.mod, package.json, pyproject.toml, requirements.txt)
 │   ├── faces/              # Face detection & recognition (OpenCV DNN, Caffe SSD + ONNX SFace, agglomerative clustering, KNN classification)
+│   ├── relations/          # Discovered document <-> meeting and document <-> document relations:
+│   │                       #   proposal signals, Jev judging, per-type cited briefs, decision ledger,
+│   │                       #   freshness, and the library find/brief/show read
+│   ├── search/             # Hybrid ranking (vectors, keywords, centrality) shared by rag and find
 │   ├── queue/              # Async job queue with worker pool (face detection, clustering, document enrichment)
 │   ├── transcript/         # Meeting transcripts: loading, speaker identification, enrichment, graph projection
 │   ├── watcher/            # Filesystem watcher (fsnotify + gitignore)

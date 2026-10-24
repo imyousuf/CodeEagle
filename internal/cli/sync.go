@@ -62,8 +62,14 @@ func WithProgress() SyncOption {
 // warnFn receives non-fatal warnings (e.g., provider detection failures).
 // logFn receives progress messages.
 func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, verboseMode bool, logFn func(format string, args ...any), warnFn func(format string, args ...any), opts ...SyncOption) error {
-	// Open read-write store.
-	store, currentBranch, err := embedded.OpenReadWrite(cfg, paths, "")
+	// Open read-write store, waiting out a reader such as an agent's query:
+	// readers hold the database only while they run.
+	var currentBranch string
+	store, err := embedded.OpenWaiting(func() (*embedded.BranchStore, error) {
+		s, b, err := embedded.OpenReadWrite(cfg, paths, "")
+		currentBranch = b
+		return s, err
+	})
 	if err != nil {
 		return err
 	}
@@ -91,7 +97,7 @@ func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, v
 	registry.Register(javascript.NewParser())
 	registry.Register(java.NewParser())
 	registry.Register(htmlparser.NewParser())
-	registry.Register(markdown.NewParser())
+	registry.Register(markdown.NewParser(markdown.WithSectionText(cfg.Docs.MarkdownSectionText())))
 	registry.Register(makefileparser.NewParser())
 	registry.Register(shell.NewParser())
 	registry.Register(terraform.NewParser())
@@ -215,15 +221,23 @@ func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, v
 	if verboseMode {
 		logFn("[vector] Detecting embedding provider...")
 	}
-	vs, vecErr := openVectorStore(cfg, store, currentBranch, logFn)
+	vecGraph := vectorGraphView(store)
+	vs, vecErr := openVectorStore(cfg, vecGraph, currentBranch, logFn)
 	if vecErr != nil {
 		warnFn("Warning: vector store: %v", vecErr)
 	}
 	if vs != nil {
 		defer vs.Close()
-		if err := syncVectorIndex(vs, cfg, full, logFn); err != nil {
+		if err := syncVectorIndex(vs, cfg, full, vecGraph, idx.ChangedFiles(), logFn); err != nil {
 			warnFn("Warning: vector indexing failed: %v", err)
 		}
+		// Relate what changed to what was discussed, now that both can be
+		// found by meaning.
+		autoRelations(cmdCtx, cfg, store, paths, vs, logFn, warnFn)
+	} else {
+		// Without vectors nothing is judged, but documents still get
+		// their briefs.
+		autoRelations(cmdCtx, cfg, store, paths, nil, logFn, warnFn)
 	}
 
 	// Cleanup stale branches.

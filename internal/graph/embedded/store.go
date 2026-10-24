@@ -33,6 +33,29 @@ type BranchStore struct {
 	// path is where this database lives, so an operation taking another
 	// database as an argument can tell whether it is the same one.
 	path string
+	// borrowed marks a view over another store's handle, which that store
+	// owns and closes.
+	borrowed bool
+}
+
+// View returns a store over the same database with its own write scope and
+// read path. It shares this store's handle, because Badger allows one writer
+// per directory and a second store cannot be opened in the same process. The
+// view's Close does nothing; closing the original closes both.
+func (s *BranchStore) View(write string, reads []string) *BranchStore {
+	return &BranchStore{
+		db:           s.db,
+		writeBranch:  write,
+		readBranches: append([]string(nil), reads...),
+		path:         s.path,
+		borrowed:     true,
+	}
+}
+
+// WithReadScopes returns a view that writes where this store does and also
+// reads the given scopes, after its own.
+func (s *BranchStore) WithReadScopes(extra ...string) *BranchStore {
+	return s.View(s.writeBranch, appendScopes(append([]string(nil), s.readBranches...), extra...))
 }
 
 // NewBranchStore opens (or creates) a BadgerDB-backed graph store at dbPath with
@@ -611,6 +634,9 @@ func (s *BranchStore) Stats(_ context.Context) (*graph.GraphStats, error) {
 }
 
 func (s *BranchStore) Close() error {
+	if s.borrowed {
+		return nil
+	}
 	return s.db.Close()
 }
 
@@ -739,6 +765,52 @@ func scanIndexPrefix(txn *badger.Txn, prefix []byte) ([]string, error) {
 
 // scanBranchNodes iterates over all node entries for a specific branch and calls fn for each.
 // Return false from fn to stop iteration.
+// MinIDPrefix is the shortest node-ID prefix ResolvePrefix accepts. Shorter
+// ones match too much of a large graph to be worth scanning for.
+const MinIDPrefix = 4
+
+// ResolvePrefix returns up to limit nodes whose ID starts with prefix, across
+// the read scopes, so an agent can refer to a node by the first few hex
+// characters of its ID rather than all twenty-four. A node present in several
+// scopes is returned once, from the first. More than one result means the
+// prefix is ambiguous and the caller should ask for more of it.
+func (s *BranchStore) ResolvePrefix(_ context.Context, prefix string, limit int) ([]*graph.Node, error) {
+	prefix = strings.ToLower(strings.TrimSpace(prefix))
+	if len(prefix) < MinIDPrefix {
+		return nil, fmt.Errorf("an ID prefix needs at least %d characters", MinIDPrefix)
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	seen := make(map[string]bool)
+	var out []*graph.Node
+	err := s.db.View(func(txn *badger.Txn) error {
+		for _, branch := range s.readBranches {
+			scan := []byte(prefixNode + branch + ":" + prefix)
+			opts := badger.DefaultIteratorOptions
+			opts.Prefix = scan
+			it := txn.NewIterator(opts)
+			for it.Seek(scan); it.Valid() && len(out) < limit; it.Next() {
+				var node graph.Node
+				if err := it.Item().Value(func(val []byte) error {
+					return json.Unmarshal(val, &node)
+				}); err != nil || seen[node.ID] {
+					continue
+				}
+				seen[node.ID] = true
+				tagNodeSource(&node, branch)
+				out = append(out, &node)
+			}
+			it.Close()
+			if len(out) >= limit {
+				break
+			}
+		}
+		return nil
+	})
+	return out, err
+}
+
 func scanBranchNodes(txn *badger.Txn, branch string, fn func(*graph.Node) bool) error {
 	opts := badger.DefaultIteratorOptions
 	opts.PrefetchValues = true

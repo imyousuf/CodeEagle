@@ -39,6 +39,13 @@ Each sync runs as a separate `codeeagle sync` process. That matters: a sync
 opens a database and may talk to a model for minutes, and if it fails, only
 that project is affected. The other projects carry on being watched.
 
+When `transcripts.jev_api_key` is set, each sync also relates what changed to
+the meetings that discussed it and refreshes those briefs, one bounded batch
+per sync (`docs/artifact-relations.md`, "Pipeline and bounds"). Nothing in the
+worker changes for it, and a failure there never fails the sync. A project
+with a large backlog of documents and meetings works through it over many
+syncs; `codeeagle relations` gets through it in one.
+
 ---
 
 ## 2. Registering more than one project
@@ -345,9 +352,15 @@ re-run `codeeagle init` there.
 
 ### `Cannot acquire directory lock` from another command
 
-A sync holds an exclusive lock on the project's database while it runs, so
-`codeeagle query` and similar can fail while the worker is syncing. Wait for
-the sync to finish and try again.
+A sync holds an exclusive lock on the project's database while it runs, and
+every reader a shared one, so neither can open the database while the other
+has it. `codeeagle query` and similar can fail while the worker is syncing;
+wait for the sync to finish and try again.
+
+Both sides wait up to three seconds before giving up, and the MCP server holds
+the database only while a tool runs, so an agent's session no longer keeps the
+worker out. While a sync runs, the MCP `brief` and `show` tools answer from
+what they last read and `find` reports that the index is busy.
 
 ### A sync never seems to finish, and memory climbs
 

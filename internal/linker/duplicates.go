@@ -48,7 +48,14 @@ func (l *Linker) linkDuplicates(ctx context.Context) (int, error) {
 	linked := 0
 	seen := make(map[string]bool)
 
-	for _, nodes := range groups {
+	for _, all := range groups {
+		// Every node parsed from one file carries that file's hash, so a
+		// markdown file's sections share it with the file. They are parts
+		// of one file, not copies of each other: the file was being marked
+		// a duplicate of its own section. A duplicate is another file, so
+		// each file is represented once, by its own node.
+		l.dropIntraFileDuplicates(ctx, all)
+		nodes := oneNodePerFile(all)
 		if len(nodes) < 2 {
 			continue
 		}
@@ -90,4 +97,61 @@ func (l *Linker) linkDuplicates(ctx context.Context) (int, error) {
 	}
 
 	return linked, nil
+}
+
+// oneNodePerFile keeps one node per file path: the file's own node where it
+// can be told apart from the parts parsed out of it, else the first.
+func oneNodePerFile(nodes []*graph.Node) []*graph.Node {
+	byPath := make(map[string]*graph.Node, len(nodes))
+	var order []string
+	for _, n := range nodes {
+		cur, ok := byPath[n.FilePath]
+		if !ok {
+			byPath[n.FilePath] = n
+			order = append(order, n.FilePath)
+			continue
+		}
+		if !isFileOwnNode(cur) && isFileOwnNode(n) {
+			byPath[n.FilePath] = n
+		}
+	}
+	out := make([]*graph.Node, 0, len(order))
+	for _, p := range order {
+		out = append(out, byPath[p])
+	}
+	return out
+}
+
+// isFileOwnNode reports whether n stands for its whole file rather than a
+// section, code block or other part of it.
+func isFileOwnNode(n *graph.Node) bool {
+	return n.Properties["kind"] == "" && (n.Name == n.FilePath || n.Type == graph.NodeFile || n.Type == graph.NodeTestFile)
+}
+
+// dropIntraFileDuplicates removes DuplicateOf edges an earlier version wrote
+// between parts of one file. Only nodes sharing a file with another node of
+// the group can have one, so only they are checked.
+func (l *Linker) dropIntraFileDuplicates(ctx context.Context, nodes []*graph.Node) {
+	perPath := make(map[string]int, len(nodes))
+	for _, n := range nodes {
+		perPath[n.FilePath]++
+	}
+	pathOf := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		pathOf[n.ID] = n.FilePath
+	}
+	for _, n := range nodes {
+		if perPath[n.FilePath] < 2 {
+			continue
+		}
+		edges, err := l.store.GetEdges(ctx, n.ID, graph.EdgeDuplicateOf)
+		if err != nil {
+			continue
+		}
+		for _, e := range edges {
+			if e.SourceID == n.ID && pathOf[e.TargetID] == n.FilePath {
+				_ = l.store.DeleteEdge(ctx, e.ID)
+			}
+		}
+	}
 }

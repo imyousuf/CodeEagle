@@ -57,8 +57,101 @@ type DocsConfig struct {
 	DisableThinking bool `mapstructure:"disable_thinking" yaml:"disable_thinking,omitempty"`
 	// ExcludeExtensions lists file extensions to never index as non-code files.
 	ExcludeExtensions []string `mapstructure:"exclude_extensions" yaml:"exclude_extensions,omitempty"`
+	// MarkdownSections stores each markdown section's own text on its node,
+	// which is what lets markdown be embedded, searched by meaning and quoted
+	// as evidence. Unset means on; false restores heading-only sections.
+	MarkdownSections *bool `mapstructure:"markdown_sections" yaml:"markdown_sections,omitempty"`
 	// Faces contains face detection configuration.
 	Faces FacesConfig `mapstructure:"faces" yaml:"faces,omitempty"`
+}
+
+// RelationsConfig holds settings for discovering relations between
+// documents and meetings. See docs/artifact-relations.md.
+type RelationsConfig struct {
+	// Enabled turns relations on or off. Unset, they run whenever
+	// transcripts.jev_api_key is set, since no relation is ever decided
+	// without the decision model.
+	Enabled *bool `mapstructure:"enabled" yaml:"enabled,omitempty"`
+	// Exclude lists path patterns of documents that are never subjects.
+	Exclude []string `mapstructure:"exclude" yaml:"exclude,omitempty"`
+	// MaxPairsPerRun caps the candidates one run judges.
+	MaxPairsPerRun int `mapstructure:"max_pairs_per_run" yaml:"max_pairs_per_run,omitempty"`
+	// MaxCandidatesPerSubject caps the meetings proposed for one document.
+	MaxCandidatesPerSubject int `mapstructure:"max_candidates_per_subject" yaml:"max_candidates_per_subject,omitempty"`
+	// MaxCandidatesPerMeeting caps the documents proposed for one meeting.
+	MaxCandidatesPerMeeting int `mapstructure:"max_candidates_per_meeting" yaml:"max_candidates_per_meeting,omitempty"`
+	// Gate is the decision model's probability at or above which a meeting
+	// is taken to discuss a document. Zero uses the package default, which
+	// is provisional until calibrated on labelled pairs.
+	Gate float64 `mapstructure:"gate" yaml:"gate,omitempty"`
+	// ConflictGate is the decision model's probability at or above which a
+	// disagreement between a document and a meeting is shown as a conflict.
+	ConflictGate float64 `mapstructure:"conflict_gate" yaml:"conflict_gate,omitempty"`
+	// MaxDocPairsPerRun caps the document pairs one run judges, one
+	// decision-model request each. Zero uses the package default of 60.
+	MaxDocPairsPerRun int `mapstructure:"max_doc_pairs_per_run" yaml:"max_doc_pairs_per_run,omitempty"`
+	// DocGates are the probabilities at or above which each kind of
+	// document relation is accepted; zero keeps the package default.
+	DocGates DocGatesConfig `mapstructure:"doc_gates" yaml:"doc_gates,omitempty"`
+	// AutoDocLinks judges document pairs on every sync too, for the
+	// documents that changed, within max_doc_pairs_per_run. Unset, it is on
+	// whenever relations are; false leaves document pairs to the relations
+	// command.
+	AutoDocLinks *bool `mapstructure:"auto_doc_links" yaml:"auto_doc_links,omitempty"`
+	// MaxBriefsPerRun caps the briefs one run writes.
+	MaxBriefsPerRun int `mapstructure:"max_briefs_per_run" yaml:"max_briefs_per_run,omitempty"`
+	// MaxBriefInputTokens bounds what one brief is written from.
+	MaxBriefInputTokens int `mapstructure:"max_brief_input_tokens" yaml:"max_brief_input_tokens,omitempty"`
+	// Settle is how long a document must go unchanged before its brief is
+	// rewritten, e.g. "30m".
+	Settle string `mapstructure:"settle" yaml:"settle,omitempty"`
+	// Provider and Model choose the language model that writes briefs.
+	// Empty uses the transcripts provider and model.
+	Provider string `mapstructure:"provider" yaml:"provider,omitempty"`
+	Model    string `mapstructure:"model" yaml:"model,omitempty"`
+}
+
+// DocGatesConfig holds the gates for document relations.
+type DocGatesConfig struct {
+	Related  float64 `mapstructure:"related" yaml:"related,omitempty"`
+	Changes  float64 `mapstructure:"changes" yaml:"changes,omitempty"`
+	Replaces float64 `mapstructure:"replaces" yaml:"replaces,omitempty"`
+	Records  float64 `mapstructure:"records" yaml:"records,omitempty"`
+}
+
+// RelationsAutoDocLinks reports whether syncs judge document pairs.
+func (c *Config) RelationsAutoDocLinks() bool {
+	return c.Relations.AutoDocLinks == nil || *c.Relations.AutoDocLinks
+}
+
+// RelationsEnabled reports whether relations are discovered automatically
+// during sync and meetings sync.
+func (c *Config) RelationsEnabled() bool {
+	if c.Relations.Enabled != nil && !*c.Relations.Enabled {
+		return false
+	}
+	return c.Transcripts.JevAPIKey != ""
+}
+
+// MCPConfig holds MCP server settings.
+type MCPConfig struct {
+	// Tools chooses what the server exposes: "all" (the default) or "verbs",
+	// only find, brief and show. Every tool definition is sent with every
+	// request, so fewer tools cost an agent less on each turn.
+	Tools string `mapstructure:"tools" yaml:"tools,omitempty"`
+}
+
+// VectorConfig holds vector index maintenance settings.
+type VectorConfig struct {
+	// BackfillLimit caps how many nodes one sync embeds when bringing the
+	// index up to date with the graph, so a large gap closes over several
+	// runs instead of one. Zero or less means no limit.
+	BackfillLimit int `mapstructure:"backfill_limit" yaml:"backfill_limit,omitempty"`
+}
+
+// MarkdownSectionText reports whether markdown sections carry their text.
+func (d DocsConfig) MarkdownSectionText() bool {
+	return d.MarkdownSections == nil || *d.MarkdownSections
 }
 
 // FacesConfig holds face detection and recognition configuration.
@@ -263,6 +356,13 @@ type Config struct {
 	Queue QueueConfig `mapstructure:"queue" yaml:"queue,omitempty"`
 	// Transcripts contains meeting transcript indexing configuration.
 	Transcripts TranscriptsConfig `mapstructure:"transcripts" yaml:"transcripts,omitempty"`
+	// Vector contains vector index maintenance configuration.
+	Vector VectorConfig `mapstructure:"vector" yaml:"vector,omitempty"`
+	// Relations contains configuration for discovering relations between
+	// documents and the meetings that discussed them.
+	Relations RelationsConfig `mapstructure:"relations" yaml:"relations,omitempty"`
+	// MCP contains MCP server configuration.
+	MCP MCPConfig `mapstructure:"mcp" yaml:"mcp,omitempty"`
 	// ConfigDir is the resolved .CodeEagle directory path (not persisted in YAML).
 	ConfigDir string `mapstructure:"-" yaml:"-"`
 	// ProjectConf is the parsed .CodeEagle.conf if found (not persisted).
@@ -428,6 +528,16 @@ func ExportFilePath(confDir string, conf *ProjectConf) string {
 //  3. Walk up from CWD for .CodeEagle/config.yaml
 //  4. Registry lookup by CWD path
 func Load() (*Config, error) {
+	return load(false)
+}
+
+// LoadForReading is Load for commands that only read the index: credentials
+// fetched by a command are left empty rather than fetched.
+func LoadForReading() (*Config, error) {
+	return load(true)
+}
+
+func load(deferSecrets bool) (*Config, error) {
 	v := viper.New()
 	setDefaults(v)
 
@@ -515,7 +625,7 @@ func Load() (*Config, error) {
 	// Resolve ${VAR} and $(command) references before anything reads a value,
 	// so a credential can live in the environment or the system keyring
 	// rather than in a file that gets committed.
-	if err := expandConfig(&cfg); err != nil {
+	if err := expandConfigWith(&cfg, deferSecrets); err != nil {
 		return nil, fmt.Errorf("error expanding config: %w", err)
 	}
 
@@ -598,6 +708,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("agents.model", "")
 	v.SetDefault("agents.auto_summarize", false)
 
+	v.SetDefault("vector.backfill_limit", 2000)
+	v.SetDefault("relations.max_pairs_per_run", 200)
+	v.SetDefault("relations.max_candidates_per_subject", 8)
+	v.SetDefault("relations.max_candidates_per_meeting", 8)
+	v.SetDefault("relations.max_briefs_per_run", 10)
+	v.SetDefault("relations.max_brief_input_tokens", 12000)
+	v.SetDefault("relations.settle", "30m")
 	v.SetDefault("docs.max_image_resolution", 1024)
 	v.SetDefault("docs.context_window", 120000) // Must match docs.DefaultContextWindow
 	v.SetDefault("docs.exclude_extensions", []string{".lock", ".min.js", ".min.css", ".map", ".wasm", ".pb.go"})

@@ -178,3 +178,66 @@ func TestSyncDirectoryExcludesFilePattern(t *testing.T) {
 		t.Errorf("expected nodes for readme.md, got none")
 	}
 }
+
+// TestSyncKeepsDirectoryNodes covers the cleanup of deleted files. A walk
+// lists files, so directories always looked deleted, and every second sync
+// of a directory that is not a git repository removed every directory node.
+// A directory's node goes only when the directory does.
+func TestSyncKeepsDirectoryNodes(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "notes")
+	for _, dir := range []string{"plans", "old"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// Distinct content: a copy would be indexed as a duplicate, without
+		// its directory.
+		if err := os.WriteFile(filepath.Join(root, dir, "a.txt"), []byte("prefill timeouts and queue age alerts in "+dir), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := embedded.NewStore(filepath.Join(t.TempDir(), "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	registry := parser.NewRegistry()
+	registry.SetFallback(generic.NewGenericParser(nil, nil, nil, 0))
+	idx := NewIndexer(IndexerConfig{
+		GraphStore: store, ParserRegistry: registry, RepoRoots: []string{root},
+		NonGitRoots:   map[string]bool{root: true},
+		WatcherConfig: &watcher.WatcherConfig{Paths: []string{root}},
+		Logger:        func(string, ...any) {},
+	})
+	ctx := context.Background()
+	dirs := func() map[string]bool {
+		t.Helper()
+		nodes, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeDirectory})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := make(map[string]bool)
+		for _, n := range nodes {
+			out[n.FilePath] = true
+		}
+		return out
+	}
+
+	for i := 0; i < 2; i++ {
+		if err := syncDirectory(ctx, idx, root, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := dirs(); !got["notes/plans"] || !got["notes/old"] {
+		t.Fatalf("directory nodes after two syncs = %v", got)
+	}
+
+	if err := os.RemoveAll(filepath.Join(root, "old")); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncDirectory(ctx, idx, root, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := dirs(); !got["notes/plans"] || got["notes/old"] {
+		t.Errorf("after removing old/: directory nodes = %v", got)
+	}
+}

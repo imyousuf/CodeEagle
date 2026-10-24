@@ -68,6 +68,42 @@ func SyncFiles(ctx context.Context, idx *Indexer, paths []string, configDir stri
 		}
 	}
 
+	// Bring markdown indexed before sections carried their text up to date.
+	if bs := state.GetBranchState(branch); bs.MarkdownSectionsVersion < MarkdownSectionsVersion && idx.storesMarkdownText() {
+		count, err := BackpopMarkdownSections(ctx, idx, paths)
+		if err != nil {
+			idx.log("Warning: markdown sections backfill: %v", err)
+		} else {
+			if count > 0 {
+				idx.log("Backfilled section text for %d markdown files", count)
+			}
+			bs.MarkdownSectionsVersion = MarkdownSectionsVersion
+			_ = state.Save(statePath)
+		}
+	}
+
+	// Bring prose documents indexed before their text was kept in sections
+	// up to date, a bounded share per sync.
+	if bs := state.GetBranchState(branch); bs.DocumentSectionsVersion < DocumentSectionsVersion {
+		count, next, err := BackpopDocumentSections(ctx, idx, paths, bs.DocumentSectionsResume)
+		if err != nil {
+			idx.log("Warning: document sections backfill: %v", err)
+		} else {
+			if count > 0 {
+				more := ""
+				if next != "" {
+					more = "; more on the next sync"
+				}
+				idx.log("Backfilled sections for %d documents%s", count, more)
+			}
+			bs.DocumentSectionsResume = next
+			if next == "" {
+				bs.DocumentSectionsVersion = DocumentSectionsVersion
+			}
+			_ = state.Save(statePath)
+		}
+	}
+
 	for _, repoPath := range paths {
 		if IsGitRepo(repoPath) {
 			if err := syncGitRepo(ctx, idx, repoPath, state, full, branch); err != nil {
@@ -490,6 +526,22 @@ func syncDirectory(ctx context.Context, idx *Indexer, dirPath string, full bool)
 			}
 			deletedCount++
 		}
+	}
+	// A directory's node goes only when the directory itself is gone.
+	for dbPath := range dbState.dirs {
+		if !strings.HasPrefix(dbPath, prefix) || underAny(dbPath, skipPrefixes) {
+			continue
+		}
+		abs := filepath.Join(filepath.Dir(dirPath), filepath.FromSlash(dbPath))
+		if info, err := os.Stat(abs); err == nil && info.IsDir() {
+			continue
+		} else if err != nil && !os.IsNotExist(err) {
+			continue // unreadable is not gone
+		}
+		if err := idx.Store().DeleteByFile(ctx, dbPath); err != nil {
+			idx.log("Warning: delete %s: %v", dbPath, err)
+		}
+		deletedCount++
 	}
 	if deletedCount > 0 {
 		idx.log("Removed %d deleted file nodes from %s", deletedCount, dirPath)

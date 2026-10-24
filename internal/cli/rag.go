@@ -20,6 +20,7 @@ import (
 // ragJSONResult represents a single search result in JSON output.
 type ragJSONResult struct {
 	Rank      int               `json:"rank"`
+	ID        string            `json:"id"`
 	Score     float64           `json:"score"`
 	Relevance int               `json:"relevance"`
 	Type      graph.NodeType    `json:"type"`
@@ -129,98 +130,22 @@ Examples:
 				}
 			}
 
-			// Fetch extra results to account for filtering, dedup, and reranking.
-			fetchK := limit * 5
-			if len(typeFilter) > 0 || noDocs {
-				fetchK = limit * 10
-			}
-			if fetchK > 200 {
-				fetchK = 200
-			}
-
-			results, err := vs.Search(context.Background(), query, fetchK)
+			hybrid, err := search.Hybrid(context.Background(), store, vs, query, search.HybridOptions{
+				Limit: limit, Types: typeFilter, NoDocs: noDocs,
+				Package: pkg, Language: language, MinScore: minScore,
+			})
 			if err != nil {
-				return fmt.Errorf("search failed: %w", err)
+				return err
 			}
 			// A thin result set from a stale index looks exactly like a
 			// thin result set from a poor query. Say which it was.
-			if stale := vs.StaleInLastSearch(); stale > 0 && stale*5 >= fetchK {
+			if stale := hybrid.Stale; stale > 0 && stale*5 >= hybrid.Fetched {
 				fmt.Fprintf(cmd.ErrOrStderr(),
 					"Note: %d of the %d nearest vectors belong to nodes no longer in the graph; "+
 						"the vector index is behind the graph. Run: codeeagle vectorindex --force\n",
-					stale, stale+len(results))
+					stale, hybrid.Examined)
 			}
-
-			// Deduplicate by node ID (keep highest-scoring chunk per node).
-			results = search.DeduplicateResults(results)
-
-			// Apply --no-docs filter.
-			if noDocs {
-				filtered := results[:0]
-				for _, r := range results {
-					if r.Node != nil && !search.DocNodeTypes[r.Node.Type] {
-						filtered = append(filtered, r)
-					}
-				}
-				results = filtered
-			}
-
-			// Apply type filter.
-			if len(typeFilter) > 0 {
-				filtered := results[:0]
-				for _, r := range results {
-					if r.Node != nil && typeFilter[r.Node.Type] {
-						filtered = append(filtered, r)
-					}
-				}
-				results = filtered
-			}
-
-			// Apply package filter.
-			if pkg != "" {
-				filtered := results[:0]
-				for _, r := range results {
-					if r.Node != nil && strings.Contains(strings.ToLower(r.Node.Package), strings.ToLower(pkg)) {
-						filtered = append(filtered, r)
-					}
-				}
-				results = filtered
-			}
-
-			// Apply language filter.
-			if language != "" {
-				filtered := results[:0]
-				for _, r := range results {
-					if r.Node != nil && strings.EqualFold(r.Node.Language, language) {
-						filtered = append(filtered, r)
-					}
-				}
-				results = filtered
-			}
-
-			// Hybrid search: keyword-match nodes from the graph, inject any that
-			// vector search missed, then rerank everything together.
-			keywords := search.KeywordSearch(context.Background(), store, query)
-			results, shares := search.InjectKeywordResults(results, keywords, typeFilter, noDocs, pkg, language)
-			results = search.RerankResults(context.Background(), store, results, shares)
-
-			// Apply min score filter (after reranking).
-			if minScore > 0 {
-				filtered := results[:0]
-				for _, r := range results {
-					if r.Score >= minScore {
-						filtered = append(filtered, r)
-					}
-				}
-				results = filtered
-			}
-
-			// Limit results, remembering how many there were: a list that
-			// ends is read as complete unless it says otherwise.
-			ranked := len(results)
-			if len(results) > limit {
-				results = results[:limit]
-			}
+			results, ranked := hybrid.Results, hybrid.Ranked
 
 			// Build repo root paths for relative path display.
 			var repoPaths []string
@@ -244,6 +169,7 @@ Examples:
 					}
 					jr := ragJSONResult{
 						Rank:      i + 1,
+						ID:        r.Node.ID,
 						Score:     r.Score,
 						Relevance: int(math.Round(r.Score * 100)),
 						Type:      r.Node.Type,

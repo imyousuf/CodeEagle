@@ -12,6 +12,7 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/docs"
 	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/parser"
+	"github.com/imyousuf/CodeEagle/internal/parser/markdown"
 )
 
 const (
@@ -117,6 +118,19 @@ func (p *GenericParser) ParseFileWithHash(ctx context.Context, filePath string, 
 		},
 	}
 
+	// A document's text is read at most once: a cached summary saves the
+	// model call, but the sections still need the text.
+	var docText string
+	var docErr error
+	docRead := false
+	extractDoc := func() (string, error) {
+		if !docRead {
+			docRead = true
+			docText, docErr = ExtractDocumentWithCtx(ctx, filePath, content)
+		}
+		return docText, docErr
+	}
+
 	// Extract content and topics based on file class.
 	switch class {
 	case FileClassText:
@@ -147,7 +161,7 @@ func (p *GenericParser) ParseFileWithHash(ctx context.Context, filePath string, 
 			result.Nodes = append(result.Nodes, topicNodes...)
 			result.Edges = append(result.Edges, topicEdges...)
 		} else {
-			text, err := ExtractDocumentWithCtx(ctx, filePath, content)
+			text, err := extractDoc()
 			if err != nil || len(strings.TrimSpace(text)) < 10 {
 				docNode.DocComment = fmt.Sprintf("Document file: %s (%s, %d bytes)", fileName, mimeType, len(content))
 			} else {
@@ -166,6 +180,67 @@ func (p *GenericParser) ParseFileWithHash(ctx context.Context, filePath string, 
 	}
 
 	result.Nodes = append(result.Nodes, docNode)
+
+	// The text itself, in sections, whatever the root's summary says: the
+	// summary is for search, the sections are what can be read and quoted.
+	// A chat log is sectioned by day instead, whatever format holds it.
+	if class == FileClassText || class == FileClassDocument {
+		var secs []TextSection
+		if log, ok := p.detectChat(filePath, class, content, extractDoc); ok {
+			docNode.Properties[PropChatFormat] = log.Format
+			for _, sec := range log.Sections() {
+				secs = append(secs, TextSection{Heading: sec.Heading, Text: sec.Text})
+			}
+		} else if Sectioned(filePath) {
+			raw := ""
+			if class == FileClassText {
+				raw = ExtractText(filePath, content)
+			} else if text, err := extractDoc(); err == nil {
+				raw = text
+			}
+			secs = Sectionize(filePath, raw)
+		}
+		if len(secs) > 0 {
+			docNode.Language = LangDocument
+			docNode.Properties["sections"] = fmt.Sprintf("%d", len(secs))
+			title := strings.TrimSuffix(fileName, filepath.Ext(fileName))
+			seen := make(map[string]int)
+			for i, sec := range secs {
+				seen[sec.Heading]++
+				key := "section:" + sec.Heading
+				if n := seen[sec.Heading]; n > 1 {
+					key = fmt.Sprintf("%s#%d", key, n)
+				}
+				secNode := &graph.Node{
+					ID:            graph.NewNodeID(string(graph.NodeDocument), filePath, key),
+					Type:          graph.NodeDocument,
+					Name:          sec.Heading,
+					QualifiedName: title + " > " + sec.Heading,
+					FilePath:      filePath,
+					Package:       filepath.Dir(filePath),
+					Language:      LangDocument,
+					DocComment:    sec.Text,
+					Properties: map[string]string{
+						"kind":         "section",
+						"heading_path": title + " > " + sec.Heading,
+						"ordinal":      fmt.Sprintf("%d", seen[sec.Heading]),
+						"position":     fmt.Sprintf("%d", i+1),
+						"section_hash": markdown.TextHash(sec.Text),
+						"text_only":    "true",
+						"content_hash": contentHash,
+						"mime_type":    mimeType,
+					},
+				}
+				result.Nodes = append(result.Nodes, secNode)
+				result.Edges = append(result.Edges, &graph.Edge{
+					ID:       graph.NewNodeID("edge", nodeID, secNode.ID+":"+string(graph.EdgeContains)),
+					Type:     graph.EdgeContains,
+					SourceID: nodeID,
+					TargetID: secNode.ID,
+				})
+			}
+		}
+	}
 
 	// Build directory hierarchy.
 	dirSeen := make(map[string]bool)

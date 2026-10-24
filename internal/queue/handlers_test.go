@@ -373,3 +373,33 @@ func TestImageDescribeHandler_NilProvider(t *testing.T) {
 		t.Error("expected nil result with nil provider")
 	}
 }
+
+func TestDocExtractHandler_LeavesSectionsAlone(t *testing.T) {
+	store := newMockStore()
+	cache, err := docs.OpenCache(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cache.Close()
+
+	filePath := createTestFile(t, "review.pdf", "binary")
+	_ = cache.Store(filePath, "sha256:pdf", &docs.ExtractionResult{Summary: "short summary", Topics: []string{"incident"}})
+	rootID := graph.NewNodeID(string(graph.NodeDocument), filePath, filepath.Base(filePath))
+	secID := graph.NewNodeID(string(graph.NodeDocument), filePath, "section:Page 1")
+	ctx := context.Background()
+	store.AddNode(ctx, &graph.Node{ID: rootID, Type: graph.NodeDocument, FilePath: filePath,
+		Properties: map[string]string{"content_hash": "sha256:pdf", "kind": "document"}})
+	store.AddNode(ctx, &graph.Node{ID: secID, Type: graph.NodeDocument, FilePath: filePath, DocComment: "the page's own words",
+		Properties: map[string]string{"content_hash": "sha256:pdf", "kind": "section"}})
+
+	handler := NewDocExtractHandler(&mockProvider{}, cache, store, nil)
+	if _, err := handler.Handle(ctx, &Job{ContentHash: "sha256:pdf", FilePaths: []string{filePath}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.nodes[rootID].DocComment; got != "short summary" {
+		t.Errorf("root DocComment = %q, want the summary", got)
+	}
+	if got := store.nodes[secID].DocComment; got != "the page's own words" {
+		t.Errorf("section DocComment = %q, want its text untouched", got)
+	}
+}

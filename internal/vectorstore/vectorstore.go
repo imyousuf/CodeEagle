@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"os"
 	"sort"
@@ -24,6 +25,9 @@ const (
 	// Key prefixes for vector BadgerDB.
 	prefixChunk = "chunk:" // chunk:<nodeID>:<chunkIndex> → ChunkEntry JSON
 	prefixMeta  = "meta:"  // meta:<branch> → VectorIndexMeta JSON
+	// prefixText records, per node, a hash of the text its vectors were made
+	// from, so a node whose text changed is embedded again.
+	prefixText = "text:" // text:<nodeID> → hash of the embedded text
 
 	// HNSW tuning parameters.
 	hnswM  = 16 // max neighbors per node
@@ -64,6 +68,12 @@ type VectorStore struct {
 	// stale counts the vectors the last search skipped because their
 	// nodes had left the graph.
 	stale int
+	// detachedKeys lists the indexed chunk keys once the vector database
+	// has been closed by Detach.
+	detachedKeys []string
+	// deleted counts the vectors removed from the graph since it was loaded
+	// or rebuilt; a graph with deletions is rebuilt before it is saved.
+	deleted int
 }
 
 // Embedder returns the provider this store embeds with.
@@ -142,13 +152,8 @@ func newVectorStore(graphDB graph.Store, embedder embedding.Provider, branch, id
 		return nil, fmt.Errorf("open vector db: %w", err)
 	}
 
-	g := hnsw.NewGraph[string]()
-	g.M = hnswM
-	g.EfSearch = hnswEf
-	g.Distance = hnsw.CosineDistance
-
 	return &VectorStore{
-		idx:      g,
+		idx:      newGraph(),
 		vecDB:    db,
 		graphDB:  graphDB,
 		embedder: embedder,
@@ -252,7 +257,57 @@ func (vs *VectorStore) searchLocked(queryVec []float32, k int) []hnsw.Node[strin
 		vs.idx.EfSearch = k
 		defer func() { vs.idx.EfSearch = prev }()
 	}
+	return vs.safeSearchLocked(queryVec, k)
+}
+
+// safeSearchLocked searches the graph, rebuilding it once if the walk
+// crashes on a link a Delete left behind.
+func (vs *VectorStore) safeSearchLocked(queryVec []float32, k int) (out []hnsw.Node[string]) {
+	defer func() {
+		if recover() != nil {
+			vs.rebuildLocked("")
+			out = vs.idx.Search(queryVec, k)
+		}
+	}()
 	return vs.idx.Search(queryVec, k)
+}
+
+// addLocked adds one vector, rebuilding the graph once if the Add crashes
+// on a link a Delete left behind.
+func (vs *VectorStore) addLocked(key string, vec []float32) {
+	defer func() {
+		if recover() != nil {
+			vs.rebuildLocked(key)
+			vs.idx.Add(hnsw.MakeNode(key, vec))
+		}
+	}()
+	vs.idx.Add(hnsw.MakeNode(key, vec))
+}
+
+// rebuildLocked replaces the graph with a fresh one holding the same live
+// vectors, all but skip.
+//
+// coder/hnsw v0.6.1's Delete leaves neighbour links to the nodes it removed.
+// Saved and loaded again, those links come back nil, and the next Add or
+// search that walks past one dereferences it: re-embedding rewritten briefs
+// in one run crashed the next. Lookup still finds every live vector, so a
+// clean graph is rebuilt from them without embedding anything again, and
+// keys whose chunks are gone are left out.
+func (vs *VectorStore) rebuildLocked(skip string) {
+	var keys []string
+	_ = vs.eachChunkKey(func(key string) {
+		if key != skip {
+			keys = append(keys, key)
+		}
+	})
+	fresh := newGraph()
+	for _, key := range keys {
+		if vec, ok := vs.idx.Lookup(key); ok {
+			fresh.Add(hnsw.MakeNode(key, vec))
+		}
+	}
+	vs.idx = fresh
+	vs.deleted = 0
 }
 
 // exactSearch compares the query with every indexed vector. The chunk
@@ -271,32 +326,23 @@ func (vs *VectorStore) exactSearch(queryVec []float32, k int) ([]hnsw.Node[strin
 	qn = math.Sqrt(qn)
 
 	var cands []candidate
-	err := vs.vecDB.View(func(txn *badger.Txn) error {
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false
-		opts.Prefix = []byte(prefixChunk)
-		it := txn.NewIterator(opts)
-		defer it.Close()
-		for it.Seek(opts.Prefix); it.Valid(); it.Next() {
-			key := strings.TrimPrefix(string(it.Item().Key()), prefixChunk)
-			vec, ok := vs.idx.Lookup(key)
-			if !ok || len(vec) != len(queryVec) {
-				continue
-			}
-			// One pass for the dot product and the vector's norm; the
-			// query's norm is fixed.
-			var dot, vn float64
-			for i, x := range vec {
-				dot += float64(x) * float64(queryVec[i])
-				vn += float64(x) * float64(x)
-			}
-			dist := float32(1)
-			if vn > 0 && qn > 0 {
-				dist = float32(1 - dot/(math.Sqrt(vn)*qn))
-			}
-			cands = append(cands, candidate{key: key, vec: vec, dist: dist})
+	err := vs.eachChunkKey(func(key string) {
+		vec, ok := vs.idx.Lookup(key)
+		if !ok || len(vec) != len(queryVec) {
+			return
 		}
-		return nil
+		// One pass for the dot product and the vector's norm; the query's
+		// norm is fixed.
+		var dot, vn float64
+		for i, x := range vec {
+			dot += float64(x) * float64(queryVec[i])
+			vn += float64(x) * float64(x)
+		}
+		dist := float32(1)
+		if vn > 0 && qn > 0 {
+			dist = float32(1 - dot/(math.Sqrt(vn)*qn))
+		}
+		cands = append(cands, candidate{key: key, vec: vec, dist: dist})
 	})
 	if err != nil {
 		return nil, err
@@ -342,6 +388,63 @@ func (vs *VectorStore) StaleInLastSearch() int {
 // embeddable nodes the graph has that the index does not. Both are why a
 // search comes back thin, and neither is visible from a search.
 func (vs *VectorStore) Staleness(ctx context.Context) (stale, missing int, err error) {
+	staleIDs, missingNodes, err := vs.gaps(ctx, nil)
+	return len(staleIDs), len(missingNodes), err
+}
+
+// Reconcile closes the gap between the index and the graph in place: it drops
+// the vectors of nodes the graph no longer has and embeds up to limit
+// embeddable nodes it lacks or whose text changed since they were embedded,
+// most recently updated first. Zero means no limit.
+//
+// Until now only a full rebuild embedded anything, so a document indexed after
+// the last rebuild was invisible to search by meaning. Reconciling on every
+// sync keeps the index current without a rebuild, and the limit keeps one sync
+// from embedding a whole corpus: a large gap closes over several runs.
+//
+// The graph store must read every scope whose nodes are in the index (the
+// branch, meetings, relations), or their vectors look stale and are dropped.
+func (vs *VectorStore) Reconcile(ctx context.Context, limit int) (added, removed int, err error) {
+	staleIDs, missing, err := vs.gaps(ctx, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	vs.mu.Lock()
+	for _, id := range staleIDs {
+		vs.removeNodeVectors(id)
+	}
+	vs.mu.Unlock()
+	if limit > 0 && len(missing) > limit {
+		missing = missing[:limit]
+	}
+	if err := vs.IndexNodes(ctx, missing); err != nil {
+		return 0, len(staleIDs), err
+	}
+	return len(missing), len(staleIDs), nil
+}
+
+// EmbedMissing embeds up to limit nodes of the given types that the index
+// lacks, and removes nothing. It is for a store that sees only part of the
+// graph, such as the meetings scope alone: anything it cannot see would look
+// stale to it, so it must not judge staleness.
+func (vs *VectorStore) EmbedMissing(ctx context.Context, limit int, types ...graph.NodeType) (int, error) {
+	_, missing, err := vs.gaps(ctx, types)
+	if err != nil {
+		return 0, err
+	}
+	if limit > 0 && len(missing) > limit {
+		missing = missing[:limit]
+	}
+	if err := vs.IndexNodes(ctx, missing); err != nil {
+		return 0, err
+	}
+	return len(missing), nil
+}
+
+// gaps lists the indexed node IDs the graph no longer has, and the embeddable
+// nodes of the given types (all embeddable types when none are given) the
+// index lacks, most recently updated first.
+func (vs *VectorStore) gaps(ctx context.Context, types []graph.NodeType) (stale []string, missing []*graph.Node, err error) {
 	vs.mu.RLock()
 	defer vs.mu.RUnlock()
 
@@ -359,26 +462,49 @@ func (vs *VectorStore) Staleness(ctx context.Context) (stale, missing int, err e
 		return nil
 	})
 	if err != nil {
-		return 0, 0, fmt.Errorf("scan chunks: %w", err)
+		return nil, nil, fmt.Errorf("scan chunks: %w", err)
 	}
 
+	hashes, err := vs.textHashes()
+	if err != nil {
+		return nil, nil, fmt.Errorf("scan text hashes: %w", err)
+	}
+
+	if len(types) == 0 {
+		types = EmbeddableTypes
+	}
 	present := make(map[string]bool)
-	for _, typ := range EmbeddableTypes {
+	for _, typ := range types {
 		nodes, err := vs.graphDB.QueryNodes(ctx, graph.NodeFilter{Type: typ})
 		if err != nil {
-			return 0, 0, err
+			return nil, nil, err
 		}
 		for _, n := range nodes {
 			present[n.ID] = true
-			if EmbeddableText(n) != "" && !indexed[n.ID] {
-				missing++
+			if !IsEmbeddable(n.Type) {
+				continue
+			}
+			text := EmbeddableText(n)
+			if text == "" {
+				continue
+			}
+			if !indexed[n.ID] || changedText(n, hashes[n.ID], text) {
+				missing = append(missing, n)
 			}
 		}
 	}
-	for id := range indexed {
-		if !present[id] {
-			stale++
+	sort.SliceStable(missing, func(i, j int) bool {
+		return missing[i].UpdatedAt.After(missing[j].UpdatedAt)
+	})
+	// Staleness is only judged over every embeddable type: with a subset,
+	// nodes of the other types are absent from present, not from the graph.
+	if len(types) == len(EmbeddableTypes) {
+		for id := range indexed {
+			if !present[id] {
+				stale = append(stale, id)
+			}
 		}
+		sort.Strings(stale)
 	}
 	return stale, missing, nil
 }
@@ -414,7 +540,7 @@ func (vs *VectorStore) IndexNode(ctx context.Context, node *graph.Node) error {
 		key := chunkKey(node.ID, i)
 
 		// Add to HNSW.
-		vs.idx.Add(hnsw.MakeNode(key, vec))
+		vs.addLocked(key, vec)
 
 		// Store chunk text in BadgerDB.
 		entry := ChunkEntry{
@@ -426,8 +552,7 @@ func (vs *VectorStore) IndexNode(ctx context.Context, node *graph.Node) error {
 			return fmt.Errorf("store chunk %s: %w", key, err)
 		}
 	}
-
-	return nil
+	return vs.putTextHashes(map[string]string{node.ID: textHash(text)})
 }
 
 // EmbedBatchSize is how many chunks are sent for embedding in one request.
@@ -448,6 +573,21 @@ func (vs *VectorStore) IndexNodes(ctx context.Context, nodes []*graph.Node) erro
 	return vs.indexNodes(ctx, nodes, nil)
 }
 
+// changedText reports whether an indexed node's text has changed since its
+// vectors were made. A relation's brief is rewritten in place, and the vectors
+// search matched it by were its first brief's until something re-embedded
+// it; a run that stopped between writing briefs and re-embedding them left
+// them so for good. A node indexed before hashes were recorded has none: a
+// relation is embedded again once, since relations are few and the ones
+// rewritten; anything else is taken as current rather than re-embedding the
+// whole index on upgrade.
+func changedText(n *graph.Node, stored, text string) bool {
+	if stored == "" {
+		return n.Type == graph.NodeRelation
+	}
+	return stored != textHash(text)
+}
+
 // pendingChunk is one chunk waiting to be embedded, and where it belongs.
 type pendingChunk struct {
 	nodeID string
@@ -461,6 +601,7 @@ func (vs *VectorStore) indexNodes(
 ) error {
 	var batch []pendingChunk
 	indexed := 0
+	hashes := make(map[string]string)
 
 	flush := func() error {
 		if len(batch) == 0 {
@@ -485,7 +626,7 @@ func (vs *VectorStore) indexNodes(
 		defer vs.mu.Unlock()
 		for i, c := range batch {
 			key := chunkKey(c.nodeID, c.index)
-			vs.idx.Add(hnsw.MakeNode(key, embeddings[i]))
+			vs.addLocked(key, embeddings[i])
 			entry := ChunkEntry{NodeID: c.nodeID, ChunkIndex: c.index, ChunkText: c.text}
 			if err := vs.putChunkEntry(key, entry); err != nil {
 				return fmt.Errorf("store chunk %s: %w", key, err)
@@ -510,6 +651,7 @@ func (vs *VectorStore) indexNodes(
 		vs.mu.Lock()
 		vs.removeNodeVectors(node.ID)
 		vs.mu.Unlock()
+		hashes[node.ID] = textHash(text)
 
 		for i, chunk := range Chunk(text, vs.chunk) {
 			batch = append(batch, pendingChunk{nodeID: node.ID, index: i, text: chunk})
@@ -525,7 +667,10 @@ func (vs *VectorStore) indexNodes(
 			progress(indexed, len(nodes))
 		}
 	}
-	return flush()
+	if err := flush(); err != nil {
+		return err
+	}
+	return vs.putTextHashes(hashes)
 }
 
 // RemoveNode removes all vectors for a node.
@@ -539,11 +684,7 @@ func (vs *VectorStore) RemoveNode(_ context.Context, nodeID string) error {
 // Rebuild performs a full reindex from the graph store.
 func (vs *VectorStore) Rebuild(ctx context.Context) error {
 	vs.mu.Lock()
-	// Create a fresh HNSW graph.
-	vs.idx = hnsw.NewGraph[string]()
-	vs.idx.M = hnswM
-	vs.idx.EfSearch = hnswEf
-	vs.idx.Distance = hnsw.CosineDistance
+	vs.idx = newGraph()
 	vs.mu.Unlock()
 
 	// Record that a rebuild started, before the first deletion and durably,
@@ -656,10 +797,7 @@ func (vs *VectorStore) Load() (bool, error) {
 	}
 	defer f.Close()
 
-	g := hnsw.NewGraph[string]()
-	g.M = hnswM
-	g.EfSearch = hnswEf
-	g.Distance = hnsw.CosineDistance
+	g := newGraph()
 	if err := g.Import(bufio.NewReader(f)); err != nil {
 		return false, fmt.Errorf("import vec.idx: %w", err)
 	}
@@ -670,8 +808,13 @@ func (vs *VectorStore) Load() (bool, error) {
 
 // Save persists the HNSW index to disk and metadata to BadgerDB.
 func (vs *VectorStore) Save() error {
-	vs.mu.RLock()
-	defer vs.mu.RUnlock()
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+
+	// A graph saved with links to deleted nodes loads with nil ones.
+	if vs.deleted > 0 {
+		vs.rebuildLocked("")
+	}
 
 	// Save HNSW index.
 	f, err := os.Create(vs.idxPath)
@@ -703,6 +846,56 @@ func (vs *VectorStore) Close() error {
 		return vs.vecDB.Close()
 	}
 	return nil
+}
+
+// eachChunkKey calls fn with every key the index holds: from the chunk
+// entries, or from the list kept when the store was detached.
+func (vs *VectorStore) eachChunkKey(fn func(key string)) error {
+	if vs.vecDB == nil {
+		for _, key := range vs.detachedKeys {
+			fn(key)
+		}
+		return nil
+	}
+	return vs.vecDB.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		opts.Prefix = []byte(prefixChunk)
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		for it.Seek(opts.Prefix); it.Valid(); it.Next() {
+			fn(strings.TrimPrefix(string(it.Item().Key()), prefixChunk))
+		}
+		return nil
+	})
+}
+
+// Detach closes the vector database once the index is loaded, so a reader
+// that keeps the index for a long session holds no lock on it: a read-only
+// Badger handle takes a shared lock that keeps every writer out while it is
+// open. A detached store still searches, without chunk text; it cannot embed
+// or save.
+func (vs *VectorStore) Detach() error {
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+	if vs.vecDB == nil {
+		return nil
+	}
+	var keys []string
+	if err := vs.eachChunkKey(func(key string) { keys = append(keys, key) }); err != nil {
+		return fmt.Errorf("list indexed chunks: %w", err)
+	}
+	err := vs.vecDB.Close()
+	vs.vecDB, vs.detachedKeys = nil, keys
+	return err
+}
+
+// UseGraph changes the graph store that search resolves nodes against, for a
+// reader that opens the graph for each request rather than holding it.
+func (vs *VectorStore) UseGraph(g graph.Store) {
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+	vs.graphDB = g
 }
 
 // Meta returns the current index metadata (may be nil if not yet loaded/built).
@@ -791,14 +984,38 @@ func (vs *VectorStore) removeNodeVectors(nodeID string) {
 		if !vs.idx.Delete(key) {
 			break // no more chunks for this node
 		}
+		vs.deleted++
+	}
+
+	// coder/hnsw v0.6.1 panics on the next Add once Delete has emptied the
+	// graph, which happens whenever the only node is re-embedded, or a
+	// reconcile drops every vector before adding new ones. An empty graph
+	// holds nothing worth keeping, so it is replaced with a fresh one.
+	if vs.idx.Len() == 0 {
+		vs.idx = newGraph()
 	}
 
 	// Remove chunk entries from BadgerDB.
 	prefix := []byte(prefixChunk + nodeID + ":")
 	vs.deleteByPrefix(prefix)
+	if vs.vecDB != nil {
+		_ = vs.vecDB.Update(func(txn *badger.Txn) error { return txn.Delete([]byte(prefixText + nodeID)) })
+	}
+}
+
+// newGraph returns an empty vector graph with the index's settings.
+func newGraph() *hnsw.Graph[string] {
+	g := hnsw.NewGraph[string]()
+	g.M = hnswM
+	g.EfSearch = hnswEf
+	g.Distance = hnsw.CosineDistance
+	return g
 }
 
 func (vs *VectorStore) getChunkText(nodeID string, chunkIdx int) string {
+	if vs.vecDB == nil {
+		return ""
+	}
 	key := []byte(prefixChunk + chunkKey(nodeID, chunkIdx))
 	var text string
 	_ = vs.vecDB.View(func(txn *badger.Txn) error {
@@ -828,8 +1045,52 @@ func (vs *VectorStore) putChunkEntry(key string, entry ChunkEntry) error {
 	})
 }
 
+// putTextHashes records the text each node's vectors were made from.
+func (vs *VectorStore) putTextHashes(hashes map[string]string) error {
+	if len(hashes) == 0 || vs.vecDB == nil {
+		return nil
+	}
+	wb := vs.vecDB.NewWriteBatch()
+	defer wb.Cancel()
+	for id, h := range hashes {
+		if err := wb.Set([]byte(prefixText+id), []byte(h)); err != nil {
+			return fmt.Errorf("store text hash of %s: %w", id, err)
+		}
+	}
+	return wb.Flush()
+}
+
+// textHashes reads every recorded text hash, by node ID.
+func (vs *VectorStore) textHashes() (map[string]string, error) {
+	out := make(map[string]string)
+	err := vs.vecDB.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = []byte(prefixText)
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		for it.Seek(opts.Prefix); it.Valid(); it.Next() {
+			item := it.Item()
+			v, err := item.ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+			out[strings.TrimPrefix(string(item.Key()), prefixText)] = string(v)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// textHash identifies the text a node's vectors were made from.
+func textHash(text string) string {
+	h := fnv.New64a()
+	h.Write([]byte(text))
+	return strconv.FormatUint(h.Sum64(), 16)
+}
+
 func (vs *VectorStore) clearAllChunks() error {
 	vs.deleteByPrefix([]byte(prefixChunk))
+	vs.deleteByPrefix([]byte(prefixText))
 	return nil
 }
 

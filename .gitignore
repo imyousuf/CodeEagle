@@ -48,3 +48,6 @@ internal/app/frontend/dist/
 # Editor/IDE
 # .idea/
 .vscode/
+
+# Python bytecode from the benchmark scripts
+__pycache__/

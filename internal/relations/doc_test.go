@@ -1,0 +1,228 @@
+package relations
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/jev"
+)
+
+func TestDecideDirection(t *testing.T) {
+	g := DefaultDocGates()
+	old := &Subject{Path: "a.md", Preamble: "Status: draft, 2026-06-02"}
+	newer := &Subject{Path: "b.md", Preamble: "Status: draft, 2026-09-14"}
+	undated := &Subject{Path: "b.md"}
+	chat := &Subject{Path: "b.jsonl", ChatFormat: "slack"}
+	postmortem := &Subject{Path: "incidents/prefill-outage-postmortem.md"}
+	for _, tt := range []struct {
+		name string
+		b    *Subject
+		v    DocVerdict
+		want []string // kind:from>to
+	}{
+		{"unrelated", newer, DocVerdict{PRelated: 0.5, PChanges: [2]float64{0, 0.99}}, nil},
+		{"b changes a", newer, DocVerdict{PRelated: 0.9, PChanges: [2]float64{0.1, 0.9}}, []string{"changes:b.md>a.md"}},
+		{"b replaces a", newer, DocVerdict{PRelated: 0.9, PChanges: [2]float64{0.1, 0.9}, PReplaces: [2]float64{0.1, 0.97}},
+			[]string{"changes:b.md>a.md", "replaces:b.md>a.md"}},
+		{"replaces needs changes", newer, DocVerdict{PRelated: 0.9, PReplaces: [2]float64{0.1, 0.97}}, []string{"companion:a.md>b.md"}},
+		{"both ways, later wins", newer, DocVerdict{PRelated: 0.9, PChanges: [2]float64{0.9, 0.9}}, []string{"changes:b.md>a.md"}},
+		{"both ways, no dates, neither", undated, DocVerdict{PRelated: 0.9, PChanges: [2]float64{0.9, 0.9}}, []string{"companion:a.md>b.md"}},
+		{"records", postmortem, DocVerdict{PRelated: 0.9, PRecords: [2]float64{0.1, 0.9}}, []string{"records:incidents/prefill-outage-postmortem.md>a.md"}},
+		{"a spec records nothing", newer, DocVerdict{PRelated: 0.9, PRecords: [2]float64{0.1, 0.9}}, []string{"companion:a.md>b.md"}},
+		{"records both ways, undated, neither", undated, DocVerdict{PRelated: 0.9, PRecords: [2]float64{0.9, 0.9}}, []string{"companion:a.md>b.md"}},
+		{"records both ways, dated specs, neither", newer, DocVerdict{PRelated: 0.9, PRecords: [2]float64{0.9, 0.9}}, []string{"companion:a.md>b.md"}},
+		{"records both ways, the chat is the record", chat, DocVerdict{PRelated: 0.9, PRecords: [2]float64{0.9, 0.9}}, []string{"records:b.jsonl>a.md"}},
+	} {
+		v := tt.v
+		v.Decide(old, tt.b, g)
+		var got []string
+		for _, l := range v.Links {
+			got = append(got, l.Kind+":"+l.From+">"+l.To)
+		}
+		if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+			t.Errorf("%s: %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestStemAndOrderedWords(t *testing.T) {
+	for _, tt := range []struct{ a, b string }{
+		{"specs/home-slice/opal-7194-plan.md", "specs/home-slice/opal-7194-plan.v1-with-schema.md"},
+		{"x/Dubai Airports – Mark Architecture Workshop.pptx", "x/Dubai Airports – Mark Architecture Workshop (with AO).pptx"},
+	} {
+		if stem(tt.a) != stem(tt.b) {
+			t.Errorf("%q and %q stem to %q and %q", tt.a, tt.b, stem(tt.a), stem(tt.b))
+		}
+	}
+	seq := strings.Fields("the tracker formerly stickyboard frontend federation design")
+	if !wordsInOrder([]string{"stickyboard", "frontend"}, seq) || wordsInOrder([]string{"frontend", "stickyboard"}, seq) {
+		t.Error("ordered words misjudged")
+	}
+}
+
+// docAsker answers every document question from a table by name.
+type docAsker struct{ p map[string]float64 }
+
+func (a docAsker) Ask(_ context.Context, state any, q jev.Questions) (*jev.Response, error) {
+	b, _ := json.Marshal(state)
+	_ = b
+	answers := jev.Answers{}
+	for name := range q {
+		answers[name] = jev.Answer{Type: jev.TypeNoul, Noul: a.p[name]}
+	}
+	return &jev.Response{Model: "jev-test", Answers: answers, Usage: jev.Usage{InputTokens: 300}}, nil
+}
+
+// TestJudgeDocPairsStoresAndLinks covers judging a pair end to end: the
+// verdict on the lower path's relation, the edge, and what the briefs say.
+func TestJudgeDocPairsStoresAndLinks(t *testing.T) {
+	store, base, _ := incrementalStores(t)
+	ctx := context.Background()
+	indexMarkdown(t, base, "docs/tracker.md", "# Tracker\n\nStatus: draft, 2026-10-01\n\nThe redesign of `retry.md`. "+longBody, nil)
+	subjects, err := LoadSubjects(ctx, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rels := map[string]*Relation{}
+	if _, err := EnsureRelations(ctx, store, subjects, rels, day); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RefreshReferences(ctx, store, subjects, rels); err != nil {
+		t.Fatal(err)
+	}
+	p := NewDocProposer(subjects, rels, nil, DefaultDocOptions())
+	cands := p.ForDocuments("docs/tracker.md")
+	if len(cands) != 1 || !contains(cands[0].Signals, DocSignalRef) {
+		t.Fatalf("candidates = %+v", cands)
+	}
+	// A is docs/retry.md, the lower path; B is the tracker, which replaces it.
+	asker := docAsker{p: map[string]float64{"related": 0.95, "changes_ba": 0.95, "replaces_ba": 0.97}}
+	stats, err := JudgeDocPairs(ctx, store, NewDocJudge(asker), cands, rels, DefaultDocGates(), day)
+	if err != nil || stats.Accepted[DocReplaces] != 1 {
+		t.Fatalf("stats %+v, %v", stats, err)
+	}
+	edges, _ := store.GetEdges(ctx, RelationID("docs/tracker.md"), graph.EdgeSupersedes)
+	if len(edges) != 1 || edges[0].TargetID != RelationID("docs/retry.md") {
+		t.Errorf("supersedes edges = %+v", edges)
+	}
+	if JudgedDoc(rels)(cands[0]) == false {
+		t.Error("a judged pair would be asked again")
+	}
+	lib, err := LoadLibrary(ctx, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flags := lib.DocFlags("docs/retry.md")
+	if len(flags) != 1 || !strings.HasPrefix(flags[0], FlagSupersededBy+":") {
+		t.Errorf("flags on the replaced document = %v", flags)
+	}
+	if lines := lib.relatedLines("docs/retry.md"); len(lines) == 0 || !strings.Contains(lines[0], "replaced by docs/tracker.md") {
+		t.Errorf("related lines = %v", lines)
+	}
+}
+
+// TestIncrementalJudgesChangedDocumentPairs covers document pairs in the
+// automatic pass: judged once for the content they were judged under, and
+// not asked about again until a document changes.
+func TestIncrementalJudgesChangedDocumentPairs(t *testing.T) {
+	store, base, vec := incrementalStores(t)
+	ctx := context.Background()
+	indexMarkdown(t, base, "docs/tracker.md", "# Tracker\n\nStatus: draft, 2026-10-01\n\nThe redesign of `retry.md`. "+longBody, nil)
+	asker := docAsker{p: map[string]float64{"related": 0.95, "changes_ba": 0.95}}
+	run := func() *IncrementalReport {
+		t.Helper()
+		o := IncrementalOptions{DocJudge: NewDocJudge(asker), DocOptions: DefaultDocOptions(), DocGates: DefaultDocGates()}
+		rep, err := Incremental(ctx, store, vec, NewJudge(&scriptedAsker{}, spokenStub{}), nil, nil, DefaultOptions(), 0.8, o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rep
+	}
+
+	rep := run()
+	if rep.DocsConsidered != 2 || rep.DocPairs.Judged != 1 || rep.DocPairs.Accepted[DocChanges] != 1 {
+		t.Fatalf("first run: considered %d, judged %d, accepted %v", rep.DocsConsidered, rep.DocPairs.Judged, rep.DocPairs.Accepted)
+	}
+	if !strings.Contains(rep.Summary(), "document pairs: 2 documents, 1 judged, 1 links") {
+		t.Errorf("summary = %q", rep.Summary())
+	}
+	if rep = run(); rep.DocsConsidered != 0 || rep.DocPairs.Judged != 0 {
+		t.Errorf("second run considered %d documents and judged %d pairs; want none", rep.DocsConsidered, rep.DocPairs.Judged)
+	}
+
+	// An edit to one side asks about the pair again.
+	indexMarkdown(t, base, "docs/tracker.md", "# Tracker\n\nStatus: draft, 2026-10-09\n\nThe redesign of `retry.md`, revised. "+longBody, map[string]string{graph.PropContentHash: "sha256:tracker-v2"})
+	if rep = run(); rep.DocsConsidered != 1 || rep.DocPairs.Judged != 1 {
+		t.Errorf("after an edit: considered %d, judged %d; want 1 and 1", rep.DocsConsidered, rep.DocPairs.Judged)
+	}
+}
+
+// TestRecordsNeedARecordOfSomethingElse covers the measured failure: a later
+// review of a pull request read as a record of the earlier review.
+func TestRecordsNeedARecordOfSomethingElse(t *testing.T) {
+	older := &Subject{Path: "reviews/2026-08-26/pr-6784-review.md"}
+	later := &Subject{Path: "reviews/2026-09-09/pr-6784-review.md"}
+	v := DocVerdict{PRelated: 0.95, PRecords: [2]float64{0.3, 0.94}}
+	v.Decide(older, later, DefaultDocGates())
+	for _, l := range v.Links {
+		if l.Kind == DocRecords {
+			t.Errorf("a review recorded another review: %+v", l)
+		}
+	}
+}
+
+func TestDatedOutputsOfDifferentRoutinesAreCompanions(t *testing.T) {
+	brief := &Subject{Path: "jarvis/signal_triage/vt_daily_brief/2026-10-14.md"}
+	recap := &Subject{Path: "jarvis/signal_triage/vt_meeting_recap/2026-10-13.md"}
+	nextBrief := &Subject{Path: "jarvis/signal_triage/vt_daily_brief/2026-10-19.md"}
+	v := DocVerdict{PRelated: 0.95, PChanges: [2]float64{0.9, 0.1}, PRecords: [2]float64{0.9, 0.1}}
+	v.Decide(brief, recap, DefaultDocGates())
+	if len(v.Links) != 1 || v.Links[0].Kind != DocCompanion {
+		t.Errorf("two routines' dated outputs: %+v, want a companion only", v.Links)
+	}
+	v = DocVerdict{PRelated: 0.95, PChanges: [2]float64{0.1, 0.9}}
+	v.Decide(brief, nextBrief, DefaultDocGates())
+	if len(v.Links) != 1 || v.Links[0].Kind != DocChanges || v.Links[0].From != nextBrief.Path {
+		t.Errorf("a later output of the same series: %+v, want it to change the earlier", v.Links)
+	}
+}
+
+// TestRedecideDocsAppliesNewGates covers a gate change taking effect on
+// stored verdicts without asking the decision model again.
+func TestRedecideDocsAppliesNewGates(t *testing.T) {
+	store, base, _ := incrementalStores(t)
+	ctx := context.Background()
+	indexMarkdown(t, base, "docs/tracker.md", "# Tracker\n\nStatus: draft, 2026-10-01\n\nThe redesign of `retry.md`. "+longBody, nil)
+	subjects, err := LoadSubjects(ctx, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rels := map[string]*Relation{}
+	if _, err := EnsureRelations(ctx, store, subjects, rels, day); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RefreshReferences(ctx, store, subjects, rels); err != nil {
+		t.Fatal(err)
+	}
+	cands := NewDocProposer(subjects, rels, nil, DefaultDocOptions()).ForDocuments("docs/tracker.md")
+	asker := docAsker{p: map[string]float64{"related": 0.95, "changes_ba": 0.8}}
+	strict := DefaultDocGates()
+	strict.Changes = 0.9
+	if _, err := JudgeDocPairs(ctx, store, NewDocJudge(asker), cands, rels, strict, day); err != nil {
+		t.Fatal(err)
+	}
+	if links := rels["docs/retry.md"].DocLinks["docs/tracker.md"].Links; len(links) != 1 || links[0].Kind != DocCompanion {
+		t.Fatalf("under the strict gate: %+v", links)
+	}
+	n, err := RedecideDocs(ctx, store, rels, subjects, DefaultDocGates())
+	if err != nil || n != 1 {
+		t.Fatalf("re-decided %d, %v", n, err)
+	}
+	edges, _ := store.GetEdges(ctx, RelationID("docs/tracker.md"), graph.EdgeChanges)
+	if len(edges) != 1 {
+		t.Errorf("changes edges after re-deciding = %+v", edges)
+	}
+}
