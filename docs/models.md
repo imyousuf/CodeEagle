@@ -17,7 +17,8 @@ Last reviewed: 2026-09-20.
 | Agents, direct API | `anthropic` | `claude-sonnet-5` | `internal/llm/anthropic.go` |
 | Agents, on GCP | `vertex-ai` | `gemini-3.8-flash` | `internal/llm/vertexai.go` |
 | Meeting enrichment | `baseten` | `deepseek-ai/DeepSeek-V4.1-Flash` | `internal/config/config.go` |
-| Speaker adjudication, topic relating, search re-ranking | Jev | `jev-1.13.0` | `pkg/jev/client.go` |
+| Relation briefs | `transcripts.provider`, or `relations.provider` | as `transcripts.model`, or `relations.model` | `internal/cli/relations.go` |
+| Speaker adjudication, topic relating, search re-ranking, document relations, conflict checks | Jev | `jev-1.13.0` | `pkg/jev/client.go` |
 | Document and image description | `ollama` | `qwen3.5:9b` | `internal/docs/ollama.go` |
 | Document and image description, hosted | `baseten` | `zai-org/GLM-5.3-Flash` | `internal/docs/baseten.go` |
 | Document and image description, on GCP | `vertex-ai` | `gemini-3.8-flash` | `internal/docs/vertex.go` |
@@ -106,14 +107,93 @@ documents up to roughly 336 KB.
 
 ---
 
+## Answering with the verbs: models measured
+
+CodeEagle does not pick the model that answers questions; whatever agent calls
+`find`, `brief` and `show` (over MCP or the CLI) does. These are the
+measurements to choose one by, taken 2026-10-23/24 on the relations benchmark
+(42 questions over specs, meetings, decks, PDFs and notes, six categories
+including unanswerable ones; `docs/artifact-relations.md`, "Phase 2 results"),
+each answer limited to 15 model calls and $0.10, graded blind by one judge
+(Claude Opus): correctness is the share of claims not contradicted, stale or
+fabricated; completeness the share of required points covered; grade the 0-2
+mark scaled to 0-1.
+
+| model | provider, identifier | answered | correctness | completeness | grade | fully right | $ median / p90 | wall s median | calls |
+|---|---|---|---|---|---|---|---|---|---|
+| Claude Sonnet | Claude Code, `sonnet` | 91% | 0.91 | 0.42 | 0.53 | 18% | 0.058 / 0.092 | 39 | 7 |
+| Claude Haiku | Claude Code, `haiku` | 100% | 0.91 | 0.40 | 0.55 | 15% | 0.012 / 0.021 | 15 | 5 |
+| GLM 5.3 | Baseten, `zai-org/GLM-5.3` | 93% | 0.92 | 0.49 | 0.49 | 7% | 0.011 / 0.025 | 15 | 4 |
+| GLM 5.3 Flash | Baseten, `zai-org/GLM-5.3-Flash` | 100% | 0.90 | 0.52 | 0.56 | 17% | **0.0014** / 0.0028 | 9 | 4 |
+| DeepSeek V4 Pro | Baseten, `deepseek-ai/DeepSeek-V4-Pro-0813` | 86% | 0.90 | 0.43 | 0.45 | 7% | 0.012 / 0.041 | 16 | 4 |
+| DeepSeek V4.1 Flash | Baseten, `deepseek-ai/DeepSeek-V4.1-Flash` | 90% | 0.93 | **0.56** | 0.56 | **24%** | 0.006 / 0.011 | 14 | 6 |
+| Kimi K3 | Baseten, `moonshotai/Kimi-K3` | 100% | 0.92 | 0.50 | 0.56 | 17% | 0.023 / 0.051 | 16 | 4 |
+| Gemini 3.5 Flash-Lite | Vertex AI, `google/gemini-3.5-flash-lite` | 100% | 0.91 | 0.40 | 0.56 | 19% | 0.004 / 0.008 | 8 | 4 |
+| GPT-OSS 120B | Baseten, `openai/gpt-oss-120b` | 93% | 0.74 | 0.32 | 0.38 | 5% | 0.001 / 0.004 | 9 | 3 |
+| Nemotron 3.5 Super | Baseten, `nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B` | 90% | 0.93 | 0.43 | 0.48 | 10% | 0.004 / 0.011 | 14 | 5 |
+
+Completeness / grade by category:
+
+| model | spec state | meetings | doc to doc | decisions over time | non-markdown | unanswerable |
+|---|---|---|---|---|---|---|
+| Claude Sonnet | 0.44 / 0.48 | 0.40 / 0.42 | 0.31 / 0.33 | 0.40 / 0.48 | 0.40 / 0.52 | 0.58 / 0.97 |
+| Claude Haiku | 0.39 / 0.50 | 0.45 / 0.50 | 0.33 / 0.48 | 0.40 / 0.50 | 0.35 / 0.43 | 0.55 / 0.94 |
+| GLM 5.3 | 0.54 / 0.50 | 0.54 / 0.50 | 0.53 / 0.57 | 0.49 / 0.43 | 0.53 / 0.50 | 0.30 / 0.42 |
+| GLM 5.3 Flash | 0.53 / 0.50 | 0.59 / 0.50 | 0.32 / 0.36 | 0.47 / 0.57 | 0.55 / 0.57 | 0.67 / 0.92 |
+| DeepSeek V4 Pro | 0.52 / 0.50 | 0.50 / 0.50 | 0.46 / 0.50 | 0.40 / 0.43 | 0.51 / 0.57 | 0.17 / 0.17 |
+| DeepSeek V4.1 Flash | 0.60 / 0.59 | 0.64 / 0.62 | 0.60 / 0.64 | 0.57 / 0.50 | 0.61 / 0.64 | 0.28 / 0.33 |
+| Kimi K3 | 0.52 / 0.50 | 0.54 / 0.50 | 0.40 / 0.50 | 0.42 / 0.43 | 0.51 / 0.50 | 0.66 / 1.00 |
+| Gemini 3.5 Flash-Lite | 0.34 / 0.50 | 0.47 / 0.50 | 0.30 / 0.36 | 0.38 / 0.50 | 0.40 / 0.57 | 0.60 / 1.00 |
+| GPT-OSS 120B | 0.38 / 0.41 | 0.42 / 0.50 | 0.21 / 0.29 | 0.35 / 0.36 | 0.23 / 0.29 | 0.35 / 0.50 |
+| Nemotron 3.5 Super | 0.49 / 0.45 | 0.58 / 0.50 | 0.45 / 0.50 | 0.48 / 0.57 | 0.29 / 0.36 | 0.32 / 0.50 |
+
+What to take from it:
+
+- **GLM 5.3 Flash is the value pick**: Haiku's grade and more of the required
+  points, at an eighth of Haiku's cost and a fortieth of Sonnet's, and it
+  says so when the sources do not have the answer.
+- **DeepSeek V4.1 Flash gives the most complete answers** to questions the
+  sources can answer (0.57-0.64 in every such category, 24% fully right), but
+  is poor at unanswerable ones: it keeps searching until the call limit
+  rather than concluding the sources are silent: all four answers it lost
+  were unanswerable questions, four of the six. GLM 5.3 (three of three) and
+  DeepSeek V4 Pro (five of six) do the same.
+- **Kimi K3** is complete and declines correctly, at about twice Haiku's
+  cost.
+- **GPT-OSS 120B is cheap but unreliable**: a quarter of its claims were
+  wrong, against 7-10% for every other model.
+- **Gemini 3.5 Flash-Lite** is cheap, fast and declines well, but leaves
+  more out than the GLM and DeepSeek Flash models.
+
+How it was measured, and what that means for comparing rows:
+
+- The Claude models ran through Claude Code (`scripts/bench-relations/bench.py`),
+  three repetitions each. The others ran through
+  `scripts/bench-relations/bench_openai.py`, one repetition each: the same MCP
+  server, tools, tool descriptions and server instructions, but a minimal
+  system prompt of its own instead of Claude Code's. Claude Code's system
+  prompt is sent with every call, so part of the Claude rows' cost is the
+  harness, not the model, and the harness may also explain some of the
+  completeness difference; Claude has not been run through the other loop.
+- Baseten models ran with `reasoning_effort: low` and a 32K token ceiling per
+  call (reasoning is spent from it first). Costs are from each response's
+  token counts at Baseten's published prices (`/v1/models`, which includes
+  cached-input prices); Gemini 3.5 Flash-Lite at $0.30 input, $0.03 cached and
+  $2.50 output per million tokens (Gemini API pricing, standard tier).
+- One repetition of 42 questions puts roughly ±0.06 on each completeness
+  figure; differences smaller than that are not differences.
+- "Answered" excludes answers lost to the limits: 15 calls without an
+  answer, $0.10 spent, or an empty reply (GPT-OSS, twice).
+
 ## Decision model
 
 ### Jev (`transcripts.jev_api_key`)
 
 Not a language model. It answers bounded questions with a **calibrated
-probability** rather than generating prose. Three jobs use it: speaker
-adjudication, topic relating, and search re-ranking. See `jev.md` for what it
-is and how it is used.
+probability** rather than generating prose. Five jobs use it: speaker
+adjudication, topic relating, search re-ranking, deciding which meetings
+discussed a document, and confirming that a meeting contradicts one. See
+`jev.md` for what it is and how it is used.
 
 | Version | Notes |
 |---|---|

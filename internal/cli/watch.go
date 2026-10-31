@@ -96,7 +96,7 @@ func newWatchCmd() *cobra.Command {
 			registry.Register(javascript.NewParser())
 			registry.Register(java.NewParser())
 			registry.Register(htmlparser.NewParser())
-			registry.Register(markdown.NewParser())
+			registry.Register(markdown.NewParser(markdown.WithSectionText(cfg.Docs.MarkdownSectionText())))
 			registry.Register(makefileparser.NewParser())
 			registry.Register(shell.NewParser())
 			registry.Register(terraform.NewParser())
@@ -160,14 +160,14 @@ func newWatchCmd() *cobra.Command {
 			lnk := linker.NewLinker(store, linkerLLM, logFn, verbose)
 
 			// Open vector store if embedding provider is available.
-			vs, vecErr := openVectorStore(cfg, store, currentBranch, logFn)
+			vs, vecErr := openVectorStore(cfg, vectorGraphView(store), currentBranch, logFn)
 			if vecErr != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: vector store: %v\n", vecErr)
 			}
 			if vs != nil {
 				defer vs.Close()
 				// Load existing index (or build from scratch on first run).
-				if err := syncVectorIndex(vs, cfg, false, logFn); err != nil {
+				if err := syncVectorIndex(vs, cfg, false, nil, nil, logFn); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: initial vector index: %v\n", err)
 				}
 			}

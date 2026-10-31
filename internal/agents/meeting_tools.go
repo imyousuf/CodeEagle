@@ -46,17 +46,37 @@ func (t *queryMeetingsTool) Parameters() map[string]any {
 			},
 			"limit": map[string]any{
 				"type":        "integer",
-				"description": "Maximum meetings to return (default 10).",
+				"description": "Maximum meetings to return (default 6).",
 			},
 		},
 	}
+}
+
+// Bounds on what query_meetings prints per meeting. Every turn resends what
+// earlier tools returned, and at ten meetings with every matched passage in
+// full a call came to about 35 KB, which alone used up a ten-cent answer;
+// query_meeting_detail has the full record.
+const (
+	queryMeetingsDefault  = 6
+	maxMeetingSummaryLen  = 400
+	maxMatchedPassages    = 2
+	maxMatchedPassageLen  = 300
+	maxParticipantsListed = 6
+)
+
+func clipText(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 func (t *queryMeetingsTool) Execute(ctx context.Context, args map[string]any) (string, bool) {
 	topic, _ := args["topic"].(string)
 	person, _ := args["person"].(string)
 	since, _ := args["since"].(string)
-	limit := intArg(args, "limit", 10)
+	limit := intArg(args, "limit", queryMeetingsDefault)
 
 	q := transcript.Query{Text: topic, Person: person, Limit: limit}
 	if since != "" {
@@ -95,29 +115,39 @@ func (t *queryMeetingsTool) Execute(ctx context.Context, args map[string]any) (s
 			formatDuration(m.Properties[graph.PropDuration]))
 		fmt.Fprintf(&b, "- Meeting ID: %s\n", m.QualifiedName)
 		if len(h.Participants) > 0 {
-			fmt.Fprintf(&b, "- Participants: %s\n", strings.Join(h.Participants, ", "))
+			ps := h.Participants
+			more := ""
+			if len(ps) > maxParticipantsListed {
+				more = fmt.Sprintf(" and %d more", len(ps)-maxParticipantsListed)
+				ps = ps[:maxParticipantsListed]
+			}
+			fmt.Fprintf(&b, "- Participants: %s%s\n", strings.Join(ps, ", "), more)
 		}
 		if topic != "" {
 			fmt.Fprintf(&b, "- Matched on: %s\n", describeMatches(h))
 		}
 		if s := m.Properties[graph.PropSummary]; s != "" {
-			fmt.Fprintf(&b, "\n%s\n", s)
+			fmt.Fprintf(&b, "\n%s\n", clipText(s, maxMeetingSummaryLen))
 		}
-		// The matched passages themselves, so the agent can answer from
-		// them without a second call when they suffice.
+		// The best matched passages themselves, so the agent can answer
+		// from them without a second call when they suffice.
+		shown := 0
 		for _, mt := range h.Matches {
-			if mt.Node == nil {
+			if mt.Node == nil || shown >= maxMatchedPassages {
 				continue
 			}
+			text := clipText(mt.Node.Properties[graph.PropSummary], maxMatchedPassageLen)
 			switch mt.Kind {
 			case transcript.MatchSegment:
-				fmt.Fprintf(&b, "\nTopic segment \"%s\": %s\n", mt.Label, mt.Node.Properties[graph.PropSummary])
+				fmt.Fprintf(&b, "\nTopic segment \"%s\": %s\n", mt.Label, text)
 			case transcript.MatchDecision:
-				fmt.Fprintf(&b, "\nDecision: %s\n", mt.Node.Properties[graph.PropSummary])
+				fmt.Fprintf(&b, "\nDecision: %s\n", text)
 			case transcript.MatchFollowUp:
-				fmt.Fprintf(&b, "\nFollow-up: %s (owner: %s)\n", mt.Node.Properties[graph.PropSummary],
-					orUnassigned(mt.Node.Properties[graph.PropAssignee]))
+				fmt.Fprintf(&b, "\nFollow-up: %s (owner: %s)\n", text, orUnassigned(mt.Node.Properties[graph.PropAssignee]))
+			default:
+				continue
 			}
+			shown++
 		}
 		b.WriteString("\n")
 	}

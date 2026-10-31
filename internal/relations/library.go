@@ -1,0 +1,840 @@
+package relations
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"math"
+	"os"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/imyousuf/CodeEagle/internal/graph"
+)
+
+// Library is the read side of relations: the corpus as it is now, the
+// relations over it, and what an agent asks of them.
+type Library struct {
+	Store       graph.Store
+	Subjects    map[string]*Subject
+	Meetings    map[string]*Meeting
+	Relations   map[string]*Relation
+	Transcripts Transcripts
+	Speakers    SpeakerNamer
+	// Resolve turns a graph path into a file on disk.
+	Resolve func(graphPath string) string
+	Now     func() time.Time
+
+	backrefs map[string][]string
+	doclinks map[string][]DocLink
+}
+
+// LoadLibrary reads the corpus and the relations from store. resolve turns a
+// graph path into a file on disk, for showing a document's text.
+func LoadLibrary(ctx context.Context, store graph.Store, resolve func(string) string) (*Library, error) {
+	subjects, err := loadSubjects(ctx, store, nil, false)
+	if err != nil {
+		return nil, fmt.Errorf("load documents: %w", err)
+	}
+	meetings, err := LoadMeetingHeaders(ctx, store)
+	if err != nil {
+		return nil, fmt.Errorf("load meetings: %w", err)
+	}
+	rels, err := LoadRelations(ctx, store)
+	if err != nil {
+		return nil, fmt.Errorf("load relations: %w", err)
+	}
+	by := make(map[string]*Subject, len(subjects))
+	for _, s := range subjects {
+		by[s.Path] = s
+	}
+	return &Library{
+		Store:       store,
+		Subjects:    by,
+		Meetings:    meetings,
+		Relations:   rels,
+		Transcripts: NewFileTranscripts(),
+		Speakers:    NewStoreSpeakers(ctx, store),
+		Resolve:     resolve,
+		Now:         time.Now,
+	}, nil
+}
+
+// Brief renders a relation's brief with its freshness as of now.
+func (l *Library) Brief(rel *Relation, budget int, since time.Time, sinceLabel string) string {
+	return Render(rel, RenderOptions{
+		Budget:      budget,
+		Since:       since,
+		SinceLabel:  sinceLabel,
+		Meetings:    l.Meetings,
+		Flags:       append(Freshness(rel, l.Subjects[rel.SubjectPath], l.Meetings), l.DocFlags(rel.SubjectPath)...),
+		Subject:     l.Subjects[rel.SubjectPath],
+		Unconfirmed: l.unconfirmed(rel),
+		LinksTo:     l.linkLines(refTargets(rel.Refs)),
+		LinkedFrom:  l.linkLines(l.linkedFrom(rel.SubjectPath)),
+		Related:     l.relatedLines(rel.SubjectPath),
+		Inherited:   l.inheritedDecisions(rel.SubjectPath),
+	})
+}
+
+// maxInherited bounds the decisions taken from each changing document.
+const maxInherited = 3
+
+// inheritedDecisions are the latest decisions of documents that change or
+// replace path, labelled with where they come from: a redesign's decisions
+// are decisions about what it redesigns.
+func (l *Library) inheritedDecisions(path string) []string {
+	var lines []string
+	seen := make(map[string]bool)
+	for _, link := range l.docLinksOf(path) {
+		if link.To != path || (link.Kind != DocChanges && link.Kind != DocReplaces) || seen[link.From] {
+			continue
+		}
+		seen[link.From] = true
+		if rel := l.Relations[link.From]; rel != nil {
+			for i, d := range rel.Decisions {
+				if i >= maxInherited {
+					break
+				}
+				lines = append(lines, decisionLine(d, link.From))
+			}
+		}
+	}
+	return lines
+}
+
+// Freshness flags from other documents.
+const (
+	// FlagSupersededBy: another document replaces this one as a whole.
+	FlagSupersededBy = "superseded_by"
+	// FlagAmendedBy: another document changes part of this one.
+	FlagAmendedBy = "amended_by"
+)
+
+// docLinksOf lists the accepted links involving path, from the verdicts
+// stored on whichever relation holds each pair; built once per library.
+func (l *Library) docLinksOf(path string) []DocLink {
+	if l.doclinks == nil {
+		l.doclinks = make(map[string][]DocLink)
+		for _, rel := range l.Relations {
+			for _, v := range rel.DocLinks {
+				for _, link := range v.Links {
+					l.doclinks[link.From] = append(l.doclinks[link.From], link)
+					l.doclinks[link.To] = append(l.doclinks[link.To], link)
+				}
+			}
+		}
+	}
+	return l.doclinks[path]
+}
+
+// DocLinks lists the accepted links between path and other documents, in
+// either direction.
+func (l *Library) DocLinks(path string) []DocLink { return l.docLinksOf(path) }
+
+// DocFlags are the flags other documents put on this one, e.g.
+// superseded_by:3fa9c2.
+func (l *Library) DocFlags(path string) []string {
+	var flags []string
+	replaced := false
+	for _, link := range l.docLinksOf(path) {
+		if link.To == path && link.Kind == DocReplaces {
+			flags = append(flags, FlagSupersededBy+":"+ShortID(RelationID(link.From)))
+			replaced = true
+		}
+	}
+	if !replaced {
+		for _, link := range l.docLinksOf(path) {
+			if link.To == path && link.Kind == DocChanges {
+				flags = append(flags, FlagAmendedBy+":"+ShortID(RelationID(link.From)))
+			}
+		}
+	}
+	return flags
+}
+
+// relatedLines describes the documents linked to path by a judged kind, with
+// the direction read from path's side.
+func (l *Library) relatedLines(path string) []string {
+	replacedPair := make(map[string]bool) // a replacement says it changed too
+	for _, link := range l.docLinksOf(path) {
+		if link.Kind == DocReplaces {
+			replacedPair[link.From+"\x00"+link.To] = true
+		}
+	}
+	type related struct {
+		rank       int
+		how, other string
+	}
+	var list []related
+	seen := make(map[string]bool)
+	for _, link := range l.docLinksOf(path) {
+		if link.Kind == DocChanges && replacedPair[link.From+"\x00"+link.To] {
+			continue
+		}
+		r := related{other: link.To}
+		switch {
+		case link.Kind == DocReplaces && link.To == path:
+			r = related{0, "replaced by", link.From}
+		case link.Kind == DocChanges && link.To == path:
+			r = related{1, "changed by", link.From}
+		case link.Kind == DocRecords && link.To == path:
+			r = related{2, "recorded in", link.From}
+		case link.Kind == DocReplaces:
+			r.rank, r.how = 3, "replaces"
+		case link.Kind == DocChanges:
+			r.rank, r.how = 3, "changes"
+		case link.Kind == DocRecords:
+			r.rank, r.how = 4, "records"
+		default:
+			r.rank, r.how = 5, "companion of"
+			if link.To == path {
+				r.other = link.From
+			}
+		}
+		if !seen[r.how+r.other] {
+			seen[r.how+r.other] = true
+			list = append(list, r)
+		}
+	}
+	// What replaces or changes the document comes first: it decides what
+	// holds now. Companions, which can number dozens, come last and fewest.
+	sort.SliceStable(list, func(i, j int) bool {
+		if list[i].rank != list[j].rank {
+			return list[i].rank < list[j].rank
+		}
+		return list[i].other < list[j].other
+	})
+	var lines []string
+	companions := 0
+	for _, r := range list {
+		if r.rank == 5 {
+			if companions >= maxCompanionLines {
+				continue
+			}
+			companions++
+		}
+		line := fmt.Sprintf("- %s %s (%s)", r.how, r.other, ShortID(RelationID(r.other)))
+		if about := l.saysAbout(r.other, path); about != "" {
+			line += ": " + about
+		} else if rel := l.Relations[r.other]; rel != nil && rel.Brief != nil && rel.Brief.Headline.Text != "" {
+			line += ": " + clip(rel.Brief.Headline.Text, maxHeadlineInFinder)
+		}
+		lines = append(lines, line)
+		if len(lines) >= maxLinkLines {
+			break
+		}
+	}
+	return lines
+}
+
+// saysAbout is what one document says where it names the other: the
+// sentence around its reference, which tells what a redesign changes or a
+// companion adds better than either document's headline. It tries other's
+// mention of path first, then path's mention of other.
+func (l *Library) saysAbout(other, path string) string {
+	for _, pair := range [][2]string{{other, path}, {path, other}} {
+		rel := l.Relations[pair[0]]
+		if rel == nil {
+			continue
+		}
+		for _, ref := range rel.Refs {
+			if ref.Target == pair[1] && strings.TrimSpace(ref.Context) != "" {
+				quote := clip(refSentence(ref.Context), maxRefQuote)
+				if quote == "" {
+					continue
+				}
+				if pair[0] == path {
+					return "this document says " + quote
+				}
+				return quote
+			}
+		}
+	}
+	return ""
+}
+
+// maxRefQuote bounds what a related-documents line quotes of a reference.
+const maxRefQuote = 280
+
+// leadingRef is a list marker, quote marker or the referenced path itself at
+// the start of a reference's context, which say nothing about the relation.
+var leadingRef = regexp.MustCompile("^(?:[-*>]\\s*)*(?:\\[[^\\]]*\\]\\([^)]*\\)|`[^`]+`)?\\s*(?:[—–:-]\\s*)?")
+
+// refSentence is a reference's context with what does not describe the
+// relation removed.
+func refSentence(context string) string {
+	return strings.TrimSpace(leadingRef.ReplaceAllString(strings.Join(strings.Fields(context), " "), ""))
+}
+
+// maxCompanionLines bounds the companions listed, after every directional
+// link.
+const maxCompanionLines = 3
+
+// maxLinkLines bounds each list of linked documents in a brief.
+const maxLinkLines = 6
+
+func refTargets(refs []Reference) []string {
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, ref.Target)
+	}
+	return out
+}
+
+// linkedFrom lists the documents that name path, from every relation's
+// references; built once per library.
+func (l *Library) linkedFrom(path string) []string {
+	if l.backrefs == nil {
+		l.backrefs = make(map[string][]string)
+		for src, rel := range l.Relations {
+			for _, ref := range rel.Refs {
+				l.backrefs[ref.Target] = append(l.backrefs[ref.Target], src)
+			}
+		}
+		for _, srcs := range l.backrefs {
+			sort.Strings(srcs)
+		}
+	}
+	return l.backrefs[path]
+}
+
+// linkLines describes linked documents one per line: path, ID and, where
+// it has one, the other document's headline.
+func (l *Library) linkLines(paths []string) []string {
+	var lines []string
+	for i, p := range paths {
+		if i >= maxLinkLines {
+			lines = append(lines, fmt.Sprintf("… %d more", len(paths)-i))
+			break
+		}
+		line := fmt.Sprintf("- %s (%s)", p, ShortID(RelationID(p)))
+		if rel := l.Relations[p]; rel != nil && rel.Brief != nil && rel.Brief.Headline.Text != "" {
+			line += ": " + clip(rel.Brief.Headline.Text, maxHeadlineInFinder)
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// unconfirmed lists the closest meetings below the gate with what was said
+// in the part judged, so an agent can weigh them without opening each. With
+// few confirmed meetings it reaches further down, since then they are most
+// of what is known; an agent given nothing went looking, and spent its
+// budget doing so. Without a store it returns nil and titles are listed.
+func (l *Library) unconfirmed(rel *Relation) []string {
+	if l.Store == nil {
+		return nil
+	}
+	floor, limit := minUnconfirmedP, maxUnconfirmed
+	if len(rel.Accepted()) < 3 {
+		floor, limit = sparseUnconfirmedP, sparseUnconfirmed
+	}
+	var near []*Verdict
+	for _, v := range rel.Links {
+		if !v.Accepted && v.P >= floor && l.Meetings[v.SessionID] != nil {
+			near = append(near, v)
+		}
+	}
+	sort.SliceStable(near, func(i, j int) bool { return near[i].P > near[j].P })
+	lines := []string{}
+	for i, v := range near {
+		if i >= limit {
+			break
+		}
+		m := l.Meetings[v.SessionID]
+		line := fmt.Sprintf("- %s %s (%s) p=%.2f", m.Date.Format("2006-01-02"), clip(m.Title, maxMeetingTitle), ShortID(m.NodeID), v.P)
+		if said := l.saidIn(m, v); said != "" {
+			line += ": " + said
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// saidIn is the summary of the part of a meeting a verdict judged.
+func (l *Library) saidIn(m *Meeting, v *Verdict) string {
+	if len(v.Ranges) == 0 {
+		return ""
+	}
+	children, err := l.Store.GetNeighbors(context.Background(), m.NodeID, graph.EdgeContains, graph.Outgoing)
+	if err != nil {
+		return ""
+	}
+	rg := v.Ranges[0]
+	for _, c := range children {
+		if c.Type != graph.NodeTopicSegment {
+			continue
+		}
+		if startOf(c) <= rg.End && endOf(c) >= rg.Start {
+			return clip(strings.Join(strings.Fields(c.Properties[graph.PropSummary]), " "), maxUnconfirmedSaid)
+		}
+	}
+	return ""
+}
+
+// Bounds on the unconfirmed meetings a brief names.
+const (
+	sparseUnconfirmedP = 0.3
+	sparseUnconfirmed  = 6
+	maxUnconfirmedSaid = 180
+)
+
+// RelationByID returns the relation whose node ID starts with prefix.
+func (l *Library) RelationByID(prefix string) *Relation {
+	for _, r := range l.Relations {
+		if strings.HasPrefix(RelationID(r.SubjectPath), prefix) {
+			return r
+		}
+	}
+	return nil
+}
+
+// Evidence finds a piece of evidence by ID across all relations.
+func (l *Library) Evidence(id string) (*Relation, *Evidence) {
+	for _, r := range l.Relations {
+		for i := range r.Evidence {
+			if r.Evidence[i].ID == id {
+				return r, &r.Evidence[i]
+			}
+		}
+	}
+	return nil, nil
+}
+
+// Bounds on what show prints, so expanding a citation never costs a file.
+const (
+	maxShowLines        = 60
+	maxShowChars        = 2500
+	showWrap            = 400
+	maxShowSaidChars    = 1500
+	showContextSeconds  = 15
+	showTurnsBefore     = 2
+	maxDocsForAMeeting  = 8
+	maxHeadlineInFinder = 140
+)
+
+// ShowEvidence expands a piece of evidence: a document quote to its section
+// as it is on disk now, a meeting quote to the turns around it. from skips
+// that many lines into a long section.
+func (l *Library) ShowEvidence(rel *Relation, e *Evidence, from int) (string, error) {
+	switch e.Kind {
+	case EvidenceDoc:
+		return l.showSection(rel, e, from)
+	default:
+		return l.showSaid(e)
+	}
+}
+
+func (l *Library) showSection(rel *Relation, e *Evidence, from int) (string, error) {
+	path := e.Path
+	if path == "" {
+		path = rel.SubjectPath
+	}
+	subj := l.Subjects[path]
+	if subj == nil {
+		return "", fmt.Errorf("%s is no longer indexed", path)
+	}
+	var sec *Section
+	for _, s := range subj.Sections {
+		if s.HeadingPath == e.HeadingPath && (e.Ordinal <= 1 || s.Ordinal == e.Ordinal) {
+			sec = s
+			break
+		}
+	}
+	if sec == nil {
+		return "", fmt.Errorf("section %q of %s is gone", e.HeadingPath, path)
+	}
+	note := ""
+	if e.SectionHash != "" && e.SectionHash != sec.Hash {
+		note = "\n(this section has changed since it was quoted)"
+	}
+	return l.renderSection(path, sec, note, from, e.ID), nil
+}
+
+// ShowSection prints a section as it is on disk now, bounded, continuing
+// from a line into a long one.
+func (l *Library) ShowSection(path string, sec *Section, from int) string {
+	return l.renderSection(path, sec, "", from, ShortID(sec.NodeID))
+}
+
+func (l *Library) renderSection(path string, sec *Section, note string, from int, id string) string {
+	header := fmt.Sprintf("%s § %s", path, sec.HeadingPath)
+	var lines []string
+	if l.Resolve != nil && sec.Line > 0 {
+		if abs := l.Resolve(path); abs != "" {
+			lines = readLines(abs, sec.Line, sec.EndLine)
+		}
+	}
+	if len(lines) == 0 {
+		// The file cannot be read; the indexed text of the section is
+		// still the section.
+		lines = strings.Split(sec.Text, "\n")
+	}
+	// A page of extracted text is often one line; shown whole it would not
+	// fit, and --from could not continue into it.
+	lines = wrapLines(lines, showWrap)
+	if from > 0 && from < len(lines) {
+		lines = lines[from:]
+	}
+	var b strings.Builder
+	shown := 0
+	for _, ln := range lines {
+		if shown >= maxShowLines || b.Len()+len(ln) > maxShowChars {
+			break
+		}
+		b.WriteString(ln)
+		b.WriteString("\n")
+		shown++
+	}
+	more := ""
+	if rest := len(lines) - shown; rest > 0 {
+		more = fmt.Sprintf("\n… %d more lines: show %s --from %d", rest, id, from+shown)
+	}
+	return fmt.Sprintf("%s%s%s\n\n%s%s", header, lineSpan(sec), note, strings.TrimRight(b.String(), "\n"), more)
+}
+
+// wrapLines breaks lines longer than width at the last space before it.
+func wrapLines(lines []string, width int) []string {
+	var out []string
+	for _, ln := range lines {
+		for len(ln) > width {
+			cut := strings.LastIndexByte(ln[:width], ' ')
+			if cut <= 0 {
+				cut = width
+				for cut > 0 && !utf8.RuneStart(ln[cut]) {
+					cut--
+				}
+				if cut == 0 {
+					_, cut = utf8.DecodeRuneInString(ln)
+				}
+			}
+			out = append(out, ln[:cut])
+			ln = strings.TrimLeft(ln[cut:], " ")
+		}
+		out = append(out, ln)
+	}
+	return out
+}
+
+// lineSpan is where a section sits in its file, or nothing for a page,
+// slide or part of a text-only document, whose heading already says where
+// it is.
+func lineSpan(sec *Section) string {
+	if sec.Line == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (lines %d–%d)", sec.Line, sec.EndLine)
+}
+
+// maxOutlineSections bounds an outline.
+const maxOutlineSections = 40
+
+// Outline lists a document's sections, each with the ID show expands, so an
+// agent can read the part it needs rather than the file.
+func (l *Library) Outline(subj *Subject) string {
+	last := 0
+	for _, sec := range subj.Sections {
+		last = max(last, sec.EndLine)
+	}
+	size := fmt.Sprintf("%s, lines 1–%d", plural(len(subj.Sections), "section"), last)
+	if subj.TextOnly {
+		size = plural(len(subj.Sections), "section") + ", text as indexed"
+	}
+	lines := []string{fmt.Sprintf("%s: %s (%s)", subj.Path, subj.Title, size)}
+	for i, sec := range subj.Sections {
+		if i >= maxOutlineSections {
+			lines = append(lines, fmt.Sprintf("… %d more sections", len(subj.Sections)-i))
+			break
+		}
+		lines = append(lines, fmt.Sprintf("%s § %s%s", ShortID(sec.NodeID), sec.HeadingPath, lineSpan(sec)))
+	}
+	lines = append(lines, "expand: show <id>")
+	return strings.Join(lines, "\n")
+}
+
+// SectionByID finds a section by its node ID.
+func (l *Library) SectionByID(id string) (*Subject, *Section) {
+	for _, subj := range l.Subjects {
+		for _, sec := range subj.Sections {
+			if sec.NodeID == id {
+				return subj, sec
+			}
+		}
+	}
+	return nil, nil
+}
+
+func (l *Library) showSaid(e *Evidence) (string, error) {
+	m := l.Meetings[e.SessionID]
+	if m == nil {
+		return "", fmt.Errorf("meeting %s is no longer indexed", e.SessionID)
+	}
+	header := fmt.Sprintf("%s %s (%s)", m.Date.Format("2006-01-02"), m.Title, ShortID(m.NodeID))
+	if l.Transcripts == nil {
+		return header + "\n" + e.Quote, nil
+	}
+	turns, err := l.Transcripts.Span(m, e.Start-showContextSeconds, e.End+showContextSeconds)
+	first, _, found := LocateQuote(turns, e.Quote)
+	if err == nil && !found {
+		// The anchor is only as good as the quote's match when the brief
+		// was written, and a decision's or follow-up's quote has no time at
+		// all; the recording itself says where the words are.
+		if all, err := l.Transcripts.Span(m, 0, math.MaxFloat64); err == nil {
+			if i, _, ok := LocateQuote(all, e.Quote); ok {
+				turns, first, found = all, i, true
+			}
+		}
+	}
+	if err != nil || len(turns) == 0 {
+		return header + "\n\"" + e.Quote + "\"\n(the recording could not be read)", nil
+	}
+	if found {
+		// Start a couple of turns before the quote, so it is never cut off
+		// by the bound on what is shown.
+		turns = turns[max(0, first-showTurnsBefore):]
+	}
+	var b strings.Builder
+	for _, t := range turns {
+		who := t.Speaker
+		if l.Speakers != nil {
+			who = l.Speakers.Name(m, t.Speaker)
+		}
+		line := fmt.Sprintf("%s %s: %s\n", clock(t.Start), who, strings.Join(strings.Fields(t.Text), " "))
+		if b.Len()+len(line) > maxShowSaidChars {
+			b.WriteString("…\n")
+			break
+		}
+		b.WriteString(line)
+	}
+	return header + "\n\n" + strings.TrimRight(b.String(), "\n"), nil
+}
+
+// readLines returns lines first..last (1-based, inclusive) of a file.
+func readLines(path string, first, last int) []string {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	var out []string
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	n := 0
+	for sc.Scan() {
+		n++
+		if n < first {
+			continue
+		}
+		if last > 0 && n > last {
+			break
+		}
+		out = append(out, sc.Text())
+	}
+	return out
+}
+
+// Bounds on a meeting's brief.
+const (
+	maxMeetingSummary   = 500
+	maxPartSummary      = 350
+	maxMeetingQuote     = 200
+	maxTopicsInBrief    = 12
+	maxDecisionsInBrief = 8
+	maxActionsInBrief   = 8
+)
+
+// MeetingBrief is what a meeting settled, in a budget: its summary, the
+// decisions with their quotes, its topics with the IDs show expands to what
+// was said, its follow-ups, and the documents it was judged to discuss.
+// Without a store, while a sync holds the graph, it is the documents only.
+func (l *Library) MeetingBrief(ctx context.Context, m *Meeting, budget int) string {
+	if budget <= 0 {
+		budget = DefaultBriefBudget
+	}
+	budget = min(budget, MaxBriefBudget)
+	header := fmt.Sprintf("%s %s (%s)", m.Date.Format("2006-01-02"), m.Title, ShortID(m.NodeID))
+	parts := []*briefPart{}
+	summary := briefPart{keep: -1}
+	if m.Summary != "" {
+		summary.lines = []string{clip(m.Summary, maxMeetingSummary)}
+	}
+	decided := briefPart{title: "decided:", keep: 3}
+	topics := briefPart{title: "topics (show an ID for what was said):", keep: 4}
+	actions := briefPart{title: "follow-ups:", keep: 2}
+	if l.Store != nil {
+		children, _ := l.Store.GetNeighbors(ctx, m.NodeID, graph.EdgeContains, graph.Outgoing)
+		var segs []*graph.Node
+		for _, c := range children {
+			switch c.Type {
+			case graph.NodeTopicSegment:
+				segs = append(segs, c)
+			case graph.NodeDecision:
+				if len(decided.lines) >= maxDecisionsInBrief {
+					continue
+				}
+				line := "- " + clip(c.Properties[graph.PropSummary], maxPartSummary)
+				if q := c.Properties[graph.PropQuote]; q != "" {
+					line += fmt.Sprintf(" — %q", clip(q, maxMeetingQuote))
+					if c.Properties["quote_verified"] != "true" {
+						line += " (quote not found in the transcript)"
+					}
+				}
+				decided.lines = append(decided.lines, line+" ["+ShortID(c.ID)+"]")
+			case graph.NodeActionItem:
+				if len(actions.lines) >= maxActionsInBrief || strings.EqualFold(c.Properties["status"], "done") {
+					continue
+				}
+				who := c.Properties[graph.PropAssignee]
+				if who == "" {
+					who = "unassigned"
+				}
+				due := ""
+				if d := c.Properties[graph.PropDueDate]; d != "" {
+					due = ", due " + d
+				}
+				actions.lines = append(actions.lines, fmt.Sprintf("- %s (%s%s) [%s]",
+					clip(c.Properties[graph.PropSummary], maxPartSummary), who, due, ShortID(c.ID)))
+			}
+		}
+		sort.Slice(segs, func(i, j int) bool { return startOf(segs[i]) < startOf(segs[j]) })
+		for i, sg := range segs {
+			if i >= maxTopicsInBrief {
+				topics.lines = append(topics.lines, fmt.Sprintf("… %d more", len(segs)-i))
+				break
+			}
+			topics.lines = append(topics.lines, fmt.Sprintf("- %s %s–%s %s: %s", ShortID(sg.ID),
+				clock(startOf(sg)), clock(endOf(sg)), sg.Name, clip(sg.Properties[graph.PropSummary], maxPartSummary)))
+		}
+	}
+	docs := briefPart{title: "documents discussed:", keep: 2}
+	type hit struct {
+		rel *Relation
+		p   float64
+	}
+	var hits []hit
+	for _, r := range l.Relations {
+		if v, ok := r.Links[m.SessionID]; ok && v.Accepted {
+			hits = append(hits, hit{r, v.P})
+		}
+	}
+	sort.Slice(hits, func(i, j int) bool { return hits[i].p > hits[j].p })
+	for i, h := range hits {
+		if i >= maxDocsForAMeeting {
+			docs.lines = append(docs.lines, fmt.Sprintf("… %d more", len(hits)-i))
+			break
+		}
+		docs.lines = append(docs.lines, "- "+l.FinderLine(h.rel))
+	}
+	parts = append(parts, &summary, &decided, &topics, &actions, &docs)
+	render := func() string {
+		out := []string{header}
+		for _, p := range parts {
+			if len(p.lines) == 0 {
+				continue
+			}
+			if p.title != "" {
+				out = append(out, p.title)
+			}
+			out = append(out, p.lines...)
+		}
+		if len(out) == 1 {
+			out = append(out, "nothing recorded about it yet")
+		}
+		return strings.Join(out, "\n")
+	}
+	for _, trim := range []struct {
+		p    *briefPart
+		keep int
+	}{{&docs, 2}, {&actions, 2}, {&topics, 4}, {&decided, 3}, {&docs, 0}, {&actions, 0}, {&topics, 2}} {
+		if EstimateTokens(render()) <= budget {
+			break
+		}
+		if len(trim.p.lines) > trim.keep {
+			trim.p.lines = trim.p.lines[:trim.keep]
+		}
+	}
+	return render()
+}
+
+func startOf(n *graph.Node) float64 {
+	v, _ := strconv.ParseFloat(n.Properties[graph.PropStartTime], 64)
+	return v
+}
+
+func endOf(n *graph.Node) float64 {
+	v, _ := strconv.ParseFloat(n.Properties[graph.PropEndTime], 64)
+	return v
+}
+
+// ShowSpan prints what was said in a meeting between two times, bounded,
+// from the given turn on, naming where to continue.
+func (l *Library) ShowSpan(m *Meeting, start, end float64, from int, id string) (string, error) {
+	header := fmt.Sprintf("%s %s (%s) %s–%s", m.Date.Format("2006-01-02"), m.Title, ShortID(m.NodeID), clock(start), clock(end))
+	if l.Transcripts == nil {
+		return header + "\n(the recording is not available)", nil
+	}
+	turns, err := l.Transcripts.Span(m, start, end)
+	if err != nil || len(turns) == 0 {
+		return header + "\n(the recording could not be read)", nil
+	}
+	if from > 0 && from < len(turns) {
+		turns = turns[from:]
+	}
+	var b strings.Builder
+	shown := 0
+	for _, t := range turns {
+		who := t.Speaker
+		if l.Speakers != nil {
+			who = l.Speakers.Name(m, t.Speaker)
+		}
+		line := fmt.Sprintf("%s %s: %s\n", clock(t.Start), who, strings.Join(strings.Fields(t.Text), " "))
+		if b.Len()+len(line) > maxShowChars {
+			break
+		}
+		b.WriteString(line)
+		shown++
+	}
+	more := ""
+	if rest := len(turns) - shown; rest > 0 {
+		more = fmt.Sprintf("\n… %d more turns: show %s --from %d", rest, id, from+shown)
+	}
+	return header + "\n\n" + strings.TrimRight(b.String(), "\n") + more, nil
+}
+
+// FinderLine is a relation in one line: its ID, document, headline, how many
+// meetings and when, and any freshness flags.
+func (l *Library) FinderLine(r *Relation) string {
+	head := "no brief yet"
+	if len(r.Accepted()) == 0 {
+		head = "no meeting confirmed"
+	}
+	if r.Brief != nil && r.Brief.Headline.Text != "" {
+		head = r.Brief.Headline.Text
+	}
+	head = clip(head, maxHeadlineInFinder)
+	var last time.Time
+	for _, v := range r.Accepted() {
+		if m := l.Meetings[v.SessionID]; m != nil && m.Date.After(last) {
+			last = m.Date
+		}
+	}
+	// The kind of document says what its brief holds: a chat's threads, a
+	// deck's claims, an incident's root cause.
+	kind := ""
+	if subj := l.Subjects[r.SubjectPath]; subj != nil {
+		if asset, _ := ClassifyAsset(subj); asset != AssetOther {
+			kind = string(asset) + " · "
+		}
+	}
+	line := fmt.Sprintf("%s doc %s: %s (%s%s %s)", ShortID(RelationID(r.SubjectPath)), r.SubjectPath, head, kind,
+		plural(len(r.Accepted()), "mtg"), strings.TrimSuffix(strings.TrimPrefix(lastSeen(last), "("), ")"))
+	if flags := append(Freshness(r, l.Subjects[r.SubjectPath], l.Meetings), l.DocFlags(r.SubjectPath)...); len(flags) > 0 {
+		line += " !" + strings.Join(flags, " !")
+	}
+	return line
+}

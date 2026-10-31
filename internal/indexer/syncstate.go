@@ -11,6 +11,16 @@ import (
 type BranchSyncState struct {
 	LastCommit string    `json:"last_commit,omitempty"`
 	Timestamp  time.Time `json:"timestamp"`
+	// MarkdownSectionsVersion is the markdown section format this branch's
+	// nodes have been brought up to. Per branch, because the backfill only
+	// rewrites the scope being written: done once on a feature branch, it
+	// must not mark the default branch done.
+	MarkdownSectionsVersion int `json:"markdown_sections_version,omitempty"`
+	// DocumentSectionsVersion is the same for PDFs, decks and other prose
+	// documents, and DocumentSectionsResume the last path the backfill
+	// reached, since it runs a bounded share per sync.
+	DocumentSectionsVersion int    `json:"document_sections_version,omitempty"`
+	DocumentSectionsResume  string `json:"document_sections_resume,omitempty"`
 }
 
 // SyncState tracks the last synchronization point for a repository.

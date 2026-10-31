@@ -115,6 +115,12 @@ func (h *DocExtractHandler) updateNodes(ctx context.Context, job *Job, result *d
 			continue
 		}
 		for _, node := range nodes {
+			// Only the file's own node takes the summary. Its sections hold
+			// the file's text, and overwriting them with the summary lost
+			// the words every quote is checked against.
+			if node.Properties["kind"] == "section" {
+				continue
+			}
 			applyExtraction(ctx, h.store, node, result)
 		}
 	}
@@ -216,6 +222,12 @@ func (h *ImageDescribeHandler) updateNodes(ctx context.Context, job *Job, result
 			continue
 		}
 		for _, node := range nodes {
+			// Only the file's own node takes the summary. Its sections hold
+			// the file's text, and overwriting them with the summary lost
+			// the words every quote is checked against.
+			if node.Properties["kind"] == "section" {
+				continue
+			}
 			applyExtraction(ctx, h.store, node, result)
 		}
 	}

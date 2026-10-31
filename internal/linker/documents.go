@@ -7,6 +7,10 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/graph"
 )
 
+// markdownLanguage is parser.LangMarkdown, spelled out to keep the linker
+// free of a dependency on the parser package.
+const markdownLanguage = "markdown"
+
 // linkDocuments scans NodeDocument DocComments for references to code entities
 // (function names, file paths, package names) and creates EdgeDocuments edges.
 func (l *Linker) linkDocuments(ctx context.Context) (int, error) {
@@ -44,6 +48,15 @@ func (l *Linker) linkDocuments(ctx context.Context) (int, error) {
 	seen := make(map[string]bool)
 
 	for _, doc := range docs {
+		// Markdown carries its own text now, but this matcher takes any
+		// code name of three letters or more as a bare substring ("new" in
+		// "renewal"), which over every section of every markdown file would
+		// bury the graph in false links and multiply this loop's cost.
+		// Markdown had no text here before, so skipping it keeps this phase
+		// as it was; linking prose to code needs matching built for prose.
+		if doc.Language == markdownLanguage {
+			continue
+		}
 		text := strings.ToLower(doc.DocComment)
 		if len(text) < 20 {
 			continue

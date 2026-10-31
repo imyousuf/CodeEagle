@@ -127,8 +127,30 @@ func commandError(what string, err error) error {
 // Applied after loading rather than to the file's text, so a value is expanded
 // exactly once and wherever it came from — file, environment or flag.
 func expandConfig(cfg *Config) error {
+	return expandConfigWith(cfg, false)
+}
+
+// secretPath reports whether a configuration path holds a credential.
+func secretPath(path string) bool {
+	p := strings.ToLower(path)
+	for _, suffix := range []string{"api_key", "apikey", "token", "secret", "password"} {
+		if strings.HasSuffix(p, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// expandConfigWith expands every string; with deferSecrets, a credential
+// fetched by a command is left empty instead of fetched. Readers of the
+// index (find, brief, show and the MCP server) never use one, and each
+// keyring lookup cost a quarter of a second on every call.
+func expandConfigWith(cfg *Config, deferSecrets bool) error {
 	cfg.resolved = make(map[string]resolvedValue)
 	return walkStrings(reflect.ValueOf(cfg), "config", func(path, value string) (string, error) {
+		if deferSecrets && secretPath(path) && cmdPattern.MatchString(value) {
+			return "", nil
+		}
 		out, err := expandValue(value, path)
 		if err != nil {
 			return "", err

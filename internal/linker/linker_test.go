@@ -1709,3 +1709,82 @@ func TestPhasesByName(t *testing.T) {
 		t.Errorf("empty selection returned phases=%d unknown=%v", len(phases), unknown)
 	}
 }
+
+// TestLinkDocumentsLeavesMarkdownAlone covers markdown sections, which now
+// carry their text. The documents phase matches any code name as a bare
+// substring, so letting it read every markdown section would link prose to
+// code on coincidences of spelling.
+func TestLinkDocumentsLeavesMarkdownAlone(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	addNodes(t, store,
+		&graph.Node{ID: "fn", Type: graph.NodeFunction, Name: "renew", FilePath: "lease.go"},
+		&graph.Node{ID: "md", Type: graph.NodeDocument, Name: "Leases", FilePath: "docs/leases.md",
+			Language: "markdown", DocComment: "We renew the lease every ten minutes."},
+		&graph.Node{ID: "txt", Type: graph.NodeDocument, Name: "notes.txt", FilePath: "notes.txt",
+			DocComment: "The renew function extends the lease."},
+	)
+
+	if _, err := NewLinker(store, nil, func(string, ...any) {}, false).linkDocuments(ctx); err != nil {
+		t.Fatalf("linkDocuments: %v", err)
+	}
+
+	md, _ := store.GetEdges(ctx, "md", graph.EdgeDocuments)
+	if len(md) != 0 {
+		t.Errorf("a markdown section was linked to code: %v", md)
+	}
+	txt, _ := store.GetEdges(ctx, "txt", graph.EdgeDocuments)
+	if len(txt) != 1 {
+		t.Errorf("a plain text document lost its link to code: %d edges", len(txt))
+	}
+}
+
+// TestDuplicatesAreOtherFilesNotPartsOfOne covers a markdown file, whose
+// sections carry the file's content hash. They were grouped as copies of
+// each other, so the file was marked a duplicate of its own section.
+func TestDuplicatesAreOtherFilesNotPartsOfOne(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	props := func(kind string) map[string]string {
+		p := map[string]string{graph.PropContentHash: "sha256:same", graph.PropMimeType: "text/markdown"}
+		if kind != "" {
+			p["kind"] = kind
+		}
+		return p
+	}
+	addNodes(t, store,
+		&graph.Node{ID: "a", Type: graph.NodeDocument, Name: "docs/a.md", FilePath: "docs/a.md", Properties: props("")},
+		&graph.Node{ID: "a-sec", Type: graph.NodeDocument, Name: "Limits", FilePath: "docs/a.md", Properties: props("section")},
+		&graph.Node{ID: "b", Type: graph.NodeDocument, Name: "docs/b.md", FilePath: "docs/b.md", Properties: props("")},
+		&graph.Node{ID: "b-sec", Type: graph.NodeDocument, Name: "Limits", FilePath: "docs/b.md", Properties: props("section")},
+	)
+	// What an earlier version wrote: a file marked a copy of its own section.
+	if err := store.AddEdge(ctx, &graph.Edge{ID: "stale", Type: graph.EdgeDuplicateOf, SourceID: "b", TargetID: "b-sec"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := NewLinker(store, nil, func(string, ...any) {}, false).linkDuplicates(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, id := range []string{"a", "a-sec", "b", "b-sec"} {
+		edges, _ := store.GetEdges(ctx, id, graph.EdgeDuplicateOf)
+		for _, e := range edges {
+			src, _ := store.GetNode(ctx, e.SourceID)
+			dst, _ := store.GetNode(ctx, e.TargetID)
+			if src != nil && dst != nil && src.FilePath == dst.FilePath {
+				t.Errorf("a part of %s is marked a duplicate of another part of it (%s -> %s)", src.FilePath, e.SourceID, e.TargetID)
+			}
+		}
+	}
+	edges, _ := store.GetEdges(ctx, "b", graph.EdgeDuplicateOf)
+	found := false
+	for _, e := range edges {
+		if e.SourceID == "b" && e.TargetID == "a" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("two identical files are no longer marked duplicates")
+	}
+}
