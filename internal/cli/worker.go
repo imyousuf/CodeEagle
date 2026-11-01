@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/imyousuf/CodeEagle/internal/watcher"
 	"github.com/imyousuf/CodeEagle/internal/worker"
 )
 
@@ -23,6 +24,10 @@ func newWorkerCmd() *cobra.Command {
 		settle      time.Duration
 		concurrency int
 		quiet       bool
+		watchAll    bool
+		hotWindow   time.Duration
+		scanEvery   time.Duration
+		maxWatches  int
 	)
 
 	cmd := &cobra.Command{
@@ -40,6 +45,15 @@ synced as itself rather than as its parent.
 Each sync runs as a separate ` + "`codeeagle sync`" + ` from that project's root and
 against that project's configuration, so it behaves exactly as if you had run
 it there by hand. One project's failure never stops the others being watched.
+
+Only directories in use hold an OS watch. A directory whose contents changed
+within --hot-window is watched; the rest are scanned every --scan-interval
+and watched again as soon as a scan finds a change, and a watched directory
+quiet for the whole window is released. The roots are always watched, so a
+new folder directly under one, such as a new meeting recording, is seen at
+once. Watches across all projects stay within --max-watches, by default a
+quarter of the system's limit. --watch-all watches every directory instead,
+for as long as the worker runs.
 
 Nothing is installed: this runs in the foreground until interrupted, and a
 sync already in flight is allowed to finish rather than being killed halfway.`,
@@ -70,7 +84,7 @@ sync already in flight is allowed to finish rather than being killed halfway.`,
 			}
 
 			if list {
-				return printProjects(out, projects)
+				return printProjects(out, projects, watchAll, hotWindow, scanEvery, maxWatches)
 			}
 
 			logf := func(format string, args ...any) {
@@ -86,6 +100,10 @@ sync already in flight is allowed to finish rather than being killed halfway.`,
 				MaxConcurrent: concurrency,
 				Log:           logf,
 				Runner:        runner,
+				WatchAll:      watchAll,
+				HotWindow:     hotWindow,
+				ScanInterval:  scanEvery,
+				MaxWatches:    maxWatches,
 			})
 
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
@@ -108,6 +126,13 @@ sync already in flight is allowed to finish rather than being killed halfway.`,
 	cmd.Flags().IntVar(&concurrency, "concurrency", worker.DefaultMaxConcurrent,
 		"how many projects may sync at the same time")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "only report failures")
+	cmd.Flags().BoolVar(&watchAll, "watch-all", false, "watch every directory for as long as the worker runs, instead of only those in use")
+	cmd.Flags().DurationVar(&hotWindow, "hot-window", watcher.DefaultHotWindow,
+		"watch a directory whose contents changed within this long; scan the rest")
+	cmd.Flags().DurationVar(&scanEvery, "scan-interval", watcher.DefaultScanInterval,
+		"how often directories that are not watched are scanned for changes")
+	cmd.Flags().IntVar(&maxWatches, "max-watches", 0,
+		"most directories watched across all projects (default: a quarter of the system's limit)")
 	return cmd
 }
 
@@ -146,7 +171,8 @@ func excludeProjects(projects []worker.Project, exclude []string) []worker.Proje
 	return out
 }
 
-func printProjects(out interface{ Write([]byte) (int, error) }, projects []worker.Project) error {
+func printProjects(out interface{ Write([]byte) (int, error) }, projects []worker.Project,
+	watchAll bool, hotWindow, scanEvery time.Duration, maxWatches int) error {
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "PROJECT\tROOT\tWATCHES")
 	fmt.Fprintln(w, "-------\t----\t-------")
@@ -171,5 +197,35 @@ func printProjects(out interface{ Write([]byte) (int, error) }, projects []worke
 
 	fmt.Fprintf(out, "\n%d project(s), %d director(ies) after removing nested duplicates.\n",
 		len(projects), len(worker.WatchRoots(projects)))
+
+	// What the worker would hold if it started now.
+	if maxWatches <= 0 {
+		maxWatches = watcher.DefaultMaxWatches()
+	}
+	if scanEvery <= 0 {
+		scanEvery = watcher.DefaultScanInterval
+	}
+	var totalWatched, totalScanned int
+	fmt.Fprintln(out)
+	for _, p := range projects {
+		watched, scanned, err := watcher.Survey(watcher.WatcherConfig{Paths: worker.WatchPaths(p), ExcludePatterns: p.Excludes},
+			time.Now(), hotWindow)
+		if err != nil {
+			fmt.Fprintf(out, "%s: %v\n", p.Name, err)
+			continue
+		}
+		if watchAll {
+			watched, scanned = watched+scanned, 0
+		}
+		totalWatched += watched
+		totalScanned += scanned
+		fmt.Fprintf(out, "%s: %d director(ies) watched, %d scanned\n", p.Name, watched, scanned)
+	}
+	if watchAll {
+		fmt.Fprintf(out, "Starting now, the worker would watch %d directories (--watch-all).\n", totalWatched)
+		return nil
+	}
+	fmt.Fprintf(out, "Starting now, the worker would watch %d directories changed within %s and scan %d more every %s; "+
+		"watch budget %d.\n", totalWatched, worker.HumanDuration(hotWindow), totalScanned, worker.HumanDuration(scanEvery), maxWatches)
 	return nil
 }

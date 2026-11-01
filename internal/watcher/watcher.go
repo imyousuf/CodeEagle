@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -48,6 +49,13 @@ type WatcherConfig struct {
 	Paths             []string
 	ExcludePatterns   []string
 	GitIgnorePatterns []string
+	// Tiering, when set, holds a watch only on directories in use and finds
+	// changes in the rest by scanning them; see Tiering. Unset, every
+	// directory under Paths is watched for as long as the watcher runs.
+	Tiering *Tiering
+	// Logf receives what the watcher has to report: a directory it could not
+	// watch, a watch budget reached. Nil discards it.
+	Logf func(format string, args ...any)
 }
 
 // Watcher watches file system paths for changes and emits debounced events.
@@ -57,6 +65,17 @@ type Watcher struct {
 	fsw     *fsnotify.Watcher
 	mu      sync.Mutex
 	closed  bool
+
+	// addWatch and removeWatch default to the fsnotify watcher's; tests
+	// replace them to make a watch fail.
+	addWatch    func(string) error
+	removeWatch func(string) error
+
+	// tmu guards the tiering state and the statistics.
+	tmu   sync.Mutex
+	hot   map[string]*dirState
+	cold  map[string]*dirState
+	stats Stats
 }
 
 // NewWatcher creates a new file system watcher with the given configuration.
@@ -86,19 +105,60 @@ func (w *Watcher) Start(ctx context.Context) (<-chan Event, error) {
 
 	w.mu.Lock()
 	w.fsw = fsw
+	if w.addWatch == nil {
+		w.addWatch = fsw.Add
+	}
+	if w.removeWatch == nil {
+		w.removeWatch = fsw.Remove
+	}
 	w.mu.Unlock()
 
-	// Recursively add directories.
-	for _, root := range w.cfg.Paths {
-		if err := w.addRecursive(root); err != nil {
-			fsw.Close()
-			return nil, err
+	out := make(chan Event, 100)
+	if w.cfg.Tiering != nil {
+		w.startTiered()
+		go w.scanLoop(ctx, out)
+	} else {
+		for _, root := range w.cfg.Paths {
+			w.addRecursive(root)
 		}
 	}
-
-	out := make(chan Event, 100)
 	go w.eventLoop(ctx, fsw, out)
 	return out, nil
+}
+
+// Stats reports how many directories are watched and scanned, and what has
+// failed. Without tiering, Scanned is always zero.
+func (w *Watcher) Stats() Stats {
+	w.tmu.Lock()
+	defer w.tmu.Unlock()
+	st := w.stats
+	if w.cfg.Tiering != nil {
+		st.Watched, st.Scanned = len(w.hot), len(w.cold)
+	}
+	return st
+}
+
+func (w *Watcher) logf(format string, args ...any) {
+	if w.cfg.Logf != nil {
+		w.cfg.Logf(format, args...)
+	}
+}
+
+// addFailed records a directory that could not be watched. Only the first is
+// logged: past the system's limit every remaining directory fails the same
+// way, and thousands of identical lines say less than one with a count.
+func (w *Watcher) addFailed(dir string, err error) {
+	w.tmu.Lock()
+	w.stats.AddFailures++
+	first := w.stats.AddFailures == 1
+	if first {
+		w.stats.FirstAddError = fmt.Sprintf("%s: %v", dir, err)
+	}
+	w.tmu.Unlock()
+	if first {
+		w.logf("Warning: cannot watch %s: %v; directories that cannot be watched are not seen to change "+
+			"(see fs.inotify.max_user_watches, or run the worker with tiering)", dir, err)
+	}
 }
 
 // Close shuts down the watcher and releases resources.
@@ -117,8 +177,13 @@ func (w *Watcher) Close() error {
 	return nil
 }
 
-func (w *Watcher) addRecursive(root string) error {
-	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+// addRecursive watches every directory under root that is not excluded.
+//
+// A directory that cannot be watched no longer ends the walk. It used to:
+// the first failure, typically the system's watch limit, returned from the
+// walk, so every directory after it went unwatched without a word.
+func (w *Watcher) addRecursive(root string) {
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil // skip inaccessible entries
 		}
@@ -128,7 +193,14 @@ func (w *Watcher) addRecursive(root string) error {
 		if w.matcher.Match(path) {
 			return filepath.SkipDir
 		}
-		return w.fsw.Add(path)
+		if err := w.addWatch(path); err != nil {
+			w.addFailed(path, err)
+			return nil
+		}
+		w.tmu.Lock()
+		w.stats.Watched++
+		w.tmu.Unlock()
+		return nil
 	})
 }
 
@@ -188,8 +260,15 @@ func (w *Watcher) eventLoop(ctx context.Context, fsw *fsnotify.Watcher, out chan
 			// If a new directory is created, add it to the watcher.
 			if op == Create {
 				if info, err := os.Stat(fsEvent.Name); err == nil && info.IsDir() {
-					_ = w.addRecursive(fsEvent.Name)
+					if w.cfg.Tiering != nil {
+						w.addTree(fsEvent.Name)
+					} else {
+						w.addRecursive(fsEvent.Name)
+					}
 				}
+			}
+			if w.cfg.Tiering != nil {
+				w.touch(fsEvent.Name, op)
 			}
 
 			// Debounce: reset the timer for this path.

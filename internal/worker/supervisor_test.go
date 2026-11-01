@@ -292,3 +292,14 @@ func TestBothRunWhenBothChanged(t *testing.T) {
 		t.Errorf("meetings sync ran %v, want once", got)
 	}
 }
+
+func TestHumanDuration(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		14 * 24 * time.Hour: "14 days", 24 * time.Hour: "1 day", 10 * time.Minute: "10m",
+		90 * time.Second: "1m30s", 2 * time.Hour: "2h", 36 * time.Hour: "36h",
+	} {
+		if got := HumanDuration(d); got != want {
+			t.Errorf("HumanDuration(%s) = %q, want %q", d, got, want)
+		}
+	}
+}
