@@ -34,6 +34,10 @@ func newServiceInstallCmd() *cobra.Command {
 		settle      string
 		concurrency int
 		exclude     []string
+		watchAll    bool
+		hotWindow   string
+		scanEvery   string
+		maxWatches  int
 	)
 
 	cmd := &cobra.Command{
@@ -54,6 +58,18 @@ func newServiceInstallCmd() *cobra.Command {
 			}
 			for _, name := range exclude {
 				workerArgs = append(workerArgs, "--exclude-project", name)
+			}
+			if watchAll {
+				workerArgs = append(workerArgs, "--watch-all")
+			}
+			if hotWindow != "" {
+				workerArgs = append(workerArgs, "--hot-window", hotWindow)
+			}
+			if scanEvery != "" {
+				workerArgs = append(workerArgs, "--scan-interval", scanEvery)
+			}
+			if maxWatches > 0 {
+				workerArgs = append(workerArgs, "--max-watches", fmt.Sprint(maxWatches))
 			}
 
 			plan, err := service.Build(service.Config{Args: workerArgs})
@@ -85,6 +101,10 @@ func newServiceInstallCmd() *cobra.Command {
 	cmd.Flags().IntVar(&concurrency, "concurrency", 0, "pass --concurrency to the worker")
 	cmd.Flags().StringSliceVar(&exclude, "exclude-project", nil,
 		"projects the service should not watch (repeatable)")
+	cmd.Flags().BoolVar(&watchAll, "watch-all", false, "pass --watch-all to the worker")
+	cmd.Flags().StringVar(&hotWindow, "hot-window", "", "pass --hot-window to the worker (e.g. 168h)")
+	cmd.Flags().StringVar(&scanEvery, "scan-interval", "", "pass --scan-interval to the worker (e.g. 5m)")
+	cmd.Flags().IntVar(&maxWatches, "max-watches", 0, "pass --max-watches to the worker")
 	return cmd
 }
 

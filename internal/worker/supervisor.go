@@ -54,6 +54,16 @@ type Options struct {
 	// Now supplies the current time. Nil means time.Now. It exists so the
 	// settle and backoff rules can be tested without sleeping.
 	Now func() time.Time
+
+	// WatchAll holds a watch on every directory for as long as the worker
+	// runs, as it once did. Otherwise only directories changed within
+	// HotWindow are watched and the rest are scanned every ScanInterval,
+	// within MaxWatches across all projects; see watcher.Tiering.
+	WatchAll     bool
+	HotWindow    time.Duration
+	ScanInterval time.Duration
+	// MaxWatches is the watch budget; zero means watcher.DefaultMaxWatches.
+	MaxWatches int
 }
 
 // Supervisor watches every project's files and syncs a project when its own
@@ -109,13 +119,28 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	// merged exclude would stop another project's directory being watched at
 	// all -- a miss nothing downstream can recover from.
 	events := make(chan string, 256)
-	var watched int
+	var budget *watcher.Budget
+	if !s.opts.WatchAll {
+		max := s.opts.MaxWatches
+		if max <= 0 {
+			max = watcher.DefaultMaxWatches()
+		}
+		budget = watcher.NewBudget(max)
+	}
+	var watchers []*watcher.Watcher
 	for _, p := range s.projects {
 		paths := WatchPaths(p)
-		w, err := watcher.NewWatcher(watcher.WatcherConfig{
+		cfg := watcher.WatcherConfig{
 			Paths:           paths,
 			ExcludePatterns: p.Excludes,
-		})
+			Logf: func(format string, args ...any) {
+				s.opts.Log("%s: "+format, append([]any{p.Name}, args...)...)
+			},
+		}
+		if budget != nil {
+			cfg.Tiering = &watcher.Tiering{HotWindow: s.opts.HotWindow, ScanInterval: s.opts.ScanInterval, Budget: budget}
+		}
+		w, err := watcher.NewWatcher(cfg)
 		if err != nil {
 			return fmt.Errorf("create watcher for %s: %w", p.Name, err)
 		}
@@ -125,7 +150,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("start watcher for %s: %w", p.Name, err)
 		}
-		watched += len(paths)
+		watchers = append(watchers, w)
 
 		s.wg.Add(1)
 		go func() {
@@ -140,11 +165,18 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		}()
 	}
 
-	s.opts.Log("Watching %d director(ies) for %d project(s); settle %s, %d sync(s) at a time",
-		watched, len(s.projects), s.opts.Settle, s.opts.MaxConcurrent)
+	last := s.logWatches(watchers, budget, watcher.Stats{}, true)
 
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
+	// What is watched changes as directories go quiet or come back into use;
+	// it is reported when it does, at most once a scan.
+	statsEvery := s.opts.ScanInterval
+	if statsEvery <= 0 {
+		statsEvery = watcher.DefaultScanInterval
+	}
+	statsTicker := time.NewTicker(statsEvery)
+	defer statsTicker.Stop()
 
 	for {
 		select {
@@ -162,8 +194,63 @@ func (s *Supervisor) Run(ctx context.Context) error {
 
 		case <-ticker.C:
 			s.dispatch(ctx)
+
+		case <-statsTicker.C:
+			last = s.logWatches(watchers, budget, last, false)
 		}
 	}
+}
+
+// logWatches reports how many directories are watched and scanned across
+// every project, when that has changed since prev or first is set, and
+// returns the totals.
+func (s *Supervisor) logWatches(watchers []*watcher.Watcher, budget *watcher.Budget, prev watcher.Stats, first bool) watcher.Stats {
+	var total watcher.Stats
+	for _, w := range watchers {
+		st := w.Stats()
+		total.Watched += st.Watched
+		total.Scanned += st.Scanned
+		total.AddFailures += st.AddFailures
+	}
+	if !first && total.Watched == prev.Watched && total.Scanned == prev.Scanned && total.AddFailures == prev.AddFailures {
+		return total
+	}
+	failed := ""
+	if total.AddFailures > 0 {
+		failed = fmt.Sprintf("; %d could not be watched", total.AddFailures)
+	}
+	if budget == nil {
+		s.opts.Log("Watching %d director(ies) for %d project(s)%s; settle %s, %d sync(s) at a time",
+			total.Watched, len(s.projects), failed, s.opts.Settle, s.opts.MaxConcurrent)
+		return total
+	}
+	scan := s.opts.ScanInterval
+	if scan <= 0 {
+		scan = watcher.DefaultScanInterval
+	}
+	s.opts.Log("Watching %d director(ies) and scanning %d more every %s for %d project(s) (watch budget %d)%s; "+
+		"settle %s, %d sync(s) at a time",
+		total.Watched, total.Scanned, HumanDuration(scan), len(s.projects), budget.Max(), failed, s.opts.Settle, s.opts.MaxConcurrent)
+	return total
+}
+
+// HumanDuration writes a duration the way a person would: whole days as
+// days, anything shorter as Go writes it, without trailing zero units.
+func HumanDuration(d time.Duration) string {
+	if d >= 24*time.Hour && d%(24*time.Hour) == 0 {
+		days := int(d / (24 * time.Hour))
+		if days == 1 {
+			return "1 day"
+		}
+		return fmt.Sprintf("%d days", days)
+	}
+	s := d.String()
+	for _, unit := range []string{"m0s", "h0m"} {
+		if strings.HasSuffix(s, unit) {
+			s = strings.TrimSuffix(s, unit[1:])
+		}
+	}
+	return s
 }
 
 // WatchPaths returns every directory watched on behalf of one project:

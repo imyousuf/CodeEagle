@@ -111,6 +111,7 @@ codeeagle sync [--full]                 # Sync knowledge graph (incremental or f
 codeeagle watch                         # Start watching and building/updating the knowledge graph
 codeeagle worker [--once|--list]        # Watch every registered project and sync the one that changed
 codeeagle worker --project NAME         # ...limited to one project
+codeeagle worker --hot-window D --scan-interval D --max-watches N   # watch only directories in use
 codeeagle service install [--dry-run]   # Run the worker at login (systemd user unit / launchd agent)
 codeeagle service status                # Is it installed, is it running
 codeeagle service uninstall             # Stop it and remove it
@@ -400,6 +401,18 @@ its shape:
   forever. The guard is on the path rather than on timing, because no quiet
   period distinguishes "the user saved a file" from "the sync is still
   flushing".
+
+**Only directories in use hold a watch.** The operating system watches
+directories, one watch per directory for as long as it is held, and watching
+whole trees held about 1,300 on one machine, mostly on photo albums untouched
+for years and on one folder per past meeting recording. A directory changed
+within `--hot-window` (14 days) is watched; the rest are scanned every
+`--scan-interval` (10 minutes) and watched again when a scan finds a change;
+a watched directory quiet for the window is released; repository roots are
+always watched, so a new recording folder is seen at once. Watches across
+projects stay within a budget, a quarter of the system's limit; that machine
+went to 153 watches. A directory the system refuses to watch no longer ends
+the walk silently: it is counted and logged once.
 
 Changes are coalesced: a project syncs once its own files have been quiet for
 `--settle`, so a build or a checkout costs one sync rather than hundreds. A

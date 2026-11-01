@@ -165,6 +165,33 @@ This is worth setting. An excluded directory is never even given a filesystem
 watch, so a large `node_modules` costs nothing rather than thousands of
 watches.
 
+### Only directories in use hold a watch
+
+The operating system watches directories, not files: one watch per directory
+reports changes to everything in it. Watching every directory of a large tree
+for as long as the worker runs holds thousands of watches, almost all on
+directories nothing has touched in months: photo albums, one folder per past
+meeting recording. On macOS each watch is also an open file.
+
+So the worker watches only what is in use:
+
+- A directory whose contents changed within the **hot window** (14 days by
+  default) is watched, and a change there is seen at once.
+- Every other directory is **scanned** every 10 minutes, which costs one
+  `stat` per entry and nothing in between. A scan that finds a change syncs
+  the project and starts watching that directory again.
+- A watched directory that stays quiet for the whole window is released back
+  to scanning.
+- The directories listed in `repositories:` are always watched, so a new
+  folder directly under one, such as a new meeting recording, is seen at once.
+- Watches across all projects stay within a **budget**, by default a quarter
+  of the system's limit (`fs.inotify.max_user_watches` on Linux). When it is
+  full, the directories changed longest ago are scanned instead, and the log
+  says so once.
+
+`codeeagle worker --list` shows, per project, how many directories would be
+watched and how many scanned. `--watch-all` restores watching everything.
+
 ---
 
 ## 4. Running it
@@ -290,6 +317,10 @@ codeeagle service install --settle 60s --concurrency 2
 | `--concurrency` | `1` | How many projects sync at once. One by default because a sync can saturate a GPU or spend money on a hosted model. |
 | `--project` | all | Limit to named projects. |
 | `--quiet` | off | Report only failures. |
+| `--hot-window` | `336h` (14 days) | Watch a directory whose contents changed within this long; scan the rest. |
+| `--scan-interval` | `10m` | How often directories that are not watched are scanned. A change there is seen at most this late. |
+| `--max-watches` | a quarter of the system's limit | Most directories watched across all projects. |
+| `--watch-all` | off | Watch every directory for as long as the worker runs, as before tiering. |
 
 A project whose sync fails is retried with an exponentially growing delay, so a
 broken configuration cannot spin.
@@ -313,15 +344,17 @@ tail -f ~/Library/Logs/codeeagle-worker.log
 A healthy log looks like this:
 
 ```
-18:54:31 Watching 7 director(ies) for 4 project(s); settle 30s, 1 sync(s) at a time
+18:54:31 Watching 153 director(ies) and scanning 1147 more every 10m for 3 project(s) (watch budget 16384); settle 30s, 1 sync(s) at a time
 19:04:31 Syncing agentic-test-runner (/home/you/projects/agentic-test-runner)
          Sync complete: 1 files indexed, 5629 nodes, 18758 edges
 19:06:48 Synced agentic-test-runner in 2m17s
 ```
 
-`Watching ... director(ies) for ... project(s)` appears at startup; if the
-number of projects is lower than you expect, check `codeeagle worker --list`
-for skipped entries.
+`Watching ... director(ies) and scanning ... more` appears at startup, and
+again whenever directories move between the two; if the number of projects is
+lower than you expect, check `codeeagle worker --list` for skipped entries. A
+line saying a directory could not be watched means the system's watch limit
+was reached: the worker carries on, but that directory is not seen to change.
 
 ---
 
