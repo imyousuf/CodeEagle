@@ -133,6 +133,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		cfg := watcher.WatcherConfig{
 			Paths:           paths,
 			ExcludePatterns: p.Excludes,
+			Includes:        p.Includes,
 			Logf: func(format string, args ...any) {
 				s.opts.Log("%s: "+format, append([]any{p.Name}, args...)...)
 			},

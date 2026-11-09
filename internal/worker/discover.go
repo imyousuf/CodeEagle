@@ -49,6 +49,10 @@ type Project struct {
 	// watcher skips excluded directories when adding watches -- keep a
 	// node_modules from consuming thousands of inotify watches.
 	Excludes []string
+	// Includes are the repositories' include patterns, keyed by repository:
+	// a change to a file they leave out cannot change the graph, so it does
+	// not wake the worker.
+	Includes map[string][]string
 }
 
 // Skipped records a registry entry the worker could not use, so that a silent
@@ -68,7 +72,8 @@ type Skipped struct {
 // in its own working directory, where those commands belong.
 type narrowConfig struct {
 	Repositories []struct {
-		Path string `yaml:"path"`
+		Path    string   `yaml:"path"`
+		Include []string `yaml:"include"`
 	} `yaml:"repositories"`
 	Watch struct {
 		Exclude []string `yaml:"exclude"`
@@ -162,6 +167,12 @@ func load(e config.ProjectEntry) (*Project, error) {
 			continue
 		}
 		p.Repos = append(p.Repos, dir)
+		if len(r.Include) > 0 {
+			if p.Includes == nil {
+				p.Includes = make(map[string][]string)
+			}
+			p.Includes[dir] = r.Include
+		}
 	}
 
 	// Meeting recordings, when this project indexes any. Absent

@@ -135,6 +135,7 @@ func RunSync(cmdCtx context.Context, cfg *config.Config, paths []string, full, v
 	wcfg := &watcher.WatcherConfig{
 		Paths:           paths,
 		ExcludePatterns: cfg.Watch.Exclude,
+		Includes:        cfg.RepositoryIncludes(),
 	}
 
 	// Create LLM client if auto-summarize or auto-link is enabled.

@@ -56,6 +56,9 @@ type WatcherConfig struct {
 	// Logf receives what the watcher has to report: a directory it could not
 	// watch, a watch budget reached. Nil discards it.
 	Logf func(format string, args ...any)
+	// Includes limits, per repository root, the files whose changes are
+	// reported to those named by its patterns; see GitIgnoreMatcher.SetIncludes.
+	Includes map[string][]string
 }
 
 // Watcher watches file system paths for changes and emits debounced events.
@@ -88,6 +91,7 @@ func NewWatcher(cfg WatcherConfig) (*Watcher, error) {
 	if err := matcher.LoadPatterns(); err != nil {
 		return nil, err
 	}
+	matcher.SetIncludes(cfg.Includes)
 
 	return &Watcher{
 		cfg:     cfg,
@@ -240,8 +244,14 @@ func (w *Watcher) eventLoop(ctx context.Context, fsw *fsnotify.Watcher, out chan
 				return
 			}
 
-			// Filter ignored paths.
+			// Filter ignored paths, and files a repository's include
+			// patterns leave out. A path that cannot be read is taken for a
+			// file: a removed directory's event is lost, a removed file's is
+			// filtered the way its creation was.
 			if w.matcher.Match(fsEvent.Name) {
+				continue
+			}
+			if info, err := os.Stat(fsEvent.Name); (err != nil || !info.IsDir()) && !w.matcher.Included(fsEvent.Name) {
 				continue
 			}
 

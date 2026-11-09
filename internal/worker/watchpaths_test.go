@@ -134,3 +134,21 @@ func TestSessionsDirMayBeAList(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoverReadsIncludePatterns(t *testing.T) {
+	base := t.TempDir()
+	docs, downloads := filepath.Join(base, "Documents"), filepath.Join(base, "Downloads")
+	body := "repositories:\n  - path: " + docs + "\n  - path: " + downloads + "\n    include: ['*.md', '*.pdf']\n"
+	root, cfgDir := writeProject(t, body, docs, downloads)
+
+	p, err := load(config.ProjectEntry{Name: "t", Root: root, ConfigDir: cfgDir})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := p.Includes[downloads]; len(got) != 2 || got[0] != "*.md" {
+		t.Errorf("Includes = %v; want Downloads limited to *.md and *.pdf", p.Includes)
+	}
+	if _, ok := p.Includes[docs]; ok {
+		t.Error("a repository without include patterns was given some")
+	}
+}
