@@ -383,6 +383,23 @@ type RepositoryConfig struct {
 	Path string `mapstructure:"path" yaml:"path"`
 	// Type is the repository type (monorepo or single).
 	Type string `mapstructure:"type" yaml:"type"`
+	// Include, when set, limits the files indexed here to those whose name
+	// matches one of these patterns ("*.md", "*.pdf"), case-insensitively.
+	// Directories are still walked, so a match deep in the tree is found;
+	// watch.exclude still applies on top. Unset, every file is a candidate.
+	Include []string `mapstructure:"include" yaml:"include,omitempty"`
+}
+
+// RepositoryIncludes returns each repository's include patterns, keyed by
+// its cleaned path, for the repositories that have any.
+func (c *Config) RepositoryIncludes() map[string][]string {
+	out := make(map[string][]string)
+	for _, r := range c.Repositories {
+		if len(r.Include) > 0 {
+			out[filepath.Clean(r.Path)] = r.Include
+		}
+	}
+	return out
 }
 
 // WatchConfig holds file watching configuration.

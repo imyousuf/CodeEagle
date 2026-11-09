@@ -12,6 +12,62 @@ type GitIgnoreMatcher struct {
 	repoRoots       []string
 	excludePatterns []string
 	rules           []ignoreRule
+	// includes holds, per repository root, the only file names indexed
+	// there; see SetIncludes.
+	includes map[string][]string
+}
+
+// SetIncludes limits, per repository root, the files that are indexed to
+// those whose name matches one of the patterns, case-insensitively. It never
+// excludes a directory: those are matched with Match, and a file the
+// patterns admit may sit anywhere below.
+func (m *GitIgnoreMatcher) SetIncludes(includes map[string][]string) {
+	m.includes = make(map[string][]string, len(includes))
+	for root, patterns := range includes {
+		lower := make([]string, 0, len(patterns))
+		for _, p := range patterns {
+			if p = strings.ToLower(strings.TrimSpace(p)); p != "" {
+				lower = append(lower, p)
+			}
+		}
+		if len(lower) > 0 {
+			m.includes[filepath.Clean(root)] = lower
+		}
+	}
+}
+
+// MatchFile reports whether a file is left out: excluded by the patterns, as
+// Match decides, or not admitted by the include patterns of the repository it
+// is in. Use it for files and Match for directories, since include patterns
+// name files and would otherwise prune every directory.
+func (m *GitIgnoreMatcher) MatchFile(path string) bool {
+	return m.Match(path) || !m.Included(path)
+}
+
+// Included reports whether a file's name is admitted by the include patterns
+// of the innermost repository containing it; a file in a repository without
+// include patterns always is.
+func (m *GitIgnoreMatcher) Included(path string) bool {
+	if len(m.includes) == 0 {
+		return true
+	}
+	var patterns []string
+	best := -1
+	for root, ps := range m.includes {
+		if (path == root || strings.HasPrefix(path, root+string(filepath.Separator))) && len(root) > best {
+			best, patterns = len(root), ps
+		}
+	}
+	if patterns == nil {
+		return true
+	}
+	name := strings.ToLower(filepath.Base(path))
+	for _, p := range patterns {
+		if ok, _ := filepath.Match(p, name); ok {
+			return true
+		}
+	}
+	return false
 }
 
 type ignoreRule struct {

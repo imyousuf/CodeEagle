@@ -477,7 +477,7 @@ func (w *Watcher) emitChanges(dir string, prev signature, emit func(Event) bool)
 	since := prev.latest()
 	for _, e := range entries {
 		path := filepath.Join(dir, e.Name())
-		if w.matcher.Match(path) {
+		if w.matcher.Match(path) || (!e.IsDir() && !w.matcher.Included(path)) {
 			continue
 		}
 		fi, err := e.Info()

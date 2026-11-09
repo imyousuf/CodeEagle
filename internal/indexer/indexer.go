@@ -89,6 +89,9 @@ func NewIndexer(cfg IndexerConfig) *Indexer {
 
 	matcher := watcher.NewGitIgnoreMatcher(paths, allPatterns)
 	_ = matcher.LoadPatterns()
+	if cfg.WatcherConfig != nil {
+		matcher.SetIncludes(cfg.WatcherConfig.Includes)
+	}
 
 	logFn := cfg.Logger
 	if logFn == nil {
@@ -455,8 +458,8 @@ func (idx *Indexer) IndexDirectory(ctx context.Context, dirPath string) error {
 			return nil
 		}
 
-		// Skip ignored files.
-		if idx.matcher.Match(path) {
+		// Skip ignored files, and what include patterns leave out.
+		if idx.matcher.MatchFile(path) {
 			return nil
 		}
 
@@ -503,7 +506,7 @@ func (idx *Indexer) countIndexableFiles(dirPath string) int {
 			}
 			return nil
 		}
-		if idx.matcher.Match(path) {
+		if idx.matcher.MatchFile(path) {
 			return nil
 		}
 		count++

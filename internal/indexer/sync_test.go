@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/internal/graph"
@@ -239,5 +241,39 @@ func TestSyncKeepsDirectoryNodes(t *testing.T) {
 	}
 	if got := dirs(); !got["notes/plans"] || got["notes/old"] {
 		t.Errorf("after removing old/: directory nodes = %v", got)
+	}
+}
+
+// TestWalkKeepsOnlyIncludedFiles covers a repository whose include patterns
+// name the files indexed there: matching files are found at any depth, and
+// nothing else is.
+func TestWalkKeepsOnlyIncludedFiles(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "Downloads")
+	for _, f := range []string{"a.md", "b.jpg", "sub/c.pdf", "sub/d.zip", "sub/deep/E.DOCX", "sub/deep/f.mp4"} {
+		path := filepath.Join(root, f)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := watcher.NewGitIgnoreMatcher([]string{root}, nil)
+	if err := m.LoadPatterns(); err != nil {
+		t.Fatal(err)
+	}
+	m.SetIncludes(map[string][]string{root: {"*.md", "*.pdf", "*.docx"}})
+	results, _, err := parallelWalkDir(context.Background(), root, m, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, r := range results {
+		rel, _ := filepath.Rel(root, r.absPath)
+		got = append(got, filepath.ToSlash(rel))
+	}
+	sort.Strings(got)
+	if strings.Join(got, ",") != "a.md,sub/c.pdf,sub/deep/E.DOCX" {
+		t.Errorf("walked %v; want only the included files, at any depth", got)
 	}
 }

@@ -208,7 +208,7 @@ func printProjects(out interface{ Write([]byte) (int, error) }, projects []worke
 	var totalWatched, totalScanned int
 	fmt.Fprintln(out)
 	for _, p := range projects {
-		watched, scanned, err := watcher.Survey(watcher.WatcherConfig{Paths: worker.WatchPaths(p), ExcludePatterns: p.Excludes},
+		watched, scanned, err := watcher.Survey(watcher.WatcherConfig{Paths: worker.WatchPaths(p), ExcludePatterns: p.Excludes, Includes: p.Includes},
 			time.Now(), hotWindow)
 		if err != nil {
 			fmt.Fprintf(out, "%s: %v\n", p.Name, err)

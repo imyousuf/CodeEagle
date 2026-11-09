@@ -544,6 +544,9 @@ repositories:
     type: monorepo
   - path: /home/user/projects/shared-lib
     type: single
+  - path: /home/user/Downloads
+    type: single
+    include: ["*.md", "*.html", "*.docx", "*.pdf"]   # only these files, at any depth
 
 # Other indices to search alongside this one, for `query` and `rag`. Reads
 # only; nothing is ever written outside the local index.

@@ -186,6 +186,12 @@ func syncGitRepo(ctx context.Context, idx *Indexer, repoPath string, state *Sync
 			syncTime := time.Now()
 			for _, relPath := range append(added, modified...) {
 				absPath := filepath.Join(repoPath, relPath)
+				// A changed file the configuration leaves out is not indexed
+				// because it was committed: the walk of a full index skips
+				// it, and a diff must agree.
+				if idx.matcher.MatchFile(absPath) {
+					continue
+				}
 				if err := idx.IndexFileWithTimestamp(ctx, absPath, syncTime); err != nil {
 					idx.log("Warning: index file %s: %v", absPath, err)
 				}
@@ -338,8 +344,9 @@ func parallelWalkDir(ctx context.Context, root string, matcher *watcher.GitIgnor
 				continue
 			}
 
-			// Regular file — skip excluded.
-			if matcher.Match(path) {
+			// Regular file — skip excluded, and what the repository's
+			// include patterns leave out.
+			if matcher.MatchFile(path) {
 				continue
 			}
 
