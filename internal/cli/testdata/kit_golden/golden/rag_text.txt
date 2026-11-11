@@ -1,0 +1,89 @@
+Semantic search: "retry backoff" (15 results)
+
+ 1. [Method] should_retry  (57%)
+    File: kitgolden/scripts/backoff.py:17
+    def should_retry(self, attempt)
+    > should_retry | File: kitgolden/scripts/backoff.py
+
+ 2. [Function] compute_backoff  (50%)
+    File: kitgolden/scripts/backoff.py:6
+    def compute_backoff(attempt, base=0.5, cap=30.0)
+    > compute_backoff | File: kitgolden/scripts/backoff.py
+
+ 3. [Class] RetryPolicy  (41%)
+    File: kitgolden/scripts/backoff.py:11
+    > RetryPolicy | File: kitgolden/scripts/backoff.py
+
+ 4. [Document] Backoff  (40%)
+    File: kitgolden/docs/design.md:8
+    > Backoff | File: kitgolden/docs/design.md
+
+ 5. [Document] Layout  (29%)
+    File: kitgolden/README.md:5
+    > Layout | File: kitgolden/README.md
+
+ 6. [Document] Retry Design  (27%)
+    File: kitgolden/docs/design.md:1
+    > Retry Design | File: kitgolden/docs/design.md
+
+ 7. [Method] delay  (27%)
+    File: kitgolden/scripts/backoff.py:21
+    def delay(self, attempt)
+    > delay | File: kitgolden/scripts/backoff.py
+
+ 8. [Document] notes.txt  (22%)
+    File: kitgolden/notes.txt
+    Package: kitgolden
+    > notes.txt | Package: kitgolden
+
+ 9. [Method] __init__  (22%)
+    File: kitgolden/scripts/backoff.py:14
+    def __init__(self, max_attempts=MAX_ATTEMPTS)
+    > __init__ | File: kitgolden/scripts/backoff.py
+
+10. [Struct] Store  (20%)
+    File: kitgolden/src/store.go:10
+    Package: store
+    > Store | Package: store
+
+11. [Document] Part 1: Operator notes  (20%)
+    File: kitgolden/notes.txt
+    Package: kitgolden
+    > Part 1: Operator notes | Package: kitgolden
+
+12. [Function] NewStore  (18%)
+    File: kitgolden/src/store.go:20
+    Package: store
+    func NewStore() *Store
+    > NewStore | Package: store
+
+13. [Method] Put  (15%)
+    File: kitgolden/src/store.go:31
+    Package: store
+    func (Store) Put(key, value string, now time.Time)
+    > Put | Package: store
+
+14. [Method] evict  (15%)
+    File: kitgolden/src/store.go:36
+    Package: store
+    func (Store) evict(now time.Time)
+    > evict | Package: store
+
+15. [Method] Get  (15%)
+    File: kitgolden/src/store.go:25
+    Package: store
+    func (Store) Get(key string) (string, bool)
+    > Get | Package: store
+
+15 results (embedding: kit-golden-bow/bow-64)
+Showing 15 of 23 ranked; --limit 23 shows more (max 30).
+
+── also in kitfed-project ──
+  1. [Document] Symptoms  (21%)
+     File: kitfed/runbook.md
+  2. [Document] Retry Runbook  (16%)
+     File: kitfed/runbook.md
+  3. [Document] Remedy  (13%)
+     File: kitfed/runbook.md
+  4. [Function] Healthy  (0%)
+     File: kitfed/health.go

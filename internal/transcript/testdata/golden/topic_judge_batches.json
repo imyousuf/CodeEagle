@@ -1,0 +1,387 @@
+[
+  {
+    "model": "jev-1.13.0",
+    "questions": {
+      "related_p0": {
+        "criteria": {
+          "false": "a and b are about different things; a person asking about one would not want meetings filed under the other, even if a meeting happened to discuss both",
+          "true": "a and b name one subject, or one is a part of the other, or both are parts of one broader subject; a person asking about either would want to see meetings filed under the other"
+        },
+        "instructions": "In the pair whose id is \"p0\", is what was said under topic a about the same thing as what was said under topic b, or about a part of it, or is a part of it?",
+        "type": "noul"
+      },
+      "related_p1": {
+        "criteria": {
+          "false": "a and b are about different things; a person asking about one would not want meetings filed under the other, even if a meeting happened to discuss both",
+          "true": "a and b name one subject, or one is a part of the other, or both are parts of one broader subject; a person asking about either would want to see meetings filed under the other"
+        },
+        "instructions": "In the pair whose id is \"p1\", is what was said under topic a about the same thing as what was said under topic b, or about a part of it, or is a part of it?",
+        "type": "noul"
+      },
+      "related_p2": {
+        "criteria": {
+          "false": "a and b are about different things; a person asking about one would not want meetings filed under the other, even if a meeting happened to discuss both",
+          "true": "a and b name one subject, or one is a part of the other, or both are parts of one broader subject; a person asking about either would want to see meetings filed under the other"
+        },
+        "instructions": "In the pair whose id is \"p2\", is what was said under topic a about the same thing as what was said under topic b, or about a part of it, or is a part of it?",
+        "type": "noul"
+      },
+      "related_p3": {
+        "criteria": {
+          "false": "a and b are about different things; a person asking about one would not want meetings filed under the other, even if a meeting happened to discuss both",
+          "true": "a and b name one subject, or one is a part of the other, or both are parts of one broader subject; a person asking about either would want to see meetings filed under the other"
+        },
+        "instructions": "In the pair whose id is \"p3\", is what was said under topic a about the same thing as what was said under topic b, or about a part of it, or is a part of it?",
+        "type": "noul"
+      },
+      "related_p4": {
+        "criteria": {
+          "false": "a and b are about different things; a person asking about one would not want meetings filed under the other, even if a meeting happened to discuss both",
+          "true": "a and b name one subject, or one is a part of the other, or both are parts of one broader subject; a person asking about either would want to see meetings filed under the other"
+        },
+        "instructions": "In the pair whose id is \"p4\", is what was said under topic a about the same thing as what was said under topic b, or about a part of it, or is a part of it?",
+        "type": "noul"
+      },
+      "related_p5": {
+        "criteria": {
+          "false": "a and b are about different things; a person asking about one would not want meetings filed under the other, even if a meeting happened to discuss both",
+          "true": "a and b name one subject, or one is a part of the other, or both are parts of one broader subject; a person asking about either would want to see meetings filed under the other"
+        },
+        "instructions": "In the pair whose id is \"p5\", is what was said under topic a about the same thing as what was said under topic b, or about a part of it, or is a part of it?",
+        "type": "noul"
+      },
+      "related_p6": {
+        "criteria": {
+          "false": "a and b are about different things; a person asking about one would not want meetings filed under the other, even if a meeting happened to discuss both",
+          "true": "a and b name one subject, or one is a part of the other, or both are parts of one broader subject; a person asking about either would want to see meetings filed under the other"
+        },
+        "instructions": "In the pair whose id is \"p6\", is what was said under topic a about the same thing as what was said under topic b, or about a part of it, or is a part of it?",
+        "type": "noul"
+      },
+      "related_p7": {
+        "criteria": {
+          "false": "a and b are about different things; a person asking about one would not want meetings filed under the other, even if a meeting happened to discuss both",
+          "true": "a and b name one subject, or one is a part of the other, or both are parts of one broader subject; a person asking about either would want to see meetings filed under the other"
+        },
+        "instructions": "In the pair whose id is \"p7\", is what was said under topic a about the same thing as what was said under topic b, or about a part of it, or is a part of it?",
+        "type": "noul"
+      },
+      "related_p8": {
+        "criteria": {
+          "false": "a and b are about different things; a person asking about one would not want meetings filed under the other, even if a meeting happened to discuss both",
+          "true": "a and b name one subject, or one is a part of the other, or both are parts of one broader subject; a person asking about either would want to see meetings filed under the other"
+        },
+        "instructions": "In the pair whose id is \"p8\", is what was said under topic a about the same thing as what was said under topic b, or about a part of it, or is a part of it?",
+        "type": "noul"
+      },
+      "related_p9": {
+        "criteria": {
+          "false": "a and b are about different things; a person asking about one would not want meetings filed under the other, even if a meeting happened to discuss both",
+          "true": "a and b name one subject, or one is a part of the other, or both are parts of one broader subject; a person asking about either would want to see meetings filed under the other"
+        },
+        "instructions": "In the pair whose id is \"p9\", is what was said under topic a about the same thing as what was said under topic b, or about a part of it, or is a part of it?",
+        "type": "noul"
+      },
+      "same_p0": {
+        "criteria": {
+          "false": "the two labels name different subjects, however closely related",
+          "true": "the two labels are two wordings of one subject; any meeting filed under one belongs under the other"
+        },
+        "instructions": "In the pair whose id is \"p0\", do the labels of topic a and topic b name one subject in different words?",
+        "type": "noul"
+      },
+      "same_p1": {
+        "criteria": {
+          "false": "the two labels name different subjects, however closely related",
+          "true": "the two labels are two wordings of one subject; any meeting filed under one belongs under the other"
+        },
+        "instructions": "In the pair whose id is \"p1\", do the labels of topic a and topic b name one subject in different words?",
+        "type": "noul"
+      },
+      "same_p2": {
+        "criteria": {
+          "false": "the two labels name different subjects, however closely related",
+          "true": "the two labels are two wordings of one subject; any meeting filed under one belongs under the other"
+        },
+        "instructions": "In the pair whose id is \"p2\", do the labels of topic a and topic b name one subject in different words?",
+        "type": "noul"
+      },
+      "same_p3": {
+        "criteria": {
+          "false": "the two labels name different subjects, however closely related",
+          "true": "the two labels are two wordings of one subject; any meeting filed under one belongs under the other"
+        },
+        "instructions": "In the pair whose id is \"p3\", do the labels of topic a and topic b name one subject in different words?",
+        "type": "noul"
+      },
+      "same_p4": {
+        "criteria": {
+          "false": "the two labels name different subjects, however closely related",
+          "true": "the two labels are two wordings of one subject; any meeting filed under one belongs under the other"
+        },
+        "instructions": "In the pair whose id is \"p4\", do the labels of topic a and topic b name one subject in different words?",
+        "type": "noul"
+      },
+      "same_p5": {
+        "criteria": {
+          "false": "the two labels name different subjects, however closely related",
+          "true": "the two labels are two wordings of one subject; any meeting filed under one belongs under the other"
+        },
+        "instructions": "In the pair whose id is \"p5\", do the labels of topic a and topic b name one subject in different words?",
+        "type": "noul"
+      },
+      "same_p6": {
+        "criteria": {
+          "false": "the two labels name different subjects, however closely related",
+          "true": "the two labels are two wordings of one subject; any meeting filed under one belongs under the other"
+        },
+        "instructions": "In the pair whose id is \"p6\", do the labels of topic a and topic b name one subject in different words?",
+        "type": "noul"
+      },
+      "same_p7": {
+        "criteria": {
+          "false": "the two labels name different subjects, however closely related",
+          "true": "the two labels are two wordings of one subject; any meeting filed under one belongs under the other"
+        },
+        "instructions": "In the pair whose id is \"p7\", do the labels of topic a and topic b name one subject in different words?",
+        "type": "noul"
+      },
+      "same_p8": {
+        "criteria": {
+          "false": "the two labels name different subjects, however closely related",
+          "true": "the two labels are two wordings of one subject; any meeting filed under one belongs under the other"
+        },
+        "instructions": "In the pair whose id is \"p8\", do the labels of topic a and topic b name one subject in different words?",
+        "type": "noul"
+      },
+      "same_p9": {
+        "criteria": {
+          "false": "the two labels name different subjects, however closely related",
+          "true": "the two labels are two wordings of one subject; any meeting filed under one belongs under the other"
+        },
+        "instructions": "In the pair whose id is \"p9\", do the labels of topic a and topic b name one subject in different words?",
+        "type": "noul"
+      }
+    },
+    "state": {
+      "pairs": [
+        {
+          "a": "42f5a0202a85d638573ebaec",
+          "b": "6b475c52087c1d12c2beaf59",
+          "meetings_filed_under_both": 0,
+          "pair": "p0",
+          "times_consecutive_segments_of_one_meeting": 0
+        },
+        {
+          "a": "dda37cbe5778094da01ea0b8",
+          "b": "da9bf65099c589e77301a8d6",
+          "meetings_filed_under_both": 0,
+          "pair": "p1",
+          "times_consecutive_segments_of_one_meeting": 0
+        },
+        {
+          "a": "30647220a017f1f3c614620d",
+          "b": "fa24f831361e35c5ff4db45a",
+          "meetings_filed_under_both": 0,
+          "pair": "p2",
+          "times_consecutive_segments_of_one_meeting": 0
+        },
+        {
+          "a": "506e45e30dfe631e8c5b3f59",
+          "b": "fe9839b55e95061652efa2a0",
+          "meetings_filed_under_both": 0,
+          "pair": "p3",
+          "times_consecutive_segments_of_one_meeting": 0
+        },
+        {
+          "a": "fe467c613aa565a261ff5c78",
+          "b": "a799a890e27fa80c8a221265",
+          "meetings_filed_under_both": 0,
+          "pair": "p4",
+          "times_consecutive_segments_of_one_meeting": 0
+        },
+        {
+          "a": "294def86398a58e7219dcce6",
+          "b": "2f66b3a4c3d0f18d3b0fde9a",
+          "meetings_filed_under_both": 0,
+          "pair": "p5",
+          "times_consecutive_segments_of_one_meeting": 0
+        },
+        {
+          "a": "67eafd48a128cb2f82628d51",
+          "b": "7823ae999f56ab3c1f6b3260",
+          "meetings_filed_under_both": 0,
+          "pair": "p6",
+          "times_consecutive_segments_of_one_meeting": 0
+        },
+        {
+          "a": "c4a252121480cb400fe5c00c",
+          "b": "12a7370a93dd2a2d5fb37c69",
+          "meetings_filed_under_both": 0,
+          "pair": "p7",
+          "times_consecutive_segments_of_one_meeting": 0
+        },
+        {
+          "a": "58c982a194ae672cc19de55f",
+          "b": "c50f7f62df4eaaa48a2c1e4a",
+          "meetings_filed_under_both": 0,
+          "pair": "p8",
+          "times_consecutive_segments_of_one_meeting": 0
+        },
+        {
+          "a": "5fdbeb26b8565dd6c23ce5b0",
+          "b": "a3979331db620a4cf3a0a93a",
+          "meetings_filed_under_both": 0,
+          "pair": "p9",
+          "times_consecutive_segments_of_one_meeting": 0
+        }
+      ],
+      "topics": [
+        {
+          "id": "42f5a0202a85d638573ebaec",
+          "label": "topic 00",
+          "meetings_filed_under": 1
+        },
+        {
+          "id": "6b475c52087c1d12c2beaf59",
+          "label": "other 00",
+          "meetings_filed_under": 2
+        },
+        {
+          "id": "dda37cbe5778094da01ea0b8",
+          "label": "topic 01",
+          "meetings_filed_under": 1
+        },
+        {
+          "id": "da9bf65099c589e77301a8d6",
+          "label": "other 01",
+          "meetings_filed_under": 2
+        },
+        {
+          "id": "30647220a017f1f3c614620d",
+          "label": "topic 02",
+          "meetings_filed_under": 1
+        },
+        {
+          "id": "fa24f831361e35c5ff4db45a",
+          "label": "other 02",
+          "meetings_filed_under": 2
+        },
+        {
+          "id": "506e45e30dfe631e8c5b3f59",
+          "label": "topic 03",
+          "meetings_filed_under": 1
+        },
+        {
+          "id": "fe9839b55e95061652efa2a0",
+          "label": "other 03",
+          "meetings_filed_under": 2
+        },
+        {
+          "id": "fe467c613aa565a261ff5c78",
+          "label": "topic 04",
+          "meetings_filed_under": 1
+        },
+        {
+          "id": "a799a890e27fa80c8a221265",
+          "label": "other 04",
+          "meetings_filed_under": 2
+        },
+        {
+          "id": "294def86398a58e7219dcce6",
+          "label": "topic 05",
+          "meetings_filed_under": 1
+        },
+        {
+          "id": "2f66b3a4c3d0f18d3b0fde9a",
+          "label": "other 05",
+          "meetings_filed_under": 2
+        },
+        {
+          "id": "67eafd48a128cb2f82628d51",
+          "label": "topic 06",
+          "meetings_filed_under": 1
+        },
+        {
+          "id": "7823ae999f56ab3c1f6b3260",
+          "label": "other 06",
+          "meetings_filed_under": 2
+        },
+        {
+          "id": "c4a252121480cb400fe5c00c",
+          "label": "topic 07",
+          "meetings_filed_under": 1
+        },
+        {
+          "id": "12a7370a93dd2a2d5fb37c69",
+          "label": "other 07",
+          "meetings_filed_under": 2
+        },
+        {
+          "id": "58c982a194ae672cc19de55f",
+          "label": "topic 08",
+          "meetings_filed_under": 1
+        },
+        {
+          "id": "c50f7f62df4eaaa48a2c1e4a",
+          "label": "other 08",
+          "meetings_filed_under": 2
+        },
+        {
+          "id": "5fdbeb26b8565dd6c23ce5b0",
+          "label": "topic 09",
+          "meetings_filed_under": 1
+        },
+        {
+          "id": "a3979331db620a4cf3a0a93a",
+          "label": "other 09",
+          "meetings_filed_under": 2
+        }
+      ]
+    }
+  },
+  {
+    "model": "jev-1.13.0",
+    "questions": {
+      "related_p0": {
+        "criteria": {
+          "false": "a and b are about different things; a person asking about one would not want meetings filed under the other, even if a meeting happened to discuss both",
+          "true": "a and b name one subject, or one is a part of the other, or both are parts of one broader subject; a person asking about either would want to see meetings filed under the other"
+        },
+        "instructions": "In the pair whose id is \"p0\", is what was said under topic a about the same thing as what was said under topic b, or about a part of it, or is a part of it?",
+        "type": "noul"
+      },
+      "same_p0": {
+        "criteria": {
+          "false": "the two labels name different subjects, however closely related",
+          "true": "the two labels are two wordings of one subject; any meeting filed under one belongs under the other"
+        },
+        "instructions": "In the pair whose id is \"p0\", do the labels of topic a and topic b name one subject in different words?",
+        "type": "noul"
+      }
+    },
+    "state": {
+      "pairs": [
+        {
+          "a": "7e7eddab3ffd592db17924e7",
+          "b": "f6810ff2d52a1eefa74cae5a",
+          "meetings_filed_under_both": 0,
+          "pair": "p0",
+          "times_consecutive_segments_of_one_meeting": 0
+        }
+      ],
+      "topics": [
+        {
+          "id": "7e7eddab3ffd592db17924e7",
+          "label": "topic 10",
+          "meetings_filed_under": 1
+        },
+        {
+          "id": "f6810ff2d52a1eefa74cae5a",
+          "label": "other 10",
+          "meetings_filed_under": 2
+        }
+      ]
+    }
+  }
+]

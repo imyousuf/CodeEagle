@@ -1,0 +1,470 @@
+[
+  {
+    "breadth": "none",
+    "complete": 2,
+    "considered": 16,
+    "expanded": 0,
+    "hits": [
+      {
+        "covers_all": true,
+        "date": "2026-03-02",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "Machine intelligence › AI alignment risk",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "intelligence"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Alignment review",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-01",
+        "terms": [
+          "intelligence"
+        ]
+      },
+      {
+        "covers_all": true,
+        "date": "2026-03-01",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "Machine intelligence › AGI feasibility debate",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "intelligence"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "AGI feasibility debate with the platform team",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-00",
+        "terms": [
+          "intelligence"
+        ]
+      }
+    ],
+    "query": "intelligence",
+    "terms": [
+      "intelligence"
+    ],
+    "total": 2
+  },
+  {
+    "breadth": "narrow",
+    "complete": 2,
+    "considered": 16,
+    "expanded": 1,
+    "hits": [
+      {
+        "covers_all": true,
+        "date": "2026-03-02",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "Machine intelligence › AI alignment risk",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "intelligence"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Alignment review",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-01",
+        "terms": [
+          "intelligence"
+        ]
+      },
+      {
+        "covers_all": true,
+        "date": "2026-03-01",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "Machine intelligence › AGI feasibility debate",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "intelligence"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "AGI feasibility debate with the platform team",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-00",
+        "terms": [
+          "intelligence"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-08",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "hiring plan",
+            "phrase": false,
+            "probability": 0.8,
+            "terms": [
+              "intelligence"
+            ],
+            "via": "Machine intelligence ~ hiring plan",
+            "weight": 0.4
+          }
+        ],
+        "meeting": "Hiring sync",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.4,
+        "session": "session-07",
+        "terms": null
+      }
+    ],
+    "query": "intelligence",
+    "terms": [
+      "intelligence"
+    ],
+    "total": 3
+  },
+  {
+    "breadth": "default",
+    "complete": 2,
+    "considered": 16,
+    "expanded": 2,
+    "hits": [
+      {
+        "covers_all": true,
+        "date": "2026-03-02",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "Machine intelligence › AI alignment risk",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "intelligence"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Alignment review",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-01",
+        "terms": [
+          "intelligence"
+        ]
+      },
+      {
+        "covers_all": true,
+        "date": "2026-03-01",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "Machine intelligence › AGI feasibility debate",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "intelligence"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "AGI feasibility debate with the platform team",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-00",
+        "terms": [
+          "intelligence"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-08",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "hiring plan",
+            "phrase": false,
+            "probability": 0.8,
+            "terms": [
+              "intelligence"
+            ],
+            "via": "Machine intelligence ~ hiring plan",
+            "weight": 0.4
+          }
+        ],
+        "meeting": "Hiring sync",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.4,
+        "session": "session-07",
+        "terms": null
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-13",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "robotics lab",
+            "phrase": false,
+            "probability": 0.75,
+            "terms": [
+              "intelligence"
+            ],
+            "via": "Machine intelligence ~ robotics lab",
+            "weight": 0.375
+          }
+        ],
+        "meeting": "Robotics lab tour",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.375,
+        "session": "session-12",
+        "terms": null
+      }
+    ],
+    "query": "intelligence",
+    "terms": [
+      "intelligence"
+    ],
+    "total": 4
+  },
+  {
+    "breadth": "wide",
+    "complete": 2,
+    "considered": 16,
+    "expanded": 6,
+    "hits": [
+      {
+        "covers_all": true,
+        "date": "2026-03-02",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "Machine intelligence › AI alignment risk",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "intelligence"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Alignment review",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-01",
+        "terms": [
+          "intelligence"
+        ]
+      },
+      {
+        "covers_all": true,
+        "date": "2026-03-01",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "Machine intelligence › AGI feasibility debate",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "intelligence"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "AGI feasibility debate with the platform team",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-00",
+        "terms": [
+          "intelligence"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-08",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "hiring plan",
+            "phrase": false,
+            "probability": 0.8,
+            "terms": [
+              "intelligence"
+            ],
+            "via": "Machine intelligence ~ hiring plan",
+            "weight": 0.4
+          }
+        ],
+        "meeting": "Hiring sync",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.4,
+        "session": "session-07",
+        "terms": null
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-13",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "robotics lab",
+            "phrase": false,
+            "probability": 0.75,
+            "terms": [
+              "intelligence"
+            ],
+            "via": "Machine intelligence ~ robotics lab",
+            "weight": 0.375
+          }
+        ],
+        "meeting": "Robotics lab tour",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.375,
+        "session": "session-12",
+        "terms": null
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-05",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "capacity planning",
+            "phrase": false,
+            "probability": 0.5,
+            "terms": [
+              "intelligence"
+            ],
+            "via": "Machine intelligence ~ capacity planning",
+            "weight": 0.25
+          }
+        ],
+        "meeting": "Capacity planning review",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.25,
+        "session": "session-04",
+        "terms": null
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-16",
+        "matches": [
+          {
+            "hops": 2,
+            "kind": "topic",
+            "label": "board governance",
+            "phrase": false,
+            "probability": 0.76,
+            "terms": [
+              "intelligence"
+            ],
+            "via": "Machine intelligence ~ hiring plan ~ board governance",
+            "weight": 0.19
+          }
+        ],
+        "meeting": "Board meeting prep",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.19,
+        "session": "session-15",
+        "terms": null
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-06",
+        "matches": [
+          {
+            "hops": 2,
+            "kind": "topic",
+            "label": "AI roadmap",
+            "phrase": false,
+            "probability": 0.76,
+            "terms": [
+              "intelligence"
+            ],
+            "via": "Machine intelligence ~ hiring plan ~ AI roadmap",
+            "weight": 0.19
+          }
+        ],
+        "meeting": "Roadmap offsite",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.19,
+        "session": "session-05",
+        "terms": null
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-12",
+        "matches": [
+          {
+            "hops": 2,
+            "kind": "topic",
+            "label": "whiteboard tooling",
+            "phrase": false,
+            "probability": 0.6000000000000001,
+            "terms": [
+              "intelligence"
+            ],
+            "via": "Machine intelligence ~ robotics lab ~ whiteboard tooling",
+            "weight": 0.15000000000000002
+          }
+        ],
+        "meeting": "Whiteboard tools demo",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.15000000000000002,
+        "session": "session-11",
+        "terms": null
+      }
+    ],
+    "query": "intelligence",
+    "terms": [
+      "intelligence"
+    ],
+    "total": 8
+  }
+]

@@ -1,0 +1,162 @@
+[
+  {
+    "model": "jev-1.13.0",
+    "questions": {
+      "c0": {
+        "criteria": {
+          "false": "the question's words occur only in passing, in another sense, or in passages about something else",
+          "true": "its passages discuss the subject the question asks about, at length or as a decision or follow-up"
+        },
+        "instructions": "Does the candidate meeting whose index is 0 answer the question in `question`?",
+        "type": "noul"
+      },
+      "c1": {
+        "criteria": {
+          "false": "the question's words occur only in passing, in another sense, or in passages about something else",
+          "true": "its passages discuss the subject the question asks about, at length or as a decision or follow-up"
+        },
+        "instructions": "Does the candidate meeting whose index is 1 answer the question in `question`?",
+        "type": "noul"
+      },
+      "c2": {
+        "criteria": {
+          "false": "the question's words occur only in passing, in another sense, or in passages about something else",
+          "true": "its passages discuss the subject the question asks about, at length or as a decision or follow-up"
+        },
+        "instructions": "Does the candidate meeting whose index is 2 answer the question in `question`?",
+        "type": "noul"
+      },
+      "c3": {
+        "criteria": {
+          "false": "the question's words occur only in passing, in another sense, or in passages about something else",
+          "true": "its passages discuss the subject the question asks about, at length or as a decision or follow-up"
+        },
+        "instructions": "Does the candidate meeting whose index is 3 answer the question in `question`?",
+        "type": "noul"
+      },
+      "c4": {
+        "criteria": {
+          "false": "the question's words occur only in passing, in another sense, or in passages about something else",
+          "true": "its passages discuss the subject the question asks about, at length or as a decision or follow-up"
+        },
+        "instructions": "Does the candidate meeting whose index is 4 answer the question in `question`?",
+        "type": "noul"
+      }
+    },
+    "state": {
+      "candidate_meetings": [
+        {
+          "date": "2026-01-01",
+          "index": 0,
+          "participants_identified": [
+            "Kevin"
+          ],
+          "passages_containing_question_words": [
+            "[topic segment seg] what was said in one",
+            "[title] one"
+          ],
+          "title": "one"
+        },
+        {
+          "date": "2026-01-02",
+          "index": 1,
+          "participants_identified": [
+            "Kevin"
+          ],
+          "passages_containing_question_words": [
+            "[topic segment seg] what was said in two",
+            "[title] two"
+          ],
+          "title": "two"
+        },
+        {
+          "date": "2026-01-03",
+          "index": 2,
+          "participants_identified": [
+            "Kevin"
+          ],
+          "passages_containing_question_words": [
+            "[topic segment seg] what was said in three",
+            "[title] three"
+          ],
+          "title": "three"
+        },
+        {
+          "date": "2026-01-04",
+          "index": 3,
+          "participants_identified": [
+            "Kevin"
+          ],
+          "passages_containing_question_words": [
+            "[topic segment seg] what was said in four",
+            "[title] four"
+          ],
+          "title": "four"
+        },
+        {
+          "date": "2026-01-05",
+          "index": 4,
+          "participants_identified": [
+            "Kevin"
+          ],
+          "passages_containing_question_words": [
+            "[topic segment seg] what was said in five",
+            "[title] five"
+          ],
+          "title": "five"
+        }
+      ],
+      "question": "the question"
+    }
+  },
+  {
+    "model": "jev-1.13.0",
+    "questions": {
+      "c0": {
+        "criteria": {
+          "false": "the question's words occur only in passing, in another sense, or in passages about something else",
+          "true": "its passages discuss the subject the question asks about, at length or as a decision or follow-up"
+        },
+        "instructions": "Does the candidate meeting whose index is 0 answer the question in `question`?",
+        "type": "noul"
+      },
+      "c1": {
+        "criteria": {
+          "false": "the question's words occur only in passing, in another sense, or in passages about something else",
+          "true": "its passages discuss the subject the question asks about, at length or as a decision or follow-up"
+        },
+        "instructions": "Does the candidate meeting whose index is 1 answer the question in `question`?",
+        "type": "noul"
+      }
+    },
+    "state": {
+      "candidate_meetings": [
+        {
+          "date": "2026-01-01",
+          "index": 0,
+          "participants_identified": [
+            "Kevin"
+          ],
+          "passages_containing_question_words": [
+            "[topic segment seg] what was said in one",
+            "[title] one"
+          ],
+          "title": "one"
+        },
+        {
+          "date": "2026-01-02",
+          "index": 1,
+          "participants_identified": [
+            "Kevin"
+          ],
+          "passages_containing_question_words": [
+            "[topic segment seg] what was said in two",
+            "[title] two"
+          ],
+          "title": "two"
+        }
+      ],
+      "question": "the question"
+    }
+  }
+]

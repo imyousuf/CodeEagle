@@ -1,0 +1,154 @@
+[
+  {
+    "id": "18f80172070a8f2bfcc3a0ce",
+    "properties": {
+      "graph_source": "default",
+      "judge": "jev-1.13.0",
+      "probability": "0.20",
+      "same_subject": "0.05",
+      "sources": "same-meeting"
+    },
+    "source": "on-call rota",
+    "target": "capacity forecast"
+  },
+  {
+    "id": "4d45380bc1837bdb3de12483",
+    "properties": {
+      "cosine": "0.02",
+      "graph_source": "default",
+      "judge": "jev-1.13.0",
+      "probability": "0.20",
+      "same_subject": "0.05",
+      "sources": "same-meeting"
+    },
+    "source": "release notes",
+    "target": "incident review"
+  },
+  {
+    "id": "5805246ea9d3b235f7aac086",
+    "properties": {
+      "graph_source": "default",
+      "judge": "jev-1.13.0",
+      "probability": "0.20",
+      "same_subject": "0.05",
+      "sources": "same-meeting"
+    },
+    "source": "capacity forecast",
+    "target": "incident review"
+  },
+  {
+    "id": "5fbaff32729a714570075bd2",
+    "properties": {
+      "graph_source": "default",
+      "judge": "jev-1.13.0",
+      "probability": "0.20",
+      "same_subject": "0.05",
+      "sources": "same-meeting"
+    },
+    "source": "schema migration",
+    "target": "capacity forecast"
+  },
+  {
+    "id": "95a938782bf9ac1eedcd0e84",
+    "properties": {
+      "cosine": "0.97",
+      "graph_source": "default",
+      "judge": "jev-1.13.0",
+      "probability": "0.62",
+      "same_subject": "0.05",
+      "sources": "nearest+same-meeting"
+    },
+    "source": "on-call rota",
+    "target": "incident review"
+  },
+  {
+    "id": "97a87067ab5a24c01daef337",
+    "properties": {
+      "cosine": "0.10",
+      "graph_source": "default",
+      "judge": "jev-1.13.0",
+      "probability": "0.20",
+      "same_subject": "0.05",
+      "sources": "same-meeting"
+    },
+    "source": "on-call rota",
+    "target": "schema migration"
+  },
+  {
+    "id": "a2814e5412717878194b9ce7",
+    "properties": {
+      "cosine": "0.10",
+      "graph_source": "default",
+      "judge": "jev-1.13.0",
+      "probability": "0.20",
+      "same_subject": "0.05",
+      "sources": "same-meeting"
+    },
+    "source": "on-call rota",
+    "target": "release notes"
+  },
+  {
+    "id": "a63bef62e8b5cbcbfe87d743",
+    "properties": {
+      "cosine": "0.00",
+      "graph_source": "default",
+      "judge": "jev-1.13.0",
+      "probability": "0.20",
+      "same_subject": "0.05",
+      "sources": "same-meeting"
+    },
+    "source": "schema migration",
+    "target": "incident review"
+  },
+  {
+    "id": "b227afb1d48488a9f1dba823",
+    "properties": {
+      "cosine": "0.99",
+      "graph_source": "default",
+      "judge": "jev-1.13.0",
+      "probability": "0.75",
+      "same_subject": "0.05",
+      "sources": "nearest"
+    },
+    "source": "schema migration",
+    "target": "release notes"
+  },
+  {
+    "id": "c2c032c39812742751e39267",
+    "properties": {
+      "cosine": "0.11",
+      "graph_source": "default",
+      "judge": "jev-1.13.0",
+      "probability": "0.20",
+      "same_subject": "0.05",
+      "sources": "same-meeting"
+    },
+    "source": "client rollout",
+    "target": "release notes"
+  },
+  {
+    "id": "f092a10a4f59a2777af14ac6",
+    "properties": {
+      "cosine": "0.00",
+      "graph_source": "default",
+      "judge": "jev-1.13.0",
+      "probability": "0.90",
+      "same_subject": "0.05",
+      "sources": "nearest+same-meeting"
+    },
+    "source": "schema migration",
+    "target": "client rollout"
+  },
+  {
+    "id": "f81693271518bc5d615fe0b9",
+    "properties": {
+      "graph_source": "default",
+      "judge": "jev-1.13.0",
+      "probability": "0.20",
+      "same_subject": "0.05",
+      "sources": "same-meeting"
+    },
+    "source": "capacity forecast",
+    "target": "release notes"
+  }
+]

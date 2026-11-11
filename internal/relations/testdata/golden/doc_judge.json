@@ -1,0 +1,214 @@
+[
+  {
+    "model": "jev-1.13.0",
+    "questions": {
+      "changes_ab": {
+        "criteria": {
+          "false": "A leaves what B specifies as it is: it adds to it, depends on it, records something about it, or is about something else",
+          "true": "A revises, renames, re-homes or overrides some of the work, design or decision in B, so that part of B is out of date while the rest may still hold"
+        },
+        "instructions": "Does document A change part of what document B specifies?",
+        "type": "noul"
+      },
+      "changes_ba": {
+        "criteria": {
+          "false": "B leaves what A specifies as it is: it adds to it, depends on it, records something about it, or is about something else",
+          "true": "B revises, renames, re-homes or overrides some of the work, design or decision in A, so that part of A is out of date while the rest may still hold"
+        },
+        "instructions": "Does document B change part of what document A specifies?",
+        "type": "noul"
+      },
+      "records_ab": {
+        "criteria": {
+          "false": "A is itself a design, plan or reference rather than an account of events, or the events it reports concern something else",
+          "true": "A reports an incident, outage, investigation, review, meeting, conversation or decision about the system, feature or plan that B describes"
+        },
+        "instructions": "Is document A an account of something that happened involving what document B describes?",
+        "type": "noul"
+      },
+      "records_ba": {
+        "criteria": {
+          "false": "B is itself a design, plan or reference rather than an account of events, or the events it reports concern something else",
+          "true": "B reports an incident, outage, investigation, review, meeting, conversation or decision about the system, feature or plan that A describes"
+        },
+        "instructions": "Is document B an account of something that happened involving what document A describes?",
+        "type": "noul"
+      },
+      "related": {
+        "criteria": {
+          "false": "they share vocabulary or a broad area only; a reader of one would gain nothing from the other",
+          "true": "they concern the same feature, system, plan, incident or decision: one builds on, revises, records or accompanies the other"
+        },
+        "instructions": "Are document A and document B about the same piece of work, so that a reader of one would want to know about the other?",
+        "type": "noul"
+      },
+      "replaces_ab": {
+        "criteria": {
+          "false": "B still holds at least in part: A changes only some of it, adds to it, or is about something else",
+          "true": "A is the current account of everything B covered, so B as a whole is no longer the account to follow"
+        },
+        "instructions": "Does document A replace document B as a whole?",
+        "type": "noul"
+      },
+      "replaces_ba": {
+        "criteria": {
+          "false": "A still holds at least in part: B changes only some of it, adds to it, or is about something else",
+          "true": "B is the current account of everything A covered, so A as a whole is no longer the account to follow"
+        },
+        "instructions": "Does document B replace document A as a whole?",
+        "type": "noul"
+      }
+    },
+    "state": {
+      "document_a": {
+        "excerpts_of_the_document": [
+          {
+            "section": "Invoice rendering > Templates",
+            "text": "Invoices render from templates."
+          }
+        ],
+        "headings_of_the_document": [
+          "Invoice rendering > Templates"
+        ],
+        "path": "docs/billing.md",
+        "title": "Invoice rendering",
+        "type_of_document": "other"
+      },
+      "document_b": {
+        "excerpts_of_the_document": [
+          {
+            "section": "Invoice rendering v2 > Part 01",
+            "text": "Invoices now render from a layout engine instead of templates. Invoices now render from a layout engine instead of templates. Invoices now render from a layout engine instead of templates. Invoices now render from a layout engine instead of templates. Invoices now render from a layout engine instead of templates. Invoices now render from a layout engine instead of templates. Invoices now render from a layout engine instead of templates. Invoices now render from a layout engine instead of templates. Invoices now render from a layout engine instead of templates. Invoices now render from a layout engine instead of templates. Invoices now render from a layout engine instead of templates.…"
+          }
+        ],
+        "headings_of_the_document": [
+          "Invoice rendering v2 > Part 01",
+          "Invoice rendering v2 > Part 02",
+          "Invoice rendering v2 > Part 03",
+          "Invoice rendering v2 > Part 04",
+          "Invoice rendering v2 > Part 05",
+          "Invoice rendering v2 > Part 06",
+          "Invoice rendering v2 > Part 07",
+          "Invoice rendering v2 > Part 08",
+          "Invoice rendering v2 > Part 09",
+          "Invoice rendering v2 > Part 10",
+          "Invoice rendering v2 > Part 11",
+          "Invoice rendering v2 > Part 12",
+          "Invoice rendering v2 > Part 13",
+          "Invoice rendering v2 > Part 14",
+          "Invoice rendering v2 > Part 15"
+        ],
+        "path": "docs/billing-v2.md",
+        "title": "Invoice rendering v2",
+        "type_of_document": "other"
+      },
+      "facts_about_the_pair": [
+        "their file names are versions of one name"
+      ]
+    }
+  },
+  {
+    "model": "jev-1.13.0",
+    "questions": {
+      "changes_ab": {
+        "criteria": {
+          "false": "A leaves what B specifies as it is: it adds to it, depends on it, records something about it, or is about something else",
+          "true": "A revises, renames, re-homes or overrides some of the work, design or decision in B, so that part of B is out of date while the rest may still hold"
+        },
+        "instructions": "Does document A change part of what document B specifies?",
+        "type": "noul"
+      },
+      "changes_ba": {
+        "criteria": {
+          "false": "B leaves what A specifies as it is: it adds to it, depends on it, records something about it, or is about something else",
+          "true": "B revises, renames, re-homes or overrides some of the work, design or decision in A, so that part of A is out of date while the rest may still hold"
+        },
+        "instructions": "Does document B change part of what document A specifies?",
+        "type": "noul"
+      },
+      "records_ab": {
+        "criteria": {
+          "false": "A is itself a design, plan or reference rather than an account of events, or the events it reports concern something else",
+          "true": "A reports an incident, outage, investigation, review, meeting, conversation or decision about the system, feature or plan that B describes"
+        },
+        "instructions": "Is document A an account of something that happened involving what document B describes?",
+        "type": "noul"
+      },
+      "records_ba": {
+        "criteria": {
+          "false": "B is itself a design, plan or reference rather than an account of events, or the events it reports concern something else",
+          "true": "B reports an incident, outage, investigation, review, meeting, conversation or decision about the system, feature or plan that A describes"
+        },
+        "instructions": "Is document B an account of something that happened involving what document A describes?",
+        "type": "noul"
+      },
+      "related": {
+        "criteria": {
+          "false": "they share vocabulary or a broad area only; a reader of one would gain nothing from the other",
+          "true": "they concern the same feature, system, plan, incident or decision: one builds on, revises, records or accompanies the other"
+        },
+        "instructions": "Are document A and document B about the same piece of work, so that a reader of one would want to know about the other?",
+        "type": "noul"
+      },
+      "replaces_ab": {
+        "criteria": {
+          "false": "B still holds at least in part: A changes only some of it, adds to it, or is about something else",
+          "true": "A is the current account of everything B covered, so B as a whole is no longer the account to follow"
+        },
+        "instructions": "Does document A replace document B as a whole?",
+        "type": "noul"
+      },
+      "replaces_ba": {
+        "criteria": {
+          "false": "A still holds at least in part: B changes only some of it, adds to it, or is about something else",
+          "true": "B is the current account of everything A covered, so A as a whole is no longer the account to follow"
+        },
+        "instructions": "Does document B replace document A as a whole?",
+        "type": "noul"
+      }
+    },
+    "state": {
+      "document_a": {
+        "date_the_document_states": "2026-10-04",
+        "excerpts_of_the_document": [
+          {
+            "section": "opening",
+            "text": "**Status:** Draft, 2026-10-04 Owner: platform team. Retries are budgeted per client."
+          },
+          {
+            "section": "Retry budget design > Limits",
+            "text": "Clients retry at most three times. Tracked in PLAT-412."
+          }
+        ],
+        "headings_of_the_document": [
+          "Retry budget design > Goals",
+          "Retry budget design > Limits",
+          "Retry budget design > Rollout"
+        ],
+        "path": "docs/specs/retry-budget.md",
+        "status_the_document_states": "Draft, 2026-10-04",
+        "title": "Retry budget design",
+        "type_of_document": "spec"
+      },
+      "document_b": {
+        "excerpts_of_the_document": [
+          {
+            "section": "Retry storm > Root cause",
+            "text": "Clients ignored the retry budget and retried without jitter."
+          }
+        ],
+        "headings_of_the_document": [
+          "Retry storm > Impact",
+          "Retry storm > Root cause",
+          "Retry storm > Timeline"
+        ],
+        "path": "docs/incidents/2026-10-20-retry-storm-postmortem.md",
+        "title": "Retry storm",
+        "type_of_document": "incident"
+      },
+      "facts_about_the_pair": [
+        "docs/incidents/2026-10-20-retry-storm-postmortem.md names docs/specs/retry-budget.md: \"the retry budget <spec> did not cover bursts & retries\""
+      ]
+    }
+  }
+]

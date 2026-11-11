@@ -1,0 +1,412 @@
+{
+  "file_path": "docs/payments.md",
+  "language": "markdown",
+  "nodes": [
+    {
+      "id": "069d8941aef1df222fa7c4c9",
+      "type": "Document",
+      "name": "Overview",
+      "qualified_name": "Overview",
+      "file_path": "docs/payments.md",
+      "line": 14,
+      "end_line": 45,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "The service owns capture and refund.\n\n- capture\n- refund\n- reconcile",
+      "properties": {
+        "heading_path": "Overview",
+        "kind": "section",
+        "level": "#",
+        "ordinal": "1",
+        "section_hash": "sha256:dbdec5fa4248cfe3eb3dfa681226972169f15558ad8c235206f796bf0c8b5827"
+      },
+      "metrics": null
+    },
+    {
+      "id": "0f16a11ce026b26964885fc4",
+      "type": "Document",
+      "name": "Configuration",
+      "qualified_name": "Overview \u003e Setup \u003e Configuration",
+      "file_path": "docs/payments.md",
+      "line": 35,
+      "end_line": 38,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "Set [config](./config.yaml) and [config again](./config.yaml).\nMail [us](mailto:team@example.com) or jump to [setup](#setup).",
+      "properties": {
+        "heading_path": "Overview \u003e Setup \u003e Configuration",
+        "kind": "section",
+        "level": "###",
+        "ordinal": "1",
+        "section_hash": "sha256:36e2c3595a1db631087becdce476e267d305605962d243f47b9215b94abab9d8"
+      },
+      "metrics": null
+    },
+    {
+      "id": "127b17e5df83b17b06a2d239",
+      "type": "Document",
+      "name": "docs/payments.md",
+      "qualified_name": "",
+      "file_path": "docs/payments.md",
+      "line": 0,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "Payments service\n\nHow payments are captured\n\nPayments are captured asynchronously.\nSee [the overview](overview.md) first.",
+      "properties": {
+        "frontmatter:description": "'How payments are captured'",
+        "frontmatter:owner": "payments-team",
+        "frontmatter:title": "\"Payments service\""
+      },
+      "metrics": null
+    },
+    {
+      "id": "3983ca59fe5d5b2e30f52e17",
+      "type": "Document",
+      "name": "Setup",
+      "qualified_name": "Overview \u003e Setup",
+      "file_path": "docs/payments.md",
+      "line": 40,
+      "end_line": 45,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "The second setup section.\n\nTODO: document refunds\nFIXME   tighten retries",
+      "properties": {
+        "heading_path": "Overview \u003e Setup",
+        "kind": "section",
+        "level": "##",
+        "ordinal": "2",
+        "section_hash": "sha256:0619a3e99acac93ad533bdbc0f00a7507318540df1234970ba96acec8f0337a1"
+      },
+      "metrics": null
+    },
+    {
+      "id": "3a0917cf0cb5dc4386aaad80",
+      "type": "Dependency",
+      "name": "overview.md",
+      "qualified_name": "",
+      "file_path": "docs/payments.md",
+      "line": 12,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "cross-reference",
+        "link_text": "the overview"
+      },
+      "metrics": null
+    },
+    {
+      "id": "533fb4c1f4aba262a3352cda",
+      "type": "Document",
+      "name": "Deep heading",
+      "qualified_name": "Overview \u003e Empty \u003e Deep heading",
+      "file_path": "docs/payments.md",
+      "line": 53,
+      "end_line": 54,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "Text right under a deep heading.",
+      "properties": {
+        "heading_path": "Overview \u003e Empty \u003e Deep heading",
+        "kind": "section",
+        "level": "####",
+        "ordinal": "1",
+        "section_hash": "sha256:93d04976c612153277f12f05ca90eb55912a25eec6bb3a519aa436e4b057d950"
+      },
+      "metrics": null
+    },
+    {
+      "id": "5761281ca80480dc5cd250e4",
+      "type": "Document",
+      "name": "TODO: document refunds",
+      "qualified_name": "",
+      "file_path": "docs/payments.md",
+      "line": 44,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "todo",
+        "todo_type": "TODO"
+      },
+      "metrics": null
+    },
+    {
+      "id": "94f9352d7bcd18cec319cc52",
+      "type": "Document",
+      "name": "Setup",
+      "qualified_name": "Overview \u003e Setup",
+      "file_path": "docs/payments.md",
+      "line": 22,
+      "end_line": 38,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "Run the [installer](../scripts/install.sh) and read [the API docs](https://example.com/api).\n\n```go\n// TODO: inside a fence, not an item\nfunc main() {}\n```\n\n```\n# Not a heading, and a fence with no language\n```",
+      "properties": {
+        "heading_path": "Overview \u003e Setup",
+        "kind": "section",
+        "level": "##",
+        "ordinal": "1",
+        "section_hash": "sha256:9e75a15749936ffc2c1cb1b3368e4bf5e5f77ccc0408a2b89d8523c8109cbd87"
+      },
+      "metrics": null
+    },
+    {
+      "id": "9ee66ca4baab99157a1f2131",
+      "type": "Document",
+      "name": "Overview",
+      "qualified_name": "Overview",
+      "file_path": "docs/payments.md",
+      "line": 47,
+      "end_line": 54,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "Closing words.",
+      "properties": {
+        "heading_path": "Overview",
+        "kind": "section",
+        "level": "#",
+        "ordinal": "2",
+        "section_hash": "sha256:552031ce054088e5a064a51ac4781be0dc41d6b5dec6bcee99427d689a386118"
+      },
+      "metrics": null
+    },
+    {
+      "id": "a421a81ce46ac4dbeeac829b",
+      "type": "Dependency",
+      "name": "../scripts/install.sh",
+      "qualified_name": "",
+      "file_path": "docs/payments.md",
+      "line": 24,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "cross-reference",
+        "link_text": "installer"
+      },
+      "metrics": null
+    },
+    {
+      "id": "b767416d1ac8165dd1c7d884",
+      "type": "Document",
+      "name": "code:go",
+      "qualified_name": "",
+      "file_path": "docs/payments.md",
+      "line": 26,
+      "end_line": 29,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "code_language": "go",
+        "kind": "code-block"
+      },
+      "metrics": null
+    },
+    {
+      "id": "e849acefefb3d6476c800346",
+      "type": "Document",
+      "name": "Empty",
+      "qualified_name": "Overview \u003e Empty",
+      "file_path": "docs/payments.md",
+      "line": 51,
+      "end_line": 54,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "heading_path": "Overview \u003e Empty",
+        "kind": "section",
+        "level": "##",
+        "ordinal": "1"
+      },
+      "metrics": null
+    },
+    {
+      "id": "ee2e1ee3e5b918f31729ad77",
+      "type": "Dependency",
+      "name": "./config.yaml",
+      "qualified_name": "",
+      "file_path": "docs/payments.md",
+      "line": 37,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "cross-reference",
+        "link_text": "config"
+      },
+      "metrics": null
+    },
+    {
+      "id": "ee2e1ee3e5b918f31729ad77",
+      "type": "Dependency",
+      "name": "./config.yaml",
+      "qualified_name": "",
+      "file_path": "docs/payments.md",
+      "line": 37,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "cross-reference",
+        "link_text": "config again"
+      },
+      "metrics": null
+    },
+    {
+      "id": "ef4495e3e97947c0ba8b9808",
+      "type": "Document",
+      "name": "FIXME: tighten retries",
+      "qualified_name": "",
+      "file_path": "docs/payments.md",
+      "line": 45,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "todo",
+        "todo_type": "FIXME"
+      },
+      "metrics": null
+    }
+  ],
+  "edges": [
+    {
+      "id": "114253c3aa4dc685a9750fd3",
+      "type": "Contains",
+      "source_id": "127b17e5df83b17b06a2d239",
+      "target_id": "94f9352d7bcd18cec319cc52",
+      "properties": null
+    },
+    {
+      "id": "194e194495bd8d81dd64c386",
+      "type": "Contains",
+      "source_id": "127b17e5df83b17b06a2d239",
+      "target_id": "533fb4c1f4aba262a3352cda",
+      "properties": null
+    },
+    {
+      "id": "2bd80689a574731ba0c92a75",
+      "type": "Documents",
+      "source_id": "127b17e5df83b17b06a2d239",
+      "target_id": "3a0917cf0cb5dc4386aaad80",
+      "properties": null
+    },
+    {
+      "id": "2fbc33fc644a904930b09cd7",
+      "type": "Contains",
+      "source_id": "127b17e5df83b17b06a2d239",
+      "target_id": "e849acefefb3d6476c800346",
+      "properties": null
+    },
+    {
+      "id": "33b40dd27b2d09118c50fa8d",
+      "type": "Contains",
+      "source_id": "127b17e5df83b17b06a2d239",
+      "target_id": "ef4495e3e97947c0ba8b9808",
+      "properties": null
+    },
+    {
+      "id": "56f75bb1a23a21e3bd987db5",
+      "type": "Contains",
+      "source_id": "127b17e5df83b17b06a2d239",
+      "target_id": "0f16a11ce026b26964885fc4",
+      "properties": null
+    },
+    {
+      "id": "5bf4714513e9ceea1eac0f4e",
+      "type": "Documents",
+      "source_id": "127b17e5df83b17b06a2d239",
+      "target_id": "a421a81ce46ac4dbeeac829b",
+      "properties": null
+    },
+    {
+      "id": "600cf6e495f163a2bb38953a",
+      "type": "Contains",
+      "source_id": "127b17e5df83b17b06a2d239",
+      "target_id": "9ee66ca4baab99157a1f2131",
+      "properties": null
+    },
+    {
+      "id": "69a275793bfaa24d35a457b6",
+      "type": "Contains",
+      "source_id": "127b17e5df83b17b06a2d239",
+      "target_id": "5761281ca80480dc5cd250e4",
+      "properties": null
+    },
+    {
+      "id": "7db1ebcfd97c008dcff75572",
+      "type": "Contains",
+      "source_id": "127b17e5df83b17b06a2d239",
+      "target_id": "3983ca59fe5d5b2e30f52e17",
+      "properties": null
+    },
+    {
+      "id": "810a5e09df73db5c2eb2e1ac",
+      "type": "Contains",
+      "source_id": "127b17e5df83b17b06a2d239",
+      "target_id": "069d8941aef1df222fa7c4c9",
+      "properties": null
+    },
+    {
+      "id": "c40e9a1b8c44493b3e34319e",
+      "type": "Documents",
+      "source_id": "127b17e5df83b17b06a2d239",
+      "target_id": "ee2e1ee3e5b918f31729ad77",
+      "properties": null
+    },
+    {
+      "id": "c40e9a1b8c44493b3e34319e",
+      "type": "Documents",
+      "source_id": "127b17e5df83b17b06a2d239",
+      "target_id": "ee2e1ee3e5b918f31729ad77",
+      "properties": null
+    },
+    {
+      "id": "cadbc1b5120e48ef2baad21f",
+      "type": "Contains",
+      "source_id": "127b17e5df83b17b06a2d239",
+      "target_id": "b767416d1ac8165dd1c7d884",
+      "properties": null
+    }
+  ]
+}

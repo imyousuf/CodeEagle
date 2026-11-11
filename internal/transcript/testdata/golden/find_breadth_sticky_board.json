@@ -1,0 +1,773 @@
+[
+  {
+    "breadth": "none",
+    "complete": 1,
+    "considered": 16,
+    "expanded": 0,
+    "hits": [
+      {
+        "covers_all": true,
+        "date": "2026-03-09",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "Sticky board kickoff",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "Sticky board kickoff",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "sticky board redesign",
+            "node": "TopicSegment: sticky board redesign",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "sticky board redesign",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Sticky board kickoff",
+        "only_related": false,
+        "phrase": true,
+        "score": 2,
+        "session": "session-08",
+        "terms": [
+          "sticky",
+          "board"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-16",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "Board meeting prep",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "Board meeting prep",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "board governance",
+            "node": "TopicSegment: board governance",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "board governance",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Board meeting prep",
+        "only_related": false,
+        "phrase": false,
+        "score": 0.5,
+        "session": "session-15",
+        "terms": [
+          "board"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-10",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "HITL vs sticky notes",
+            "node": "TopicSegment: HITL vs sticky notes",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "sticky"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "HITL vs sticky notes",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "sticky"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Review tooling",
+        "only_related": false,
+        "phrase": false,
+        "score": 0.5,
+        "session": "session-09",
+        "terms": [
+          "sticky"
+        ]
+      }
+    ],
+    "query": "sticky board",
+    "terms": [
+      "sticky",
+      "board"
+    ],
+    "total": 3
+  },
+  {
+    "breadth": "narrow",
+    "complete": 1,
+    "considered": 16,
+    "expanded": 0,
+    "hits": [
+      {
+        "covers_all": true,
+        "date": "2026-03-09",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "Sticky board kickoff",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "Sticky board kickoff",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "sticky board redesign",
+            "node": "TopicSegment: sticky board redesign",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "sticky board redesign",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Sticky board kickoff",
+        "only_related": false,
+        "phrase": true,
+        "score": 2,
+        "session": "session-08",
+        "terms": [
+          "sticky",
+          "board"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-16",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "Board meeting prep",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "Board meeting prep",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "board governance",
+            "node": "TopicSegment: board governance",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "board governance",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Board meeting prep",
+        "only_related": false,
+        "phrase": false,
+        "score": 0.5,
+        "session": "session-15",
+        "terms": [
+          "board"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-10",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "HITL vs sticky notes",
+            "node": "TopicSegment: HITL vs sticky notes",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "sticky"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "HITL vs sticky notes",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "sticky"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Review tooling",
+        "only_related": false,
+        "phrase": false,
+        "score": 0.5,
+        "session": "session-09",
+        "terms": [
+          "sticky"
+        ]
+      }
+    ],
+    "query": "sticky board",
+    "terms": [
+      "sticky",
+      "board"
+    ],
+    "total": 3
+  },
+  {
+    "breadth": "default",
+    "complete": 1,
+    "considered": 16,
+    "expanded": 1,
+    "hits": [
+      {
+        "covers_all": true,
+        "date": "2026-03-09",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "Sticky board kickoff",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "Sticky board kickoff",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "sticky board redesign",
+            "node": "TopicSegment: sticky board redesign",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "sticky board redesign",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Sticky board kickoff",
+        "only_related": false,
+        "phrase": true,
+        "score": 2,
+        "session": "session-08",
+        "terms": [
+          "sticky",
+          "board"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-16",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "Board meeting prep",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "Board meeting prep",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "board governance",
+            "node": "TopicSegment: board governance",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "board governance",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Board meeting prep",
+        "only_related": false,
+        "phrase": false,
+        "score": 0.5,
+        "session": "session-15",
+        "terms": [
+          "board"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-10",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "HITL vs sticky notes",
+            "node": "TopicSegment: HITL vs sticky notes",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "sticky"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "HITL vs sticky notes",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "sticky"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Review tooling",
+        "only_related": false,
+        "phrase": false,
+        "score": 0.5,
+        "session": "session-09",
+        "terms": [
+          "sticky"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-12",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "whiteboard tooling",
+            "phrase": false,
+            "probability": 0.7,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "via": "sticky board redesign ~ whiteboard tooling",
+            "weight": 0.35
+          }
+        ],
+        "meeting": "Whiteboard tools demo",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.35,
+        "session": "session-11",
+        "terms": null
+      }
+    ],
+    "query": "sticky board",
+    "terms": [
+      "sticky",
+      "board"
+    ],
+    "total": 4
+  },
+  {
+    "breadth": "wide",
+    "complete": 1,
+    "considered": 16,
+    "expanded": 2,
+    "hits": [
+      {
+        "covers_all": true,
+        "date": "2026-03-09",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "Sticky board kickoff",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "Sticky board kickoff",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "sticky board redesign",
+            "node": "TopicSegment: sticky board redesign",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "sticky board redesign",
+            "phrase": true,
+            "probability": 0,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Sticky board kickoff",
+        "only_related": false,
+        "phrase": true,
+        "score": 2,
+        "session": "session-08",
+        "terms": [
+          "sticky",
+          "board"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-16",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "Board meeting prep",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "Board meeting prep",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "board governance",
+            "node": "TopicSegment: board governance",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "board governance",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "board"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Board meeting prep",
+        "only_related": false,
+        "phrase": false,
+        "score": 0.5,
+        "session": "session-15",
+        "terms": [
+          "board"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-10",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "HITL vs sticky notes",
+            "node": "TopicSegment: HITL vs sticky notes",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "sticky"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "HITL vs sticky notes",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "sticky"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Review tooling",
+        "only_related": false,
+        "phrase": false,
+        "score": 0.5,
+        "session": "session-09",
+        "terms": [
+          "sticky"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-12",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "whiteboard tooling",
+            "phrase": false,
+            "probability": 0.7,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "via": "sticky board redesign ~ whiteboard tooling",
+            "weight": 0.35
+          }
+        ],
+        "meeting": "Whiteboard tools demo",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.35,
+        "session": "session-11",
+        "terms": null
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-13",
+        "matches": [
+          {
+            "hops": 2,
+            "kind": "topic",
+            "label": "robotics lab",
+            "phrase": false,
+            "probability": 0.5599999999999999,
+            "terms": [
+              "sticky",
+              "board"
+            ],
+            "via": "sticky board redesign ~ whiteboard tooling ~ robotics lab",
+            "weight": 0.13999999999999999
+          }
+        ],
+        "meeting": "Robotics lab tour",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.13999999999999999,
+        "session": "session-12",
+        "terms": null
+      }
+    ],
+    "query": "sticky board",
+    "terms": [
+      "sticky",
+      "board"
+    ],
+    "total": 5
+  }
+]

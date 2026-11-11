@@ -1,0 +1,7 @@
+Syncing (incremental) on branch "default"...
+[vector] Embedding provider: kit-golden-bow/bow-64 (64-dim)
+[vector] Building vector index from graph...
+[vector] Indexed 4 vectors
+Sync complete: 2 files indexed, 11 nodes, 10 edges
+--- stderr ---
+Warning: branch cleanup failed: list local branches: list local branches: git branch --format=%(refname:short): exit status 128

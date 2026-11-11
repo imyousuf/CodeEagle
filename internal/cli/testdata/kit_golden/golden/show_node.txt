@@ -1,0 +1,4 @@
+c5e7bd Struct Store
+kitgolden/src/store.go:10-12
+
+Store holds string values by key.

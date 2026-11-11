@@ -1,0 +1,6 @@
+Operator notes
+
+Restarting the store clears every cached entry; there is no persistence.
+
+When the upstream service is down, expect each request to take up to a minute
+before it fails, because of the retry backoff.

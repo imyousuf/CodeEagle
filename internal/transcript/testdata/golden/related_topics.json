@@ -1,0 +1,867 @@
+[
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "hiring plan"
+        },
+        {
+          "probability": 0.75,
+          "same": 0,
+          "topic": "robotics lab"
+        },
+        {
+          "probability": 0.5,
+          "same": 0,
+          "topic": "capacity planning"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "hiring plan"
+        },
+        {
+          "probability": 0.75,
+          "same": 0,
+          "topic": "robotics lab"
+        },
+        {
+          "probability": 0.5,
+          "same": 0,
+          "topic": "capacity planning"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "hiring plan"
+        },
+        {
+          "probability": 0.75,
+          "same": 0,
+          "topic": "robotics lab"
+        }
+      ],
+      "0.8": [
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "hiring plan"
+        }
+      ]
+    },
+    "topic": "Machine intelligence"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.85,
+          "same": 0.1,
+          "topic": "AI alignment risk"
+        },
+        {
+          "probability": 0.65,
+          "same": 0.05,
+          "topic": "recursive self improvement"
+        },
+        {
+          "probability": 0.55,
+          "same": 0.02,
+          "topic": "AI roadmap"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.85,
+          "same": 0.1,
+          "topic": "AI alignment risk"
+        },
+        {
+          "probability": 0.65,
+          "same": 0.05,
+          "topic": "recursive self improvement"
+        },
+        {
+          "probability": 0.55,
+          "same": 0.02,
+          "topic": "AI roadmap"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.85,
+          "same": 0.1,
+          "topic": "AI alignment risk"
+        },
+        {
+          "probability": 0.65,
+          "same": 0.05,
+          "topic": "recursive self improvement"
+        }
+      ],
+      "0.8": [
+        {
+          "probability": 0.85,
+          "same": 0.1,
+          "topic": "AI alignment risk"
+        }
+      ]
+    },
+    "topic": "AGI feasibility debate"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.9,
+          "same": 0.2,
+          "topic": "AGI timelines"
+        },
+        {
+          "probability": 0.85,
+          "same": 0.1,
+          "topic": "AGI feasibility debate"
+        },
+        {
+          "probability": 0.7,
+          "same": 0.01,
+          "topic": "model regression"
+        },
+        {
+          "probability": 0.6,
+          "same": 0,
+          "topic": "AI roadmap"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.9,
+          "same": 0.2,
+          "topic": "AGI timelines"
+        },
+        {
+          "probability": 0.85,
+          "same": 0.1,
+          "topic": "AGI feasibility debate"
+        },
+        {
+          "probability": 0.7,
+          "same": 0.01,
+          "topic": "model regression"
+        },
+        {
+          "probability": 0.6,
+          "same": 0,
+          "topic": "AI roadmap"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.9,
+          "same": 0.2,
+          "topic": "AGI timelines"
+        },
+        {
+          "probability": 0.85,
+          "same": 0.1,
+          "topic": "AGI feasibility debate"
+        },
+        {
+          "probability": 0.7,
+          "same": 0.01,
+          "topic": "model regression"
+        },
+        {
+          "probability": 0.6,
+          "same": 0,
+          "topic": "AI roadmap"
+        }
+      ],
+      "0.8": [
+        {
+          "probability": 0.9,
+          "same": 0.2,
+          "topic": "AGI timelines"
+        },
+        {
+          "probability": 0.85,
+          "same": 0.1,
+          "topic": "AGI feasibility debate"
+        }
+      ]
+    },
+    "topic": "AI alignment risk"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.7,
+          "same": 0.03,
+          "topic": "capacity planning"
+        },
+        {
+          "probability": 0.65,
+          "same": 0.05,
+          "topic": "AGI feasibility debate"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.7,
+          "same": 0.03,
+          "topic": "capacity planning"
+        },
+        {
+          "probability": 0.65,
+          "same": 0.05,
+          "topic": "AGI feasibility debate"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.7,
+          "same": 0.03,
+          "topic": "capacity planning"
+        },
+        {
+          "probability": 0.65,
+          "same": 0.05,
+          "topic": "AGI feasibility debate"
+        }
+      ],
+      "0.8": []
+    },
+    "topic": "recursive self improvement"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.92,
+          "same": 0,
+          "topic": "AI roadmap"
+        },
+        {
+          "probability": 0.7,
+          "same": 0.01,
+          "topic": "AI alignment risk"
+        },
+        {
+          "probability": 0.6,
+          "same": 0,
+          "topic": "AGI timelines"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.92,
+          "same": 0,
+          "topic": "AI roadmap"
+        },
+        {
+          "probability": 0.7,
+          "same": 0.01,
+          "topic": "AI alignment risk"
+        },
+        {
+          "probability": 0.6,
+          "same": 0,
+          "topic": "AGI timelines"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.92,
+          "same": 0,
+          "topic": "AI roadmap"
+        },
+        {
+          "probability": 0.7,
+          "same": 0.01,
+          "topic": "AI alignment risk"
+        },
+        {
+          "probability": 0.6,
+          "same": 0,
+          "topic": "AGI timelines"
+        }
+      ],
+      "0.8": [
+        {
+          "probability": 0.92,
+          "same": 0,
+          "topic": "AI roadmap"
+        }
+      ]
+    },
+    "topic": "model regression"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.7,
+          "same": 0.03,
+          "topic": "recursive self improvement"
+        },
+        {
+          "probability": 0.5,
+          "same": 0,
+          "topic": "Machine intelligence"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.7,
+          "same": 0.03,
+          "topic": "recursive self improvement"
+        },
+        {
+          "probability": 0.5,
+          "same": 0,
+          "topic": "Machine intelligence"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.7,
+          "same": 0.03,
+          "topic": "recursive self improvement"
+        }
+      ],
+      "0.8": []
+    },
+    "topic": "capacity planning"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "hiring plan"
+        },
+        {
+          "probability": 0.92,
+          "same": 0,
+          "topic": "model regression"
+        },
+        {
+          "probability": 0.9,
+          "same": 0,
+          "topic": "GPU budget"
+        },
+        {
+          "probability": 0.6,
+          "same": 0,
+          "topic": "AI alignment risk"
+        },
+        {
+          "probability": 0.55,
+          "same": 0.02,
+          "topic": "AGI feasibility debate"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "hiring plan"
+        },
+        {
+          "probability": 0.92,
+          "same": 0,
+          "topic": "model regression"
+        },
+        {
+          "probability": 0.9,
+          "same": 0,
+          "topic": "GPU budget"
+        },
+        {
+          "probability": 0.6,
+          "same": 0,
+          "topic": "AI alignment risk"
+        },
+        {
+          "probability": 0.55,
+          "same": 0.02,
+          "topic": "AGI feasibility debate"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "hiring plan"
+        },
+        {
+          "probability": 0.92,
+          "same": 0,
+          "topic": "model regression"
+        },
+        {
+          "probability": 0.9,
+          "same": 0,
+          "topic": "GPU budget"
+        },
+        {
+          "probability": 0.6,
+          "same": 0,
+          "topic": "AI alignment risk"
+        }
+      ],
+      "0.8": [
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "hiring plan"
+        },
+        {
+          "probability": 0.92,
+          "same": 0,
+          "topic": "model regression"
+        },
+        {
+          "probability": 0.9,
+          "same": 0,
+          "topic": "GPU budget"
+        }
+      ]
+    },
+    "topic": "AI roadmap"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.9,
+          "same": 0,
+          "topic": "AI roadmap"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.9,
+          "same": 0,
+          "topic": "AI roadmap"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.9,
+          "same": 0,
+          "topic": "AI roadmap"
+        }
+      ],
+      "0.8": [
+        {
+          "probability": 0.9,
+          "same": 0,
+          "topic": "AI roadmap"
+        }
+      ]
+    },
+    "topic": "GPU budget"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "AI roadmap"
+        },
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "board governance"
+        },
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "Machine intelligence"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "AI roadmap"
+        },
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "board governance"
+        },
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "Machine intelligence"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "AI roadmap"
+        },
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "board governance"
+        },
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "Machine intelligence"
+        }
+      ],
+      "0.8": [
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "AI roadmap"
+        },
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "board governance"
+        },
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "Machine intelligence"
+        }
+      ]
+    },
+    "topic": "hiring plan"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.8,
+          "same": 0.15,
+          "topic": "HITL vs sticky notes"
+        },
+        {
+          "probability": 0.7,
+          "same": 0.25,
+          "topic": "whiteboard tooling"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.8,
+          "same": 0.15,
+          "topic": "HITL vs sticky notes"
+        },
+        {
+          "probability": 0.7,
+          "same": 0.25,
+          "topic": "whiteboard tooling"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.8,
+          "same": 0.15,
+          "topic": "HITL vs sticky notes"
+        },
+        {
+          "probability": 0.7,
+          "same": 0.25,
+          "topic": "whiteboard tooling"
+        }
+      ],
+      "0.8": [
+        {
+          "probability": 0.8,
+          "same": 0.15,
+          "topic": "HITL vs sticky notes"
+        }
+      ]
+    },
+    "topic": "sticky board redesign"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.9,
+          "same": 0.4,
+          "topic": "HITL review queue"
+        },
+        {
+          "probability": 0.8,
+          "same": 0.15,
+          "topic": "sticky board redesign"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.9,
+          "same": 0.4,
+          "topic": "HITL review queue"
+        },
+        {
+          "probability": 0.8,
+          "same": 0.15,
+          "topic": "sticky board redesign"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.9,
+          "same": 0.4,
+          "topic": "HITL review queue"
+        },
+        {
+          "probability": 0.8,
+          "same": 0.15,
+          "topic": "sticky board redesign"
+        }
+      ],
+      "0.8": [
+        {
+          "probability": 0.9,
+          "same": 0.4,
+          "topic": "HITL review queue"
+        },
+        {
+          "probability": 0.8,
+          "same": 0.15,
+          "topic": "sticky board redesign"
+        }
+      ]
+    },
+    "topic": "HITL vs sticky notes"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.9,
+          "same": 0.4,
+          "topic": "HITL vs sticky notes"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.9,
+          "same": 0.4,
+          "topic": "HITL vs sticky notes"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.9,
+          "same": 0.4,
+          "topic": "HITL vs sticky notes"
+        }
+      ],
+      "0.8": [
+        {
+          "probability": 0.9,
+          "same": 0.4,
+          "topic": "HITL vs sticky notes"
+        }
+      ]
+    },
+    "topic": "HITL review queue"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "robotics lab"
+        },
+        {
+          "probability": 0.7,
+          "same": 0.25,
+          "topic": "sticky board redesign"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "robotics lab"
+        },
+        {
+          "probability": 0.7,
+          "same": 0.25,
+          "topic": "sticky board redesign"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "robotics lab"
+        },
+        {
+          "probability": 0.7,
+          "same": 0.25,
+          "topic": "sticky board redesign"
+        }
+      ],
+      "0.8": [
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "robotics lab"
+        }
+      ]
+    },
+    "topic": "whiteboard tooling"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "whiteboard tooling"
+        },
+        {
+          "probability": 0.75,
+          "same": 0,
+          "topic": "Machine intelligence"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "whiteboard tooling"
+        },
+        {
+          "probability": 0.75,
+          "same": 0,
+          "topic": "Machine intelligence"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "whiteboard tooling"
+        },
+        {
+          "probability": 0.75,
+          "same": 0,
+          "topic": "Machine intelligence"
+        }
+      ],
+      "0.8": [
+        {
+          "probability": 0.8,
+          "same": 0,
+          "topic": "whiteboard tooling"
+        }
+      ]
+    },
+    "topic": "robotics lab"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [],
+      "0.5": [],
+      "0.6": [],
+      "0.8": []
+    },
+    "topic": "quarterly planning"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.9,
+          "same": 0.2,
+          "topic": "AI alignment risk"
+        },
+        {
+          "probability": 0.6,
+          "same": 0,
+          "topic": "model regression"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.9,
+          "same": 0.2,
+          "topic": "AI alignment risk"
+        },
+        {
+          "probability": 0.6,
+          "same": 0,
+          "topic": "model regression"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.9,
+          "same": 0.2,
+          "topic": "AI alignment risk"
+        },
+        {
+          "probability": 0.6,
+          "same": 0,
+          "topic": "model regression"
+        }
+      ],
+      "0.8": [
+        {
+          "probability": 0.9,
+          "same": 0.2,
+          "topic": "AI alignment risk"
+        }
+      ]
+    },
+    "topic": "AGI timelines"
+  },
+  {
+    "neighbours_at_gate": {
+      "0.0": [
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "hiring plan"
+        }
+      ],
+      "0.5": [
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "hiring plan"
+        }
+      ],
+      "0.6": [
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "hiring plan"
+        }
+      ],
+      "0.8": [
+        {
+          "probability": 0.95,
+          "same": 0,
+          "topic": "hiring plan"
+        }
+      ]
+    },
+    "topic": "board governance"
+  }
+]

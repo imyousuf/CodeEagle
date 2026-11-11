@@ -1,0 +1,834 @@
+[
+  {
+    "breadth": "none",
+    "complete": 3,
+    "considered": 16,
+    "expanded": 0,
+    "hits": [
+      {
+        "covers_all": true,
+        "date": "2026-03-15",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "AGI timelines",
+            "node": "TopicSegment: AGI timelines",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "AGI timelines",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Timelines chat",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-14",
+        "terms": [
+          "agi"
+        ]
+      },
+      {
+        "covers_all": true,
+        "date": "2026-03-14",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "Quarterly planning, AGI mentioned",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "Quarterly planning, AGI mentioned",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Quarterly planning, AGI mentioned",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-13",
+        "terms": [
+          "agi"
+        ]
+      },
+      {
+        "covers_all": true,
+        "date": "2026-03-01",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "AGI feasibility debate with the platform team",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "AGI feasibility debate with the platform team",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "AGI feasibility debate",
+            "node": "TopicSegment: AGI feasibility debate",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "AGI feasibility debate",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "AGI feasibility debate with the platform team",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-00",
+        "terms": [
+          "agi"
+        ]
+      }
+    ],
+    "query": "AGI",
+    "terms": [
+      "agi"
+    ],
+    "total": 3
+  },
+  {
+    "breadth": "narrow",
+    "complete": 3,
+    "considered": 16,
+    "expanded": 1,
+    "hits": [
+      {
+        "covers_all": true,
+        "date": "2026-03-15",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "AGI timelines",
+            "node": "TopicSegment: AGI timelines",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "AGI timelines",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Timelines chat",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-14",
+        "terms": [
+          "agi"
+        ]
+      },
+      {
+        "covers_all": true,
+        "date": "2026-03-14",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "Quarterly planning, AGI mentioned",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "Quarterly planning, AGI mentioned",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Quarterly planning, AGI mentioned",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-13",
+        "terms": [
+          "agi"
+        ]
+      },
+      {
+        "covers_all": true,
+        "date": "2026-03-01",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "AGI feasibility debate with the platform team",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "AGI feasibility debate with the platform team",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "AGI feasibility debate",
+            "node": "TopicSegment: AGI feasibility debate",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "AGI feasibility debate",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "AGI feasibility debate with the platform team",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-00",
+        "terms": [
+          "agi"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-02",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "AI alignment risk",
+            "phrase": false,
+            "probability": 0.85,
+            "terms": [
+              "agi"
+            ],
+            "via": "AGI feasibility debate ~ AI alignment risk",
+            "weight": 0.425
+          },
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "AI alignment risk",
+            "phrase": false,
+            "probability": 0.9,
+            "terms": [
+              "agi"
+            ],
+            "via": "AGI timelines ~ AI alignment risk",
+            "weight": 0.45
+          }
+        ],
+        "meeting": "Alignment review",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.45,
+        "session": "session-01",
+        "terms": null
+      }
+    ],
+    "query": "AGI",
+    "terms": [
+      "agi"
+    ],
+    "total": 4
+  },
+  {
+    "breadth": "default",
+    "complete": 3,
+    "considered": 16,
+    "expanded": 3,
+    "hits": [
+      {
+        "covers_all": true,
+        "date": "2026-03-15",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "AGI timelines",
+            "node": "TopicSegment: AGI timelines",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "AGI timelines",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Timelines chat",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-14",
+        "terms": [
+          "agi"
+        ]
+      },
+      {
+        "covers_all": true,
+        "date": "2026-03-14",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "Quarterly planning, AGI mentioned",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "Quarterly planning, AGI mentioned",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Quarterly planning, AGI mentioned",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-13",
+        "terms": [
+          "agi"
+        ]
+      },
+      {
+        "covers_all": true,
+        "date": "2026-03-01",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "AGI feasibility debate with the platform team",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "AGI feasibility debate with the platform team",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "AGI feasibility debate",
+            "node": "TopicSegment: AGI feasibility debate",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "AGI feasibility debate",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "AGI feasibility debate with the platform team",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-00",
+        "terms": [
+          "agi"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-02",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "AI alignment risk",
+            "phrase": false,
+            "probability": 0.85,
+            "terms": [
+              "agi"
+            ],
+            "via": "AGI feasibility debate ~ AI alignment risk",
+            "weight": 0.425
+          },
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "AI alignment risk",
+            "phrase": false,
+            "probability": 0.9,
+            "terms": [
+              "agi"
+            ],
+            "via": "AGI timelines ~ AI alignment risk",
+            "weight": 0.45
+          }
+        ],
+        "meeting": "Alignment review",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.45,
+        "session": "session-01",
+        "terms": null
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-03",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "recursive self improvement",
+            "phrase": false,
+            "probability": 0.65,
+            "terms": [
+              "agi"
+            ],
+            "via": "AGI feasibility debate ~ recursive self improvement",
+            "weight": 0.325
+          }
+        ],
+        "meeting": "Self-improvement reading group",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.325,
+        "session": "session-02",
+        "terms": null
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-04",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "model regression",
+            "phrase": false,
+            "probability": 0.6,
+            "terms": [
+              "agi"
+            ],
+            "via": "AGI timelines ~ model regression",
+            "weight": 0.3
+          }
+        ],
+        "meeting": "Regression postmortem",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.3,
+        "session": "session-03",
+        "terms": null
+      }
+    ],
+    "query": "AGI",
+    "terms": [
+      "agi"
+    ],
+    "total": 6
+  },
+  {
+    "breadth": "wide",
+    "complete": 3,
+    "considered": 16,
+    "expanded": 5,
+    "hits": [
+      {
+        "covers_all": true,
+        "date": "2026-03-15",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "AGI timelines",
+            "node": "TopicSegment: AGI timelines",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "AGI timelines",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Timelines chat",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-14",
+        "terms": [
+          "agi"
+        ]
+      },
+      {
+        "covers_all": true,
+        "date": "2026-03-14",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "Quarterly planning, AGI mentioned",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "Quarterly planning, AGI mentioned",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "Quarterly planning, AGI mentioned",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-13",
+        "terms": [
+          "agi"
+        ]
+      },
+      {
+        "covers_all": true,
+        "date": "2026-03-01",
+        "matches": [
+          {
+            "hops": 0,
+            "kind": "title",
+            "label": "AGI feasibility debate with the platform team",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "summary",
+            "label": "AGI feasibility debate with the platform team",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "segment",
+            "label": "AGI feasibility debate",
+            "node": "TopicSegment: AGI feasibility debate",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          },
+          {
+            "hops": 0,
+            "kind": "topic",
+            "label": "AGI feasibility debate",
+            "phrase": false,
+            "probability": 0,
+            "terms": [
+              "agi"
+            ],
+            "weight": 0
+          }
+        ],
+        "meeting": "AGI feasibility debate with the platform team",
+        "only_related": false,
+        "phrase": false,
+        "score": 1,
+        "session": "session-00",
+        "terms": [
+          "agi"
+        ]
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-02",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "AI alignment risk",
+            "phrase": false,
+            "probability": 0.85,
+            "terms": [
+              "agi"
+            ],
+            "via": "AGI feasibility debate ~ AI alignment risk",
+            "weight": 0.425
+          },
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "AI alignment risk",
+            "phrase": false,
+            "probability": 0.9,
+            "terms": [
+              "agi"
+            ],
+            "via": "AGI timelines ~ AI alignment risk",
+            "weight": 0.45
+          }
+        ],
+        "meeting": "Alignment review",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.44999999999999996,
+        "session": "session-01",
+        "terms": null
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-03",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "recursive self improvement",
+            "phrase": false,
+            "probability": 0.65,
+            "terms": [
+              "agi"
+            ],
+            "via": "AGI feasibility debate ~ recursive self improvement",
+            "weight": 0.325
+          }
+        ],
+        "meeting": "Self-improvement reading group",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.325,
+        "session": "session-02",
+        "terms": null
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-04",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "model regression",
+            "phrase": false,
+            "probability": 0.6,
+            "terms": [
+              "agi"
+            ],
+            "via": "AGI timelines ~ model regression",
+            "weight": 0.3
+          }
+        ],
+        "meeting": "Regression postmortem",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.3,
+        "session": "session-03",
+        "terms": null
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-06",
+        "matches": [
+          {
+            "hops": 1,
+            "kind": "topic",
+            "label": "AI roadmap",
+            "phrase": false,
+            "probability": 0.55,
+            "terms": [
+              "agi"
+            ],
+            "via": "AGI feasibility debate ~ AI roadmap",
+            "weight": 0.275
+          }
+        ],
+        "meeting": "Roadmap offsite",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.275,
+        "session": "session-05",
+        "terms": null
+      },
+      {
+        "covers_all": false,
+        "date": "2026-03-08",
+        "matches": [
+          {
+            "hops": 2,
+            "kind": "topic",
+            "label": "hiring plan",
+            "phrase": false,
+            "probability": 0.5225,
+            "terms": [
+              "agi"
+            ],
+            "via": "AGI feasibility debate ~ AI roadmap ~ hiring plan",
+            "weight": 0.130625
+          }
+        ],
+        "meeting": "Hiring sync",
+        "only_related": true,
+        "phrase": false,
+        "score": 0.130625,
+        "session": "session-07",
+        "terms": null
+      }
+    ],
+    "query": "AGI",
+    "terms": [
+      "agi"
+    ],
+    "total": 8
+  }
+]
