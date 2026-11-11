@@ -25,6 +25,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -114,7 +115,7 @@ func goldenJevJudge(t *testing.T, s *jevGoldenServer) *JevJudge {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &JevJudge{client: client}
+	return NewJevJudge(client)
 }
 
 // jevGoldenCanonical decodes JSON and encodes it again with sorted keys,
@@ -333,13 +334,18 @@ func TestJevJudgeRequestGolden(t *testing.T) {
 			goldenIdentityOptions("Person 2")),
 	})
 
-	if got, want := fmt.Sprintf("%+v", screen), "map[voice_0:{Choice:background_media Confidence:0.93 RunnerUp:participant RunnerUpShare:0.05}]"; got != want {
-		t.Errorf("screen verdicts = %s\nwant              %s", got, want)
+	// Compared as structs: a yes/no probability field joined Verdict after
+	// these were pinned, and is zero for a choice.
+	wantScreen := map[string]Verdict{"voice_0": {Choice: "background_media", Confidence: 0.93, RunnerUp: "participant", RunnerUpShare: 0.05}}
+	if !reflect.DeepEqual(screen, wantScreen) {
+		t.Errorf("screen verdicts = %+v\nwant              %+v", screen, wantScreen)
 	}
-	if got, want := fmt.Sprintf("%+v", identify),
-		"map[speaker_0:{Choice:Kevin Mitchell Confidence:0.97 RunnerUp:unresolved RunnerUpShare:0.02} "+
-			"speaker_1:{Choice:unresolved Confidence:0.88 RunnerUp:Mona Patel RunnerUpShare:0.12}]"; got != want {
-		t.Errorf("identify verdicts = %s\nwant                %s", got, want)
+	wantIdentify := map[string]Verdict{
+		"speaker_0": {Choice: "Kevin Mitchell", Confidence: 0.97, RunnerUp: "unresolved", RunnerUpShare: 0.02},
+		"speaker_1": {Choice: "unresolved", Confidence: 0.88, RunnerUp: "Mona Patel", RunnerUpShare: 0.12},
+	}
+	if !reflect.DeepEqual(identify, wantIdentify) {
+		t.Errorf("identify verdicts = %+v\nwant                %+v", identify, wantIdentify)
 	}
 	if got := judge.Usage(); got != (Usage{Requests: 2, InputTokens: 2100, OutputTokens: 10}) {
 		t.Errorf("usage = %+v", got)

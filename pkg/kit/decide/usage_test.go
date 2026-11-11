@@ -21,7 +21,7 @@ func newTestJudge(t *testing.T, url string) *JevJudge {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &JevJudge{client: client}
+	return NewJevJudge(client)
 }
 
 // twoWay is a question with the two options the client insists on.

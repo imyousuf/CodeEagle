@@ -42,7 +42,7 @@ func TestJevJudgeMapsVerdicts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	judge := &JevJudge{client: client}
+	judge := NewJevJudge(client)
 
 	verdicts, err := judge.Decide(context.Background(), map[string]string{"transcript": "..."},
 		map[string]Question{
@@ -85,7 +85,7 @@ func TestJevJudgeNoQuestions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	judge := &JevJudge{client: client}
+	judge := NewJevJudge(client)
 
 	verdicts, err := judge.Decide(context.Background(), "state", nil)
 	if err != nil {
@@ -100,14 +100,11 @@ func TestJevJudgeNoQuestions(t *testing.T) {
 // graph edge written at a given confidence can be traced to the weights that
 // produced it.
 func TestNewJevJudgeName(t *testing.T) {
-	judge, err := NewJevJudge("apikey_test", "jev-1.13.0")
+	client, err := jev.New("apikey_test", jev.WithModel("jev-1.13.0"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := judge.Name(); got != "jev/jev-1.13.0" {
+	if got := NewJevJudge(client).Name(); got != "jev/jev-1.13.0" {
 		t.Errorf("Name() = %q, want jev/jev-1.13.0", got)
-	}
-	if _, err := NewJevJudge("", ""); err == nil {
-		t.Error("NewJevJudge succeeded with no key")
 	}
 }

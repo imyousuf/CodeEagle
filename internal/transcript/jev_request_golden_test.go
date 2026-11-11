@@ -38,8 +38,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/decide"
 	"github.com/imyousuf/CodeEagle/pkg/jev"
+	"github.com/imyousuf/CodeEagle/pkg/kit/decide"
 	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
