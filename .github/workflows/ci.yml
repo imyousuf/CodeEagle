@@ -59,5 +59,11 @@ jobs:
       - name: Test
         run: make test
 
+      # Every step above builds in workspace mode against the working copy of
+      # the nested modules. A consumer, and `go install …/cmd/codeeagle@latest`,
+      # builds against the pinned versions instead, without go.work.
+      - name: Check the nested modules and the pins on them
+        run: make modules-check
+
       - name: Build
         run: make build
