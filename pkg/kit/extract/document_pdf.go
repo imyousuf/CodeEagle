@@ -1,6 +1,4 @@
-//go:build !poppler
-
-package generic
+package extract
 
 import (
 	"bytes"
@@ -17,13 +15,13 @@ import (
 // extractPDF extracts plain text from a PDF file in pure Go.
 //
 // This is the default because it builds anywhere: no system library, no
-// pkg-config, and it cross-compiles, which the poppler path cannot do for
-// linux-arm64 without an arm64 copy of libpoppler. Build with `-tags poppler`
-// — which `make build` does automatically when pkg-config finds poppler-glib —
-// to get the faster and more capable extractor in document_pdf_poppler.go.
-// The two must agree on output shape: the same page markers, the same note
-// when cancelled, and the same silence for a page holding no text, because
-// callers and tests read that text rather than knowing which build produced it.
+// pkg-config, and it cross-compiles, which a reader built on libpoppler
+// cannot do for linux-arm64 without an arm64 copy of the library. A program
+// that has such a reader passes it with WithPDFReader (CodeEagle does when
+// built with `-tags poppler`). The two must agree on output shape: the same
+// page markers, the same note when cancelled, and the same silence for a page
+// holding no text, because callers and tests read that text rather than
+// knowing which reader produced it.
 //
 // Extraction is per page rather than via the whole-document helper so the
 // context can be honoured between pages, and so one unreadable page costs that

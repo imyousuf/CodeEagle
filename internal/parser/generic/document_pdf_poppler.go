@@ -10,6 +10,12 @@ import (
 	"github.com/wassup05/poppler-go/poppler"
 )
 
+// The kit cannot hold this reader: its module must build without cgo, and
+// `go mod tidy` would list poppler-go among its requirements for every
+// program that imports it, whatever tags they build with. So it stays here
+// and is handed to the kit, per call, by ExtractDocumentWithCtx.
+func init() { pdfReader = extractPDF }
+
 // extractPDF extracts plain text from a PDF file using poppler (via CGo).
 // Poppler is the industry-standard PDF rendering library used by most Linux
 // PDF viewers. It handles complex PDFs (embedded fonts, vector graphics, CJK
@@ -22,8 +28,9 @@ import (
 // requirement for compiling — or even linting — the whole repository, and made
 // the linux-arm64 release unbuildable, since cross-compiling against a system
 // library needs a matching arm64 copy of it. `make build` adds the tag
-// automatically when pkg-config finds poppler-glib; see document_pdf_purego.go
-// for the fallback, which must keep the same output shape as this.
+// automatically when pkg-config finds poppler-glib; without it PDFs are read
+// by pkg/kit/extract's pure Go reader, which must keep the same output shape
+// as this.
 //
 // The context is checked between pages for cancellation support.
 func extractPDF(ctx context.Context, content []byte) (string, error) {

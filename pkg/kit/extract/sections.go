@@ -1,4 +1,4 @@
-package generic
+package extract
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/imyousuf/CodeEagle/internal/parser/chatlog"
+	"github.com/imyousuf/CodeEagle/pkg/kit/extract/chatlog"
 )
 
 // LangDocument is the language of non-code documents whose text is kept in
@@ -58,8 +58,17 @@ var chatExtensions = map[string]bool{
 	".docx": true, ".odt": true, ".pdf": true,
 }
 
-// detectChat reads a file as a chat log if it is one.
-func (p *GenericParser) detectChat(path string, class FileClass, content []byte, extractDoc func() (string, error)) (*chatlog.Log, bool) {
+// DetectChat reads a file as a chat log if it is one: an export or history
+// in JSON, or a conversation pasted into text, a PDF or a word-processor
+// file. Only the formats a chat is looked for in are considered (.json,
+// .jsonl, .txt, .text, .docx, .odt, .pdf); anything else is not a chat,
+// whatever it holds.
+//
+// class is the file's Classify result. A document's text is asked of
+// extractDoc rather than read here, so a caller that needs the text anyway
+// (to section it, say) can read it once and hand the same text to both; it
+// is not called for a text file, nor for a format no chat is looked for in.
+func DetectChat(path string, class FileClass, content []byte, extractDoc func() (string, error)) (*chatlog.Log, bool) {
 	if !chatExtensions[strings.ToLower(filepath.Ext(path))] {
 		return nil, false
 	}

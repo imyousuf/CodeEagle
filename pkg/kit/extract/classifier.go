@@ -1,5 +1,4 @@
-// Package generic provides a fallback parser for non-code files (text, images).
-package generic
+package extract
 
 import (
 	"net/http"

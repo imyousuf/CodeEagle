@@ -1,7 +1,6 @@
 package generic
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -55,20 +54,6 @@ func TestSectionize(t *testing.T) {
 				t.Errorf("headings = %q, want %q", got, tt.headings)
 			}
 		})
-	}
-}
-
-func TestSectionizeBounds(t *testing.T) {
-	secs := Sectionize("big.txt", strings.Repeat("text ", 1800))
-	if len(secs) != 1 || len(secs[0].Text) != maxSectionTextLen {
-		t.Fatalf("got %d sections, first %d long; want 1 of %d", len(secs), len(secs[0].Text), maxSectionTextLen)
-	}
-	var b strings.Builder
-	for i := 1; i <= maxSections+20; i++ {
-		fmt.Fprintf(&b, "--- Slide %d ---\nSlide title %d\n", i, i)
-	}
-	if n := len(Sectionize("deck.pptx", b.String())); n != maxSections {
-		t.Errorf("slides = %d, want the cap %d", n, maxSections)
 	}
 }
 
@@ -181,29 +166,6 @@ func TestGenericParserChatLog(t *testing.T) {
 	}
 	if data.Nodes[0].Language == LangDocument {
 		t.Error("a config file was sectioned")
-	}
-}
-
-func TestGarbled(t *testing.T) {
-	for _, tt := range []struct {
-		name string
-		text string
-		want bool
-	}{
-		{"english", "Claude Code consumes the fine-tuned model via a custom endpoint while the classifier routes each request.", false},
-		{"french", "La passerelle expose l'API des messages, et le classifieur oriente chaque requête vers le modèle approprié.", false},
-		{"chinese", "网关公开消息接口，分类器将每个请求路由到合适的模型。网关公开消息接口，分类器将每个请求路由到合适的模型。", false},
-		{"type 3 font", "\x14û®:ÆË\x01\x14\x11ÆË\x01TË**®ÙË*\x01\x02p8\x01L®TË&\x011\x14û\x11:Æ\x01u:\b2p:&!\x11*Ë\x03\x01®", true},
-		{"accented capitals", "û®:ÆËÆËTË**®ÙË*p8L®TË&1û:Æu:2p:&!*Ë®û®:ÆËÆËÀ!®4å¾ûËÙ®4ËM®TËR!*åÙ4áË4á", true},
-		{"no word breaks", strings.Repeat("abcdefghijklmnopqrstuvwxyzabcdefghij", 4), true},
-		{"short", "ÆËÆË", false},
-	} {
-		if got := garbled(tt.text); got != tt.want {
-			t.Errorf("%s: garbled = %v, want %v", tt.name, got, tt.want)
-		}
-	}
-	if secs := Sectionize("x.pdf", "--- Page 1 ---\n"+strings.Repeat("û®:ÆËÆËTË**®ÙË*p8L®TË&", 10)); len(secs) != 0 {
-		t.Errorf("a garbled page became %d sections", len(secs))
 	}
 }
 

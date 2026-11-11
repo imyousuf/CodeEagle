@@ -6,6 +6,7 @@ require github.com/imyousuf/CodeEagle/pkg/jev v0.1.0
 
 require (
 	github.com/coder/hnsw v0.6.1
+	github.com/dslipak/pdf v0.0.2
 	github.com/imyousuf/CodeEagle/pkg/llm v0.0.0-20261111224124-7e58ed03d72d
 	google.golang.org/genai v1.45.0
 )

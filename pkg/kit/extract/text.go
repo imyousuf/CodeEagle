@@ -1,4 +1,4 @@
-package generic
+package extract
 
 import (
 	"path/filepath"
@@ -6,10 +6,10 @@ import (
 	"strings"
 )
 
-// ExtractText processes raw file content based on the file extension.
+// Text processes raw file content based on the file extension.
 // For most files, returns the content as-is. For specific formats,
 // performs basic extraction (e.g., SVG tag stripping).
-func ExtractText(filePath string, content []byte) string {
+func Text(filePath string, content []byte) string {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	text := string(content)
 

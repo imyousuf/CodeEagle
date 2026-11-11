@@ -12,6 +12,7 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/docs"
 	"github.com/imyousuf/CodeEagle/internal/parser"
 	"github.com/imyousuf/CodeEagle/internal/parser/markdown"
+	"github.com/imyousuf/CodeEagle/pkg/kit/extract"
 	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
@@ -186,7 +187,7 @@ func (p *GenericParser) ParseFileWithHash(ctx context.Context, filePath string, 
 	// A chat log is sectioned by day instead, whatever format holds it.
 	if class == FileClassText || class == FileClassDocument {
 		var secs []TextSection
-		if log, ok := p.detectChat(filePath, class, content, extractDoc); ok {
+		if log, ok := extract.DetectChat(filePath, class, content, extractDoc); ok {
 			docNode.Properties[PropChatFormat] = log.Format
 			for _, sec := range log.Sections() {
 				secs = append(secs, TextSection{Heading: sec.Heading, Text: sec.Text})

@@ -1,4 +1,4 @@
-package generic
+package extract
 
 import (
 	"archive/zip"

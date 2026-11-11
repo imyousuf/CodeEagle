@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/parser/chatlog"
+	"github.com/imyousuf/CodeEagle/pkg/kit/extract/chatlog"
 )
 
 // These tests pin DetectText exactly, from outside the package: the format,
