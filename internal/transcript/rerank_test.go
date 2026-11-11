@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/pkg/jev"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // scriptedAsker answers every noul with the probability scripted for its

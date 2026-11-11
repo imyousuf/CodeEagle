@@ -3,8 +3,8 @@ package search
 import (
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/vectorstore"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 func TestDeduplicateResults(t *testing.T) {

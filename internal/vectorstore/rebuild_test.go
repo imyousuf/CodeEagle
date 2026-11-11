@@ -11,7 +11,7 @@ import (
 
 	"github.com/dgraph-io/badger/v4"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // spreadEmbedder gives each text its own direction, so the graph has real

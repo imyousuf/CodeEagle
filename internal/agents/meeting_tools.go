@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/transcript"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // Meetings hold the part of a project's reasoning that never reaches the

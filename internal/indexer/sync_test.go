@@ -8,13 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/parser"
 	"github.com/imyousuf/CodeEagle/internal/parser/generic"
 	"github.com/imyousuf/CodeEagle/internal/parser/golang"
 	"github.com/imyousuf/CodeEagle/internal/parser/markdown"
 	"github.com/imyousuf/CodeEagle/internal/watcher"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // setupSyncTestIndexer creates an indexer with Go, Markdown, and Generic parsers

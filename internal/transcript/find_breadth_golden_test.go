@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // breadthMeetings are the meetings of the fixture: title, then the topics it

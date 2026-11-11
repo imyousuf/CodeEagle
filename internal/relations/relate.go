@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // DefaultGate is the probability at or above which a verdict is accepted.

@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/vectorstore"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // VectorSearcher is the part of the vector store a hybrid search needs.

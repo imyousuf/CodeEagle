@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // fileTypeNodes lists the node types that represent files on disk.

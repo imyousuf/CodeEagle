@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/decide"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // TestMeasureJevAgainstCorpus compares what a decision model concludes about

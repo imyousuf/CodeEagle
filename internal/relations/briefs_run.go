@@ -6,7 +6,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // DefaultBriefWorkers is how many briefs are written at once. A brief is one

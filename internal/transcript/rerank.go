@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/pkg/jev"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // Word matching decides which meetings contain a question's words; it cannot

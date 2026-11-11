@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/search"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 
 	// Register embedding providers so their init() functions run.
 	_ "github.com/imyousuf/CodeEagle/internal/embedding"

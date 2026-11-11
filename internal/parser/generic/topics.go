@@ -1,7 +1,7 @@
 package generic
 
 import (
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // CreateTopicNodes creates NodeTopic nodes and EdgeHasTopic edges from an

@@ -3,7 +3,7 @@ package relations
 import (
 	"context"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // LoadRelations reads every relation in the graph, keyed by subject path.

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 func addDocs(t *testing.T, g *mockGraphStore, n int, base time.Time) []*graph.Node {

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/parser/markdown"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // These tests pin every node and edge the parser emits, field by field, so a

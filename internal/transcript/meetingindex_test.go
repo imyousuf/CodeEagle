@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 func indexedMeeting(t *testing.T, store graph.Store, session, title, path string, when time.Time) *graph.Node {

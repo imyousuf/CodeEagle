@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/parser/markdown"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 func indexMarkdown(t *testing.T, store graph.Store, path, content string, props map[string]string) {

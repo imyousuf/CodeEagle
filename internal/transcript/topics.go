@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // TopicRegistry resolves a subject named in one meeting to a durable topic in

@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/parser"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // MarkdownParser extracts knowledge graph nodes and edges from Markdown files.

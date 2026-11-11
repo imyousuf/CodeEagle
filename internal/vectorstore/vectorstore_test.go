@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // mockEmbedder is a test embedding provider that returns deterministic vectors.

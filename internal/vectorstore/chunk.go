@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // embeddableProperties are node property keys that enrich the embedded text

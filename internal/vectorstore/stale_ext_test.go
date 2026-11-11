@@ -8,8 +8,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/vectorstore"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // The black-box counterparts of stale_test.go: the same behaviour, observed

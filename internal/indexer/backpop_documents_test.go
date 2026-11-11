@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/parser"
 	"github.com/imyousuf/CodeEagle/internal/parser/generic"
 	"github.com/imyousuf/CodeEagle/internal/watcher"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 func genericIndexer(store graph.Store, root string) *Indexer {

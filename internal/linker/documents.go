@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // markdownLanguage is parser.LangMarkdown, spelled out to keep the linker

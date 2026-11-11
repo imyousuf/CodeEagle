@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/imyousuf/CodeEagle/internal/docs"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/parser"
 	"github.com/imyousuf/CodeEagle/internal/parser/markdown"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 const (

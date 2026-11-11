@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/pkg/jev"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // meetingFiledUnder builds an enriched session filed under the given topics.

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // --- query_file_symbols ---

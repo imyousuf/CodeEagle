@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // MeetingIndex holds every indexed meeting so that lookups by session

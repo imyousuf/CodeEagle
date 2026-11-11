@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // relate writes a judged pair the way the relater does.

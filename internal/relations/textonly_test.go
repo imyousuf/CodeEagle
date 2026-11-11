@@ -6,9 +6,9 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/parser/generic"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 func TestTextOnlyDocumentIsASubject(t *testing.T) {

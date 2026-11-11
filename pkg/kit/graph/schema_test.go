@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // TestNewNodeIDIsPinned fixes the IDs NewNodeID produces. Every stored node,

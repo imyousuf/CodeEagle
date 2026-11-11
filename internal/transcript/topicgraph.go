@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // Every meeting names its subject in its own words, so a corpus of six

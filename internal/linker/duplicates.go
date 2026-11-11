@@ -4,7 +4,7 @@ import (
 	"context"
 	"sort"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // fileNodeTypes lists the node types that can be duplicates.

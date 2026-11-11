@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/parser"
 	"github.com/imyousuf/CodeEagle/internal/parser/markdown"
 	"github.com/imyousuf/CodeEagle/internal/watcher"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 const backfillDoc = "# Retry policy\n\nAt most three retries per call.\n"

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/search"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // A question about meetings is nearly always "what was said about X, by

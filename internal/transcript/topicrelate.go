@@ -9,9 +9,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/vectorstore"
 	"github.com/imyousuf/CodeEagle/pkg/jev"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // Property keys on a RelatedTo edge.

@@ -16,8 +16,8 @@ import (
 
 	"github.com/dgraph-io/badger/v4"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/vectorstore"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // These helpers drive the store through its exported API only, and read or

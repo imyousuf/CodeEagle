@@ -17,13 +17,13 @@ import (
 
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/decide"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/indexer"
 	"github.com/imyousuf/CodeEagle/internal/linker"
 	_ "github.com/imyousuf/CodeEagle/internal/llm" // register LLM providers
 	"github.com/imyousuf/CodeEagle/internal/search"
 	"github.com/imyousuf/CodeEagle/internal/transcript"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 

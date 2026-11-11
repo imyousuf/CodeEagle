@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // isFileTypeNode returns true for node types that represent files on disk

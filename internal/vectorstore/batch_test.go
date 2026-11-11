@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // countingEmbedder records how it was called, so a test can tell one request

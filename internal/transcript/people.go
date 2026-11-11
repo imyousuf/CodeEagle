@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // PersonRegistry resolves a name spoken in one meeting to a durable person in

@@ -8,5 +8,6 @@ go 1.27.0
 use (
 	.
 	./pkg/jev
+	./pkg/kit
 	./pkg/llm
 )

@@ -6,8 +6,8 @@ import (
 
 	yamlv3 "go.yaml.in/yaml/v3"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/parser"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // YAML dialect identifiers.

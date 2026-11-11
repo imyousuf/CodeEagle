@@ -3,7 +3,7 @@ package parser
 import (
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // Classifier performs post-parse classification of nodes, enriching them

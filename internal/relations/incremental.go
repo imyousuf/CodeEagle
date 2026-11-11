@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // ScanState records, per document and per meeting, the content each was last

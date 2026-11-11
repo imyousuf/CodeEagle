@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 func addNode(t *testing.T, s *BranchStore, typ graph.NodeType, name string) {

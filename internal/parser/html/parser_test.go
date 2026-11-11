@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/parser"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 const testHTML = `<!DOCTYPE html>

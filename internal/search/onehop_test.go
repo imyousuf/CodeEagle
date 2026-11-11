@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/search"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // oneHopFixture surrounds a service with edges of every kind OneHopEdges

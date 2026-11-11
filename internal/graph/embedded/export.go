@@ -8,7 +8,7 @@ import (
 	"io"
 
 	"github.com/dgraph-io/badger/v4"
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // exportRecord is the JSON-lines format for export/import.

@@ -4,12 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/imyousuf/CodeEagle/internal/badgerutil"
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // Key prefixes for the BadgerDB key scheme.
@@ -378,7 +377,7 @@ func (s *BranchStore) QueryNodes(_ context.Context, filter graph.NodeFilter) ([]
 					if _, ok := seen[node.ID]; ok {
 						return true // skip, earlier branch already has this ID
 					}
-					if matchesFilter(node, filter) {
+					if graph.Matches(node, filter) {
 						seen[node.ID] = struct{}{}
 						tagNodeSource(node, branch)
 						results = append(results, node)
@@ -394,7 +393,7 @@ func (s *BranchStore) QueryNodes(_ context.Context, filter graph.NodeFilter) ([]
 				if err != nil {
 					continue // index entry for deleted node; skip
 				}
-				if matchesFilter(node, filter) {
+				if graph.Matches(node, filter) {
 					seen[id] = struct{}{}
 					tagNodeSource(node, branch)
 					results = append(results, node)
@@ -847,49 +846,6 @@ func getEdgeInTxn(txn *badger.Txn, branch, id string) (*graph.Edge, error) {
 		return nil, fmt.Errorf("unmarshal edge %s: %w", id, err)
 	}
 	return &edge, nil
-}
-
-// matchesFilter checks whether a node matches all non-zero fields in the filter.
-func matchesFilter(node *graph.Node, filter graph.NodeFilter) bool {
-	if filter.Type != "" && node.Type != filter.Type {
-		return false
-	}
-	if filter.FilePath != "" && node.FilePath != filter.FilePath {
-		return false
-	}
-	if filter.Package != "" && node.Package != filter.Package {
-		return false
-	}
-	if filter.Language != "" && node.Language != filter.Language {
-		return false
-	}
-	if filter.NamePattern != "" {
-		matched, err := filepath.Match(filter.NamePattern, node.Name)
-		if err != nil || !matched {
-			return false
-		}
-	}
-	if filter.NameMatch != nil && !filter.NameMatch(node.Name) {
-		return false
-	}
-	if filter.Exported != nil && node.Exported != *filter.Exported {
-		return false
-	}
-	// Property-based filtering: all specified key-value pairs must match.
-	for key, val := range filter.Properties {
-		if node.Properties == nil {
-			return false
-		}
-		nodeVal, ok := node.Properties[key]
-		if !ok {
-			return false
-		}
-		// Support substring matching for comma-separated values (e.g., "repository" matches "repository,singleton").
-		if nodeVal != val && !strings.Contains(nodeVal, val) {
-			return false
-		}
-	}
-	return true
 }
 
 // tagNodeSource sets the PropGraphSource property on a node to indicate

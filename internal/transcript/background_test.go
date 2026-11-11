@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/internal/decide"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // broadcastSession has a voice nobody ever answers — the shape of a television

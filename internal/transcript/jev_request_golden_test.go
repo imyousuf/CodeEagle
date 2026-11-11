@@ -39,8 +39,8 @@ import (
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/internal/decide"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/pkg/jev"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // jevGoldenUpdate rewrites golden files rather than comparing against them.

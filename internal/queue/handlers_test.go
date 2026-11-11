@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/internal/docs"
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // mockProvider implements docs.Provider for testing.

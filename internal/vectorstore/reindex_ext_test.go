@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/vectorstore"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // TestNeedsReindexFollowsTheStoredMeta drives NeedsReindex and ReindexReason

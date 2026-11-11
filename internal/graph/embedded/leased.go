@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // ErrBusy is returned when another process holds the database for longer

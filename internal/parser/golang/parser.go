@@ -8,8 +8,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/parser"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // GoParser extracts knowledge graph nodes and edges from Go source files.

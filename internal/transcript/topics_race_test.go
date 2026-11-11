@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // TestTopicRegistryConcurrentLevelAndVocabulary reproduces the shape of a real

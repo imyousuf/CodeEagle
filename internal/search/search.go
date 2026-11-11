@@ -12,8 +12,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/vectorstore"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // DocNodeTypes are node types excluded by the "no docs" filter.
