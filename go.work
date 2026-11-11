@@ -1,10 +1,12 @@
-// pkg/jev is its own module so that other projects can depend on the Jev
-// client without pulling in this application's dependencies. The workspace
-// lets the application build against the working copy; a release pins a
-// tagged version instead (see pkg/jev/RELEASING.md).
+// pkg/jev, pkg/llm and pkg/kit are their own modules so that other projects
+// can depend on them without pulling in this application's dependencies. The
+// workspace lets the application build against the working copy; its go.mod
+// pins a version instead (see pkg/kit/RELEASING.md), which is what
+// `go install` and every consumer build against.
 go 1.27.0
 
 use (
 	.
 	./pkg/jev
+	./pkg/llm
 )

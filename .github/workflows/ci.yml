@@ -51,10 +51,10 @@ jobs:
           # x/tools rejects however it is built. Keep in sync with
           # GOLANGCI_LINT_VERSION in the Makefile.
           version: v2.15.0
-          # pkg/jev is a separate module, so the repository root's ./...
-          # stops at its directory. Named explicitly, or it is never linted.
-          # Keep in sync with PACKAGES in the Makefile.
-          args: ./... ./pkg/jev/...
+          # pkg/jev and pkg/llm are separate modules, so the repository
+          # root's ./... stops at their directories. Named explicitly, or they
+          # are never linted. Keep in sync with PACKAGES in the Makefile.
+          args: ./... ./pkg/jev/... ./pkg/llm/...
 
       - name: Test
         run: make test

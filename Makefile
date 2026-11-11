@@ -23,13 +23,13 @@ GOTEST=$(GOCMD) test
 GOMOD=$(GOCMD) mod
 GOFMT=gofmt
 
-# pkg/jev is a separate module (see go.work), so the root's ./... no longer
-# reaches it: every target that walks the tree names both.
-PACKAGES=./... ./pkg/jev/...
+# pkg/jev and pkg/llm are separate modules (see go.work), so the root's ./...
+# no longer reaches them: every target that walks the tree names each one.
+PACKAGES=./... ./pkg/jev/... ./pkg/llm/...
 
 # The nested modules other projects depend on. modules-check builds each one
 # as a consumer does: outside the workspace and without cgo.
-MODULES=pkg/jev
+MODULES=pkg/jev pkg/llm
 
 # --- Linter ---
 # golangci-lint type-checks against the standard library's export data, so the
