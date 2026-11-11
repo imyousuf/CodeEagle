@@ -11,5 +11,4 @@ followed by a bump.
 3. Pin the application to it, outside the workspace so the tag is what resolves: `GOWORK=off go get github.com/imyousuf/CodeEagle/pkg/jev@v0.1.0 && GOWORK=off go mod tidy`.
 4. Commit the root `go.mod`/`go.sum` change ("Require pkg/jev v0.1.0"). Until this has happened once, `go install …@latest` and `make tidy` cannot find the module — do it before the branch reaches main.
 5. Version by semver while v0: a changed `DefaultModel` or a renamed identifier is a minor bump and a release note, because confidence thresholds tuned on the old pin drift on the new one.
-6. A change to pkg/jev that is not tagged yet still reaches the application only through a pin: until it is tagged, pin the application to the pushed commit's pseudo-version, as `pkg/kit/RELEASING.md` describes, and `make modules-check` keeps that pin honest.
-7. The import path may move once, to `github.com/imyousuf/jev`, when a second external consumer appears or at v1.0.0 — whichever comes first. Say so in the release note that does it.
+6. The import path may move once, to `github.com/imyousuf/jev`, when a second external consumer appears or at v1.0.0 — whichever comes first. Say so in the release note that does it.
