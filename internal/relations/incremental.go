@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/relate"
 )
 
 // ScanState records, per document and per meeting, the content each was last
@@ -204,56 +205,36 @@ func incremental(ctx context.Context, store graph.Store, p *Proposer, subjects [
 
 // judgeDocsPending proposes and judges pairs for the documents whose content
 // changed since their pairs were last considered, newest first and at most
-// MaxSubjects of them. A document is marked considered only when none of its
-// pairs was deferred or failed, so a later run takes up the rest.
+// MaxSubjects of them, through the kit's run (relate.Relater.Run). A document
+// is marked considered only when none of its pairs was deferred or failed,
+// so a later run takes up the rest.
 func judgeDocsPending(ctx context.Context, store graph.Store, vec Vectors, subjects []*Subject,
 	existing map[string]*Relation, state *ScanState, o IncrementalOptions, rep *IncrementalReport) error {
-	var pending []*Subject
-	for _, s := range subjects {
-		if state.DocPairs[s.Path] != s.Hash {
-			pending = append(pending, s)
-		}
-	}
-	if len(pending) == 0 {
-		return nil
-	}
-	sort.SliceStable(pending, func(i, j int) bool { return pending[i].UpdatedAt.After(pending[j].UpdatedAt) })
-	if len(pending) > o.MaxSubjects {
-		rep.DocsWaiting = len(pending) - o.MaxSubjects
-		pending = pending[:o.MaxSubjects]
-	}
-	rep.DocsConsidered = len(pending)
-	paths := make([]string, len(pending))
-	for i, s := range pending {
-		paths[i] = s.Path
-	}
 	opts := o.DocOptions
 	if opts.MaxPairs <= 0 {
 		opts = DefaultDocOptions()
 	}
 	dp := NewDocProposer(subjects, existing, vec, opts)
-	selected, deferred := dp.SelectDocs(dp.ForDocuments(paths...), JudgedDoc(existing))
-	stats, err := JudgeDocPairs(ctx, store, o.DocJudge, selected, existing, o.DocGates, time.Now())
-	rep.DocPairs, rep.DocDeferred = stats, len(deferred)
-	if err != nil {
-		return err
+	// The run reads only which content each document is in and how recent
+	// it is; the candidates carry what the decision model is shown.
+	docs := make([]relate.Doc, len(subjects))
+	by := make(map[string]*Subject, len(subjects))
+	for i, s := range subjects {
+		docs[i] = relate.Doc{ID: s.Path, Hash: s.Hash, UpdatedAt: s.UpdatedAt}
+		by[s.Path] = s
 	}
-	open := make(map[string]bool)
-	for _, c := range deferred {
-		open[c.A.Path], open[c.B.Path] = true, true
+	propose := func(paths ...string) []*relate.Candidate {
+		pairs, _ := kitCandidates(dp.ForDocuments(paths...))
+		return pairs
 	}
-	judged := JudgedDoc(existing)
-	for _, c := range selected {
-		if !judged(c) {
-			open[c.A.Path], open[c.B.Path] = true, true
-		}
+	ledger := &docLedger{store: store, rels: existing, subjects: by, state: state}
+	bounds := relate.RunOptions{MaxDocs: o.MaxSubjects, MaxPerDoc: opts.MaxPerDocument, MaxPairs: opts.MaxPairs}
+	run, err := o.DocJudge.relater(o.DocGates).Run(ctx, docs, propose, ledger, bounds, time.Now())
+	rep.DocsConsidered, rep.DocsWaiting = run.Considered, run.Waiting
+	if run.Considered > 0 {
+		rep.DocPairs, rep.DocDeferred = docRunStats(run.Stats), run.Deferred
 	}
-	for _, s := range pending {
-		if !open[s.Path] {
-			state.DocPairs[s.Path] = s.Hash
-		}
-	}
-	return state.Save(ctx, store)
+	return err
 }
 
 // judgePending considers what is new or changed, judges its candidates and
