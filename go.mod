@@ -5,12 +5,13 @@ go 1.27.0
 require (
 	github.com/charmbracelet/huh v0.8.0
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/coder/hnsw v0.6.1
 	github.com/dgraph-io/badger/v4 v4.5.1
-	github.com/dslipak/pdf v0.0.2
+	github.com/dgraph-io/ristretto/v2 v2.1.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
 	github.com/imyousuf/CodeEagle/pkg/jev v0.1.0
+	github.com/imyousuf/CodeEagle/pkg/kit v0.0.0-20261111234539-a6ac345a665f
+	github.com/imyousuf/CodeEagle/pkg/llm v0.0.0-20261111224124-7e58ed03d72d
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/shirou/gopsutil/v4 v4.26.2
 	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
@@ -23,6 +24,7 @@ require (
 	golang.org/x/image v0.36.0
 	golang.org/x/net v0.45.0
 	google.golang.org/genai v1.45.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -42,8 +44,9 @@ require (
 	github.com/charmbracelet/x/term v0.2.1 // indirect
 	github.com/chewxy/math32 v1.10.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
+	github.com/coder/hnsw v0.6.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/dgraph-io/ristretto/v2 v2.1.0
+	github.com/dslipak/pdf v0.0.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
@@ -95,5 +98,4 @@ require (
 	google.golang.org/grpc v1.66.2 // indirect
 	google.golang.org/protobuf v1.36.3 // indirect
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
