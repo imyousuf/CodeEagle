@@ -27,6 +27,8 @@ package decide
 import (
 	"context"
 	"errors"
+
+	"github.com/imyousuf/CodeEagle/pkg/jev"
 )
 
 // Question is one decision to make: what to ask, and the answers allowed.
@@ -114,4 +116,8 @@ var (
 	// ErrUnsupported is returned for a kind of question a judge cannot
 	// answer.
 	ErrUnsupported = errors.New("decide: question not supported by this judge")
+	// ErrTooLarge is a judge's way of saying the state is more than it can
+	// take: trim it, or split the questions over smaller states, and ask
+	// again. It is jev.ErrTooLarge, so errors.Is matches either name.
+	ErrTooLarge = jev.ErrTooLarge
 )
