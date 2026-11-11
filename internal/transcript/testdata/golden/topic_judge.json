@@ -1,0 +1,129 @@
+[
+  {
+    "model": "jev-1.13.0",
+    "questions": {
+      "related_p0": {
+        "criteria": {
+          "false": "a and b are about different things; a person asking about one would not want meetings filed under the other, even if a meeting happened to discuss both",
+          "true": "a and b name one subject, or one is a part of the other, or both are parts of one broader subject; a person asking about either would want to see meetings filed under the other"
+        },
+        "instructions": "In the pair whose id is \"p0\", is what was said under topic a about the same thing as what was said under topic b, or about a part of it, or is a part of it?",
+        "type": "noul"
+      },
+      "related_p1": {
+        "criteria": {
+          "false": "a and b are about different things; a person asking about one would not want meetings filed under the other, even if a meeting happened to discuss both",
+          "true": "a and b name one subject, or one is a part of the other, or both are parts of one broader subject; a person asking about either would want to see meetings filed under the other"
+        },
+        "instructions": "In the pair whose id is \"p1\", is what was said under topic a about the same thing as what was said under topic b, or about a part of it, or is a part of it?",
+        "type": "noul"
+      },
+      "related_p2": {
+        "criteria": {
+          "false": "a and b are about different things; a person asking about one would not want meetings filed under the other, even if a meeting happened to discuss both",
+          "true": "a and b name one subject, or one is a part of the other, or both are parts of one broader subject; a person asking about either would want to see meetings filed under the other"
+        },
+        "instructions": "In the pair whose id is \"p2\", is what was said under topic a about the same thing as what was said under topic b, or about a part of it, or is a part of it?",
+        "type": "noul"
+      },
+      "same_p0": {
+        "criteria": {
+          "false": "the two labels name different subjects, however closely related",
+          "true": "the two labels are two wordings of one subject; any meeting filed under one belongs under the other"
+        },
+        "instructions": "In the pair whose id is \"p0\", do the labels of topic a and topic b name one subject in different words?",
+        "type": "noul"
+      },
+      "same_p1": {
+        "criteria": {
+          "false": "the two labels name different subjects, however closely related",
+          "true": "the two labels are two wordings of one subject; any meeting filed under one belongs under the other"
+        },
+        "instructions": "In the pair whose id is \"p1\", do the labels of topic a and topic b name one subject in different words?",
+        "type": "noul"
+      },
+      "same_p2": {
+        "criteria": {
+          "false": "the two labels name different subjects, however closely related",
+          "true": "the two labels are two wordings of one subject; any meeting filed under one belongs under the other"
+        },
+        "instructions": "In the pair whose id is \"p2\", do the labels of topic a and topic b name one subject in different words?",
+        "type": "noul"
+      }
+    },
+    "state": {
+      "pairs": [
+        {
+          "a": "06f7c44355bfa2e6bd7cdae0",
+          "b": "cbb066e14b0ee6fc83f10773",
+          "meetings_filed_under_both": 1,
+          "pair": "p0",
+          "times_consecutive_segments_of_one_meeting": 2
+        },
+        {
+          "a": "06f7c44355bfa2e6bd7cdae0",
+          "b": "aaa3a0c5f845c612aa40428f",
+          "meetings_filed_under_both": 0,
+          "pair": "p1",
+          "times_consecutive_segments_of_one_meeting": 0
+        },
+        {
+          "a": "4714f89e0d803b2521f3f4cf",
+          "b": "79bb8f127112f1f866bb6489",
+          "meetings_filed_under_both": 2,
+          "pair": "p2",
+          "times_consecutive_segments_of_one_meeting": 1
+        }
+      ],
+      "topics": [
+        {
+          "id": "06f7c44355bfa2e6bd7cdae0",
+          "label": "AGI feasibility debate",
+          "meetings_filed_under": 3,
+          "other_wordings_meetings_used": [
+            "AGI debate",
+            "feasibility of AGI"
+          ],
+          "verbatim_quote_from_a_decision_filed_under_it": "We treat AGI claims as marketing until a model retrains itself.",
+          "what_meetings_filed_under_it_said": [
+            "Imran argued that current models lack recursive self-improvement, and the group went back and forth on whether benchmarks measure generality and the group went back and forth on whether benchmarks measure generality and the group went back and forth on whether benchmarks measure generality and the …",
+            "Mona asked whether AGI is a useful word at all."
+          ]
+        },
+        {
+          "id": "cbb066e14b0ee6fc83f10773",
+          "label": "AI alignment risk",
+          "meetings_filed_under": 1,
+          "what_meetings_filed_under_it_said": [
+            "Superintelligence risk and who should own alignment work."
+          ]
+        },
+        {
+          "id": "aaa3a0c5f845c612aa40428f",
+          "label": "recursive self improvement",
+          "meetings_filed_under": 2
+        },
+        {
+          "id": "4714f89e0d803b2521f3f4cf",
+          "label": "sticky board redesign",
+          "meetings_filed_under": 2,
+          "other_wordings_meetings_used": [
+            "sticky board v2"
+          ],
+          "verbatim_quote_from_a_decision_filed_under_it": "Ship the new sticky board layout behind a flag Ship the new sticky board layout behind a flag Ship the new sticky board layout behind a flag Ship the new sticky board layout behind a flag Ship the ne…",
+          "what_meetings_filed_under_it_said": [
+            "The sticky board gets swimlanes."
+          ]
+        },
+        {
+          "id": "79bb8f127112f1f866bb6489",
+          "label": "HITL vs sticky notes",
+          "meetings_filed_under": 1,
+          "what_meetings_filed_under_it_said": [
+            "Whether human review replaces sticky notes."
+          ]
+        }
+      ]
+    }
+  }
+]

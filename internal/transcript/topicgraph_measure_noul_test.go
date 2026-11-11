@@ -30,13 +30,13 @@ func TestTopicMeasureAGI(t *testing.T) {
 				parents = append(parents, id)
 			}
 		}
-		t.Logf("%s (meetings %d, parents %v)", p.Node.Name, len(p.Meetings), parents)
-		for _, n := range profiles.nearest(p, all, 15) {
+		t.Logf("%s (meetings %d, parents %v)", p.Node.Name, len(p.Uses), parents)
+		for _, n := range profiles.Nearest(p, all, 15) {
 			mark := ""
-			if agi.MatchString(n.profile.Node.Name) {
+			if agi.MatchString(n.Profile.Node.Name) {
 				mark = "  <== AGI"
 			}
-			t.Logf("   %2d  %.2f  %s%s", n.rank, n.cosine, n.profile.Node.Name, mark)
+			t.Logf("   %2d  %.2f  %s%s", n.Rank, n.Cosine, n.Profile.Node.Name, mark)
 		}
 	}
 }

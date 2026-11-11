@@ -3,7 +3,7 @@ package parser
 import (
 	"context"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // Language represents a supported programming language.

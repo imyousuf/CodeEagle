@@ -51,13 +51,20 @@ jobs:
           # x/tools rejects however it is built. Keep in sync with
           # GOLANGCI_LINT_VERSION in the Makefile.
           version: v2.15.0
-          # pkg/jev is a separate module, so the repository root's ./...
-          # stops at its directory. Named explicitly, or it is never linted.
-          # Keep in sync with PACKAGES in the Makefile.
-          args: ./... ./pkg/jev/...
+          # pkg/jev, pkg/kit and pkg/llm are separate modules, so the
+          # repository root's ./... stops at their directories. Named
+          # explicitly, or they are never linted. Keep in sync with PACKAGES in
+          # the Makefile.
+          args: ./... ./pkg/jev/... ./pkg/kit/... ./pkg/llm/...
 
       - name: Test
         run: make test
+
+      # Every step above builds in workspace mode against the working copy of
+      # the nested modules. A consumer, and `go install …/cmd/codeeagle@latest`,
+      # builds against the pinned versions instead, without go.work.
+      - name: Check the nested modules and the pins on them
+        run: make modules-check
 
       - name: Build
         run: make build

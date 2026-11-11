@@ -887,7 +887,7 @@ a model's two-sentence summary that also overwrote the text. Now:
 ### Chat logs
 
 A conversation held in a chat tool is a record of decisions like a meeting,
-but arrives as a file. `internal/parser/chatlog` recognizes, by shape rather
+but arrives as a file. `pkg/kit/extract/chatlog` recognizes, by shape rather
 than by name:
 
 - role/content JSONL, as assistant chat histories store it, dated from the

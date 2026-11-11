@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/parser"
 	"github.com/imyousuf/CodeEagle/internal/parser/golang"
@@ -27,6 +26,7 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/parser/typescript"
 	yamlparser "github.com/imyousuf/CodeEagle/internal/parser/yaml"
 	"github.com/imyousuf/CodeEagle/internal/watcher"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 const opalAppPath = "/home/imyousuf/projects/opal-app"

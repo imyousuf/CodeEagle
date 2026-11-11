@@ -7,8 +7,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/topics"
 )
 
 // TestTopicMeasureFamilies reports how many children each parent in the tree
@@ -20,7 +21,7 @@ import (
 func TestTopicMeasureFamilies(t *testing.T) {
 	profiles, closeAll := measureCorpus(t)
 	defer closeAll()
-	families := profiles.families()
+	families := profiles.Families()
 	type fam struct {
 		name string
 		n    int
@@ -52,7 +53,7 @@ func TestTopicMeasureFamilies(t *testing.T) {
 		}
 		t.Logf("families of at most %d children: %d pairs", cap, capped)
 	}
-	t.Logf("candidates at k=%d: %d", DefaultNearestK, len(profiles.Candidates(DefaultNearestK)))
+	t.Logf("candidates at k=%d: %d", DefaultNearestK, len(profiles.Candidates(topics.DefaultGenerators(DefaultNearestK)...)))
 }
 
 // TestTopicMeasureEdges reports what a relate run over a graph produced: how

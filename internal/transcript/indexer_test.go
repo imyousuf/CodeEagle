@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // writeSession writes a transcript into its own session directory.

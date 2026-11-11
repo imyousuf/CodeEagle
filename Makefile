@@ -1,4 +1,4 @@
-.PHONY: build build-faces install clean test test-fast test-smoke lint lint-tools fmt tidy jev-record help \
+.PHONY: build build-faces install clean test test-fast test-smoke lint lint-tools fmt tidy modules-check jev-record help \
 	build-linux-amd64 build-linux-arm64 \
 	build-darwin-amd64 build-darwin-arm64 \
 	build-all
@@ -23,9 +23,14 @@ GOTEST=$(GOCMD) test
 GOMOD=$(GOCMD) mod
 GOFMT=gofmt
 
-# pkg/jev is a separate module (see go.work), so the root's ./... no longer
-# reaches it: every target that walks the tree names both.
-PACKAGES=./... ./pkg/jev/...
+# pkg/jev, pkg/kit and pkg/llm are separate modules (see go.work), so the
+# root's ./... no longer reaches them: every target that walks the tree names
+# each one.
+PACKAGES=./... ./pkg/jev/... ./pkg/kit/... ./pkg/llm/...
+
+# The nested modules other projects depend on. modules-check builds each one
+# as a consumer does: outside the workspace and without cgo.
+MODULES=pkg/jev pkg/kit pkg/llm
 
 # --- Linter ---
 # golangci-lint type-checks against the standard library's export data, so the
@@ -179,6 +184,31 @@ lint-tools:
 ## fmt: Format code
 fmt:
 	$(GOFMT) -s -w .
+
+## modules-check: Build each nested module as a consumer would, and check the application's pins on them
+# The workspace makes everything build against the working copy, which hides
+# three things a consumer would hit: a nested module importing the
+# application's code (the internal rule goes by path, so pkg/kit may import
+# internal/...), a cgo dependency, and a pin naming an older commit. Each module
+# is therefore built, vetted and tested with GOWORK=off and CGO_ENABLED=0, its
+# imports and modules are checked, and so is the application against its pins.
+modules-check:
+	@set -e; for m in $(MODULES); do \
+		echo "== $$m"; \
+		( cd $$m && GOWORK=off CGO_ENABLED=0 $(GOBUILD) ./... \
+			&& GOWORK=off CGO_ENABLED=0 $(GOCMD) vet ./... \
+			&& GOWORK=off CGO_ENABLED=0 $(GOTEST) -count=1 ./... \
+			&& GOWORK=off $(GOMOD) tidy -diff ); \
+		leaks=$$(cd $$m && GOWORK=off CGO_ENABLED=0 $(GOCMD) list -deps -test ./... \
+			| grep '^github.com/imyousuf/CodeEagle/' | grep -v '^github.com/imyousuf/CodeEagle/pkg/' || true); \
+		if [ -n "$$leaks" ]; then echo "$$m imports application code:"; echo "$$leaks"; exit 1; fi; \
+		cgo=$$(cd $$m && GOWORK=off $(GOCMD) list -m all | grep -E 'go-tree-sitter|gocv|poppler' || true); \
+		if [ -n "$$cgo" ]; then echo "$$m depends on a cgo module:"; echo "$$cgo"; exit 1; fi; \
+	done
+	@echo "== application against its pins"
+	GOWORK=off $(GOBUILD) ./...
+	GOWORK=off $(GOCMD) vet ./...
+	./scripts/check-module-pins.sh
 
 ## tidy: Tidy and verify dependencies
 tidy:

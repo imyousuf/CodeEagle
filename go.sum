@@ -127,6 +127,10 @@ github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/ad
 github.com/hybridgroup/mjpeg v0.0.0-20140228234708-4680f319790e/go.mod h1:eagM805MRKrioHYuU7iKLUyFPVKqVV6um5DAvCkUtXs=
 github.com/imyousuf/CodeEagle/pkg/jev v0.1.0 h1:o4A8KgDeWtGRRDQ8BYwNWN2DIpml1HwpYCTJjoyy+l8=
 github.com/imyousuf/CodeEagle/pkg/jev v0.1.0/go.mod h1:FQ9IsZFBAubHWw/ndXMTCDAICQVc4ON1lobXKQosXsM=
+github.com/imyousuf/CodeEagle/pkg/kit v0.0.0-20261111234539-a6ac345a665f h1:hImcDWjRtiP8hjem5MxsyORN6Y1HdTO1+eoC7fg/0/g=
+github.com/imyousuf/CodeEagle/pkg/kit v0.0.0-20261111234539-a6ac345a665f/go.mod h1:5ouiawWT1IKokbSzL4xE5KTQw8wcnPW3kKMbVsBxx9g=
+github.com/imyousuf/CodeEagle/pkg/llm v0.0.0-20261111224124-7e58ed03d72d h1:YPdMzImu45barSV6583RLk922qE4FGfQqlzPmoFPvxk=
+github.com/imyousuf/CodeEagle/pkg/llm v0.0.0-20261111224124-7e58ed03d72d/go.mod h1:KC2Fh1NulWeF5yFiKO5cr6CJE8gpldNhplPi1VFn4sA=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/klauspost/compress v1.17.11 h1:In6xLpyWOi1+C7tXUUWv2ot1QvBjxevKAaI6IXrJmUc=

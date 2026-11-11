@@ -1,0 +1,7 @@
+no meeting confirmed to discuss it yet; find may still turn some up
+kitgolden/docs/design.md: Retry Design (4 sections, lines 1–21)
+920867 § Retry Design (lines 1–21)
+396078 § Retry Design > Backoff (lines 8–12)
+a03288 § Retry Design > Limits (lines 14–17)
+11ebd3 § Retry Design > Related (lines 19–21)
+expand: show <id>

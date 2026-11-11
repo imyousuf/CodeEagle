@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // NewPlannerTools creates the set of tools available to the planning agent.

@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // countingVectors has no vectors and counts the lookups, which any run that

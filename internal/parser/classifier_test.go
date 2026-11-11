@@ -3,7 +3,7 @@ package parser
 import (
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 func TestClassifier_JavaEntity_ToDBModel(t *testing.T) {

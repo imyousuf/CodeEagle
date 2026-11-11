@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // linkEndpoints links API endpoint nodes to their containing services

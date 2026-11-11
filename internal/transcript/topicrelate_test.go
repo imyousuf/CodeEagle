@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/pkg/jev"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/topics"
 )
 
 // meetingFiledUnder builds an enriched session filed under the given topics.
@@ -194,25 +195,24 @@ func (failingAsker) Ask(context.Context, any, jev.Questions) (*jev.Response, err
 }
 
 func TestCandidatesSkipLargeFamilies(t *testing.T) {
-	tp := &TopicProfiles{byID: map[string]*TopicProfile{}, cooccur: map[pairKey]int{}, adjacent: map[pairKey]int{}}
+	tp := topics.NewProfiles()
 	add := func(name, parent string) *TopicProfile {
-		p := profileNamed(name, 1)
+		p := tp.Ensure(profileNamed(name, 1).Node)
 		p.Parents = []string{parent}
-		tp.byID[p.ID()] = p
 		return p
 	}
 	for i := range maxSiblingFamily + 1 {
 		add(fmt.Sprintf("broad child %d", i), "broad")
 	}
 	a, b := add("narrow child a", "narrow"), add("narrow child b", "narrow")
-	pairs := tp.Candidates(0)
+	pairs := tp.Candidates(topics.DefaultGenerators(0)...)
 	if len(pairs) != 1 || pairs[0].Sources != SourceSharedParent {
 		t.Fatalf("candidates = %d, want only the narrow family's pair", len(pairs))
 	}
-	if got := tp.siblings(a); len(got) != 1 || got[0] != b {
+	if got := tp.Siblings(a, maxSiblingFamily); len(got) != 1 || got[0] != b {
 		t.Errorf("siblings of a = %v", got)
 	}
-	if got := tp.siblings(tp.byID[topicID("broad child 0")]); len(got) != 0 {
+	if got := tp.Siblings(tp.Get(topicID("broad child 0")), maxSiblingFamily); len(got) != 0 {
 		t.Errorf("a member of a family of %d proposed %d siblings", maxSiblingFamily+1, len(got))
 	}
 }

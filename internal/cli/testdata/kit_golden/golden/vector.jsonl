@@ -1,0 +1,47 @@
+{"key":"chunk:10145ffed697a81aa70a3417:0","value":{"chunk_index":0,"chunk_text":"Get\nPackage: store\nFile: kitgolden/src/store.go\nQualified: Store.Get\nGet returns the value for key and whether it was present.\n\nfunc (Store) Get(key string) (string, bool)","node_id":"10145ffed697a81aa70a3417"}}
+{"key":"chunk:11ebd311f7d289a6ddfa89be:0","value":{"chunk_index":0,"chunk_text":"Related\nFile: kitgolden/docs/design.md\nQualified: Retry Design \u003e Related\nSee the [README](../README.md) and the [operator notes](../notes.txt).","node_id":"11ebd311f7d289a6ddfa89be"}}
+{"key":"chunk:138759d9e6faaeab031f651f:0","value":{"chunk_index":0,"chunk_text":"Consequences\nFile: kitgolden/docs/adr-001-cache.md\nQualified: ADR 001: Evict cache entries by age \u003e Consequences\nA key read constantly is still evicted after an hour, and the next read misses.","node_id":"138759d9e6faaeab031f651f"}}
+{"key":"chunk:3960788306937c29b8ddb2c5:0","value":{"chunk_index":0,"chunk_text":"Backoff\nFile: kitgolden/docs/design.md\nQualified: Retry Design \u003e Backoff\nEach attempt waits twice as long as the one before, starting at half a second\nand never longer than thirty seconds. The calculation lives in\n[backoff.py](../scripts/backoff.py).","node_id":"3960788306937c29b8ddb2c5"}}
+{"key":"chunk:3bf5426a3fd978b9cc4778e2:0","value":{"chunk_index":0,"chunk_text":"notes.txt\nPackage: kitgolden\nFile: kitgolden/notes.txt\nQualified: kitgolden/notes.txt\nOperator notes\n\nRestarting the store clears every cached entry; there is no persistence.\n\nWhen the upstream service is down, expect each request to take up to a minute\nbefore it fails, because of the retry backoff.\n","node_id":"3bf5426a3fd978b9cc4778e2"}}
+{"key":"chunk:428ee69702e5385d073f978e:0","value":{"chunk_index":0,"chunk_text":"compute_backoff\nFile: kitgolden/scripts/backoff.py\nReturn how many seconds to wait before the given attempt.\ndef compute_backoff(attempt, base=0.5, cap=30.0)","node_id":"428ee69702e5385d073f978e"}}
+{"key":"chunk:714a421afec96c9bfd8bf8db:0","value":{"chunk_index":0,"chunk_text":"NewStore\nPackage: store\nFile: kitgolden/src/store.go\nQualified: store.NewStore\nPattern: factory\nNewStore returns an empty store.\n\nfunc NewStore() *Store","node_id":"714a421afec96c9bfd8bf8db"}}
+{"key":"chunk:7849a3d769f1c109eec747e7:0","value":{"chunk_index":0,"chunk_text":"Context\nFile: kitgolden/docs/adr-001-cache.md\nQualified: ADR 001: Evict cache entries by age \u003e Context\nThe store held every entry forever, and memory grew without bound under a\nsteady stream of distinct keys.","node_id":"7849a3d769f1c109eec747e7"}}
+{"key":"chunk:87abd90d982e8ded13cda0b9:0","value":{"chunk_index":0,"chunk_text":"should_retry\nFile: kitgolden/scripts/backoff.py\nQualified: RetryPolicy.should_retry\nReturn True while attempts remain.\ndef should_retry(self, attempt)","node_id":"87abd90d982e8ded13cda0b9"}}
+{"key":"chunk:920867487ddc98d793dc1f4b:0","value":{"chunk_index":0,"chunk_text":"Retry Design\nFile: kitgolden/docs/design.md\nStatus: Draft\n\nThe client retries a failed call with exponential backoff, so a brief outage\ndoes not surface as an error to the caller.","node_id":"920867487ddc98d793dc1f4b"}}
+{"key":"chunk:a032887256c4b47d04e653b9:0","value":{"chunk_index":0,"chunk_text":"Limits\nFile: kitgolden/docs/design.md\nQualified: Retry Design \u003e Limits\nA call is attempted at most five times. After the fifth failure the error is\nreturned unchanged, and the store keeps no record of it.","node_id":"a032887256c4b47d04e653b9"}}
+{"key":"chunk:a1a920af1a70442f04bf1a78:0","value":{"chunk_index":0,"chunk_text":"evict\nPackage: store\nFile: kitgolden/src/store.go\nQualified: Store.evict\nfunc (Store) evict(now time.Time)","node_id":"a1a920af1a70442f04bf1a78"}}
+{"key":"chunk:ae7dc9e2c8fcddf8783849a1:0","value":{"chunk_index":0,"chunk_text":"Running\nFile: kitgolden/README.md\nQualified: Kit Golden Fixture \u003e Running\nNothing here runs; the files exist to be read by the indexer.","node_id":"ae7dc9e2c8fcddf8783849a1"}}
+{"key":"chunk:b93bb12163dfcdcef154889c:0","value":{"chunk_index":0,"chunk_text":"Put\nPackage: store\nFile: kitgolden/src/store.go\nQualified: Store.Put\nPut stores value under key, evicting entries older than MaxAge first.\n\nfunc (Store) Put(key, value string, now time.Time)","node_id":"b93bb12163dfcdcef154889c"}}
+{"key":"chunk:bfa38785d217abc8a031b553:0","value":{"chunk_index":0,"chunk_text":"Decision\nFile: kitgolden/docs/adr-001-cache.md\nQualified: ADR 001: Evict cache entries by age \u003e Decision\nEntries older than one hour are evicted on the next write. Eviction by age was\nchosen over least-recently-used because it needs no bookkeeping on reads.","node_id":"bfa38785d217abc8a031b553"}}
+{"key":"chunk:c40ef2e1455734c863089e5f:0","value":{"chunk_index":0,"chunk_text":"Kit Golden Fixture\nFile: kitgolden/README.md\nA small project used to pin what CodeEagle indexes and how it answers.","node_id":"c40ef2e1455734c863089e5f"}}
+{"key":"chunk:c5e7bd05e38dc6e9cf5cd21a:0","value":{"chunk_index":0,"chunk_text":"Store\nPackage: store\nFile: kitgolden/src/store.go\nQualified: store.Store\nRole: repository\nPattern: repository\nLayer: data_access\nStore holds string values by key.\n","node_id":"c5e7bd05e38dc6e9cf5cd21a"}}
+{"key":"chunk:cf39fc40361cb0c407644b24:0","value":{"chunk_index":0,"chunk_text":"ADR 001: Evict cache entries by age\nFile: kitgolden/docs/adr-001-cache.md\nStatus: Accepted\nDate: 2026-01-10","node_id":"cf39fc40361cb0c407644b24"}}
+{"key":"chunk:cf3b1f2798207adc8103ebe0:0","value":{"chunk_index":0,"chunk_text":"delay\nFile: kitgolden/scripts/backoff.py\nQualified: RetryPolicy.delay\ndef delay(self, attempt)","node_id":"cf3b1f2798207adc8103ebe0"}}
+{"key":"chunk:cf941aefcd22c13224fb2740:0","value":{"chunk_index":0,"chunk_text":"Layout\nFile: kitgolden/README.md\nQualified: Kit Golden Fixture \u003e Layout\n- [Retry design](docs/design.md) explains how the client retries failed calls.\n- [Cache decision](docs/adr-001-cache.md) records why entries are evicted.\n- The key-value store lives in [store.go](src/store.go).\n- The backoff calculator is [backoff.py](scripts/backoff.py).","node_id":"cf941aefcd22c13224fb2740"}}
+{"key":"chunk:d680fa304c3ed3f414f7ab27:0","value":{"chunk_index":0,"chunk_text":"RetryPolicy\nFile: kitgolden/scripts/backoff.py\nDecides whether a failed call is tried again.","node_id":"d680fa304c3ed3f414f7ab27"}}
+{"key":"chunk:f99f014fcf744464279e3104:0","value":{"chunk_index":0,"chunk_text":"Part 1: Operator notes\nPackage: kitgolden\nFile: kitgolden/notes.txt\nQualified: notes \u003e Part 1: Operator notes\nOperator notes\n\nRestarting the store clears every cached entry; there is no persistence.\n\nWhen the upstream service is down, expect each request to take up to a minute\nbefore it fails, because of the retry backoff.","node_id":"f99f014fcf744464279e3104"}}
+{"key":"chunk:fe5f39d76e8345ee33bad9ab:0","value":{"chunk_index":0,"chunk_text":"__init__\nFile: kitgolden/scripts/backoff.py\nQualified: RetryPolicy.__init__\ndef __init__(self, max_attempts=MAX_ATTEMPTS)","node_id":"fe5f39d76e8345ee33bad9ab"}}
+{"key":"meta:default","value":{"chunk_size":1500,"dimensions":64,"model":"bow-64","node_count":29,"overlap":200,"provider":"kit-golden-bow","text_version":2,"version":2}}
+{"key":"text:10145ffed697a81aa70a3417","value":"16d67909e03855c0"}
+{"key":"text:11ebd311f7d289a6ddfa89be","value":"a9341a3fef8b197f"}
+{"key":"text:138759d9e6faaeab031f651f","value":"b2bc57451bae33fc"}
+{"key":"text:3960788306937c29b8ddb2c5","value":"ec654fa4bb824b20"}
+{"key":"text:3bf5426a3fd978b9cc4778e2","value":"4342d3aac6faec59"}
+{"key":"text:428ee69702e5385d073f978e","value":"487dad10e1d91b99"}
+{"key":"text:714a421afec96c9bfd8bf8db","value":"bd09c004fe003ad5"}
+{"key":"text:7849a3d769f1c109eec747e7","value":"d562d5d9846d98d"}
+{"key":"text:87abd90d982e8ded13cda0b9","value":"9cb558d0604e50b"}
+{"key":"text:920867487ddc98d793dc1f4b","value":"12af5ca2aa83bd3"}
+{"key":"text:a032887256c4b47d04e653b9","value":"2d094873b81d10eb"}
+{"key":"text:a1a920af1a70442f04bf1a78","value":"e9fc24ef53f485db"}
+{"key":"text:ae7dc9e2c8fcddf8783849a1","value":"18ce41ee3e753bc"}
+{"key":"text:b93bb12163dfcdcef154889c","value":"d944010e56d0e14"}
+{"key":"text:bfa38785d217abc8a031b553","value":"7ce4ee3c27c2caf1"}
+{"key":"text:c40ef2e1455734c863089e5f","value":"73b4ea2824d27c4"}
+{"key":"text:c5e7bd05e38dc6e9cf5cd21a","value":"2797118a6488ca8d"}
+{"key":"text:cf39fc40361cb0c407644b24","value":"4b09dd2edcdb3d76"}
+{"key":"text:cf3b1f2798207adc8103ebe0","value":"140ee87c961d10d"}
+{"key":"text:cf941aefcd22c13224fb2740","value":"56ddbfffe3b6f576"}
+{"key":"text:d680fa304c3ed3f414f7ab27","value":"b085cdbded0056e9"}
+{"key":"text:f99f014fcf744464279e3104","value":"c820c4d42256a15a"}
+{"key":"text:fe5f39d76e8345ee33bad9ab","value":"ff6f4046db374be"}

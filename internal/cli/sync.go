@@ -12,11 +12,11 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/indexer"
 	"github.com/imyousuf/CodeEagle/internal/linker"
 	"github.com/imyousuf/CodeEagle/internal/queue"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 
 	// Register LLM and embedding providers so their init() functions run.

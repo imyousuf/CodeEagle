@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // meetingCorpus writes a small but representative corpus into a scope.

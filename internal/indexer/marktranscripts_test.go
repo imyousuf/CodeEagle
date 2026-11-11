@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/parser"
 	genericparser "github.com/imyousuf/CodeEagle/internal/parser/generic"
 	"github.com/imyousuf/CodeEagle/internal/parser/golang"
 	"github.com/imyousuf/CodeEagle/internal/watcher"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 const sampleVTT = `WEBVTT

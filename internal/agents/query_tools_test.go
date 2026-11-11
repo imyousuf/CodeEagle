@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // setupQueryToolTestStore creates a store with richer data for query tool tests:

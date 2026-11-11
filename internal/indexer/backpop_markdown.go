@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // MarkdownSectionsVersion is the markdown section format the backfill brings

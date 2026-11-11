@@ -16,14 +16,15 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
-	"github.com/imyousuf/CodeEagle/internal/decide"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/indexer"
 	"github.com/imyousuf/CodeEagle/internal/linker"
 	_ "github.com/imyousuf/CodeEagle/internal/llm" // register LLM providers
 	"github.com/imyousuf/CodeEagle/internal/search"
 	"github.com/imyousuf/CodeEagle/internal/transcript"
+	"github.com/imyousuf/CodeEagle/pkg/jev"
+	"github.com/imyousuf/CodeEagle/pkg/kit/decide"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 
@@ -1850,13 +1851,17 @@ func newSpeakerJudge(tc config.TranscriptsConfig) (decide.Judge, error) {
 	if key == "" {
 		return nil, nil
 	}
-	judge, err := decide.NewJevJudge(key, tc.JevModel)
+	var opts []jev.Option
+	if tc.JevModel != "" {
+		opts = append(opts, jev.WithModel(tc.JevModel))
+	}
+	client, err := jev.New(key, opts...)
 	if err != nil {
 		// The key is in hand but unusable, which is a configuration mistake
 		// rather than a reason to quietly fall back to the other path.
 		return nil, fmt.Errorf("speaker decision model: %w", err)
 	}
-	return judge, nil
+	return decide.NewJevJudge(client), nil
 }
 
 // recomputeAttendance rewrites a person's attendance of one meeting from

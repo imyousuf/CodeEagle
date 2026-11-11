@@ -7,8 +7,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/parser/generic"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // DocumentSectionsVersion is the section format for PDFs, decks and other

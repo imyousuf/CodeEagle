@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 const sectionsDoc = `---

@@ -1,0 +1,58 @@
+Semantic search: "store" (8 results)
+
+ 1. [Function] NewStore  (86%)
+    File: kitgolden/src/store.go:20
+    Package: store
+    func NewStore() *Store
+    > NewStore | Package: store
+    ← Contains store (Package)
+    ← Calls TestGetReturnsWhatPutStored (TestFunction)
+
+ 2. [Method] Put  (85%)
+    File: kitgolden/src/store.go:31
+    Package: store
+    func (Store) Put(key, value string, now time.Time)
+    > Put | Package: store
+    ← Contains store (Package)
+
+ 3. [Method] evict  (75%)
+    File: kitgolden/src/store.go:36
+    Package: store
+    func (Store) evict(now time.Time)
+    > evict | Package: store
+    ← Contains store (Package)
+
+ 4. [Method] Get  (67%)
+    File: kitgolden/src/store.go:25
+    Package: store
+    func (Store) Get(key string) (string, bool)
+    > Get | Package: store
+    ← Contains store (Package)
+
+ 5. [Function] compute_backoff  (40%)
+    File: kitgolden/scripts/backoff.py:6
+    def compute_backoff(attempt, base=0.5, cap=30.0)
+    > compute_backoff | File: kitgolden/scripts/backoff.py
+    ← Contains backoff (Module)
+    ← Calls delay (Method)
+
+ 6. [Method] delay  (38%)
+    File: kitgolden/scripts/backoff.py:21
+    def delay(self, attempt)
+    > delay | File: kitgolden/scripts/backoff.py
+    ← Contains RetryPolicy (Class)
+    → Calls compute_backoff (Function)
+
+ 7. [Method] should_retry  (29%)
+    File: kitgolden/scripts/backoff.py:17
+    def should_retry(self, attempt)
+    > should_retry | File: kitgolden/scripts/backoff.py
+    ← Contains RetryPolicy (Class)
+
+ 8. [Method] __init__  (19%)
+    File: kitgolden/scripts/backoff.py:14
+    def __init__(self, max_attempts=MAX_ATTEMPTS)
+    > __init__ | File: kitgolden/scripts/backoff.py
+    ← Contains RetryPolicy (Class)
+
+8 results (embedding: kit-golden-bow/bow-64)

@@ -19,8 +19,8 @@ import (
 
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/docs"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // fileTypeNodes lists the node types that represent files on disk.

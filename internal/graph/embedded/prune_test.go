@@ -8,7 +8,7 @@ import (
 
 	"github.com/dgraph-io/badger/v4"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // pruneFixture is a graph with a directory that should not have been indexed

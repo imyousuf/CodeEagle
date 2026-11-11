@@ -14,7 +14,7 @@ import (
 
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/faces"
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 func init() {

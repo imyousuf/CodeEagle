@@ -1,0 +1,5 @@
+Syncing (incremental) on branch "default"...
+[vector] Embedding provider: kit-golden-bow/bow-64 (64-dim)
+Sync complete: 0 files indexed, 51 nodes, 63 edges
+--- stderr ---
+Warning: branch cleanup failed: list local branches: list local branches: git branch --format=%(refname:short): exit status 128

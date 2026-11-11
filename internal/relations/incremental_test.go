@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 const retryDoc = "# Retry budget design\n\n## Limits\n\nClients retry at most three times. " +

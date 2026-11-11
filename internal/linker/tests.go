@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // linkTests creates EdgeTests edges between test nodes and their source counterparts.

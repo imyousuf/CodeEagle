@@ -1,0 +1,39 @@
+Knowledge Graph Status
+======================
+
+  Active branch: default
+  Total nodes:   51
+  Total edges:   63
+
+  Nodes by type:
+    Class                1
+    Constant             2
+    Date                 1
+    Dependency           10
+    Directory            1
+    Document             16
+    File                 2
+    Function             2
+    Method               6
+    Module               1
+    Month                1
+    Package              2
+    Service              1
+    Struct               2
+    TestFile             1
+    TestFunction         1
+    Year                 1
+
+  Edges by type:
+    Calls                3
+    Contains             34
+    Documents            15
+    Imports              3
+    Tests                1
+    UpdatedOn            7
+
+  Vector Search: enabled (kit-golden-bow/bow-64, 64-dim)
+    Indexed nodes:  29
+
+  Git Status:
+

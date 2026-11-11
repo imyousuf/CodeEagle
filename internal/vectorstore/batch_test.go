@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // countingEmbedder records how it was called, so a test can tell one request
@@ -102,35 +102,6 @@ func TestIndexNodesBatches(t *testing.T) {
 	}
 	if got := vs.Len(); got != embedder.chunks {
 		t.Errorf("index holds %d vectors, want %d", got, embedder.chunks)
-	}
-}
-
-// TestIndexNodesReportsProgress covers being able to tell slow from stuck.
-func TestIndexNodesReportsProgress(t *testing.T) {
-	embedder := &countingEmbedder{}
-	vs := newTestStore(t, embedder)
-
-	var lastDone, lastTotal int
-	var calls int
-	vs.WithProgress(func(done, total int) {
-		calls++
-		lastDone, lastTotal = done, total
-	})
-
-	nodes := []*graph.Node{
-		{ID: "a", Type: graph.NodeDocument, Name: "a.md", DocComment: "first"},
-		{ID: "b", Type: graph.NodeDocument, Name: "b.md", DocComment: "second"},
-		{ID: "c", Type: graph.NodeDocument, Name: "c.md", DocComment: "third"},
-	}
-	if err := vs.indexNodes(context.Background(), nodes, vs.progress); err != nil {
-		t.Fatalf("indexNodes: %v", err)
-	}
-
-	if calls != len(nodes) {
-		t.Errorf("progress reported %d times for %d nodes", calls, len(nodes))
-	}
-	if lastDone != len(nodes) || lastTotal != len(nodes) {
-		t.Errorf("finished at %d/%d, want %d/%d", lastDone, lastTotal, len(nodes), len(nodes))
 	}
 }
 

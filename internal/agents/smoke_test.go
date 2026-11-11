@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	_ "github.com/imyousuf/CodeEagle/internal/llm"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 

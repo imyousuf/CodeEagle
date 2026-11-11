@@ -1,0 +1,74 @@
+[
+  {
+    "questions": {
+      "voice_0": {
+        "Ask": "Was the voice labelled \"Person 7\" a person taking part in this meeting, or something else the microphone picked up?",
+        "Options": {
+          "background_media": "Not a person in the meeting at all — a television, a video being demonstrated, a podcast, an advertisement, a sports or news broadcast, or a conversation elsewhere that the microphone caught",
+          "cannot_tell": "There is not enough here to tell",
+          "mixed": "Both: this label holds some meeting speech and some background audio that the recorder filed together",
+          "participant": "A person taking part in the meeting"
+        }
+      }
+    },
+    "state": {
+      "duration_minutes": "2",
+      "meeting": "Retention sync",
+      "note": "Every voice here already spoke enough to look like a participant by length alone, and none of them was addressed by name or answered. Judge by what was said.",
+      "situation": "A meeting was recorded. The recorder separated the voices it heard, but some of what it heard may not be people in the meeting at all — a television, a video being demonstrated on a shared screen, a stream left running nearby.",
+      "voices": {
+        "Person 7": {
+          "first_spoke_at": "01:10",
+          "it_addressed_nobody": true,
+          "last_spoke_at": "01:38",
+          "nobody_replied_to_it": true,
+          "said": [
+            "Are you familiar with this chili? The scorpion pepper.",
+            "It has a fruity heat that builds at the back of the throat.",
+            "Now this next sauce is the one that people fear the most."
+          ],
+          "share_of_its_own_span": "0.86",
+          "speaking_seconds": "24",
+          "utterances": 3,
+          "voices_it_traded_turns_with": 1
+        }
+      }
+    }
+  },
+  {
+    "questions": {
+      "speaker_0": {
+        "Ask": "Which person is the speaker labelled \"Person 1\"? Answer \"unresolved\" unless the transcript itself establishes who they are.",
+        "Options": {
+          "Kevin Mitchell": "The transcript establishes that Person 1 is Kevin Mitchell",
+          "Mona Patel": "The transcript establishes that Person 1 is Mona Patel",
+          "Priya Shah": "The transcript establishes that Person 1 is Priya Shah",
+          "Saki Tanaka": "The transcript establishes that Person 1 is Saki Tanaka",
+          "unresolved": "The transcript does not establish who Person 1 is"
+        }
+      },
+      "speaker_1": {
+        "Ask": "Which person is the speaker labelled \"Person 2\"? Answer \"unresolved\" unless the transcript itself establishes who they are.",
+        "Options": {
+          "Kevin Mitchell": "The transcript establishes that Person 2 is Kevin Mitchell",
+          "Mona Patel": "The transcript establishes that Person 2 is Mona Patel",
+          "Priya Shah": "The transcript establishes that Person 2 is Priya Shah",
+          "Saki Tanaka": "The transcript establishes that Person 2 is Saki Tanaka",
+          "unresolved": "The transcript does not establish who Person 2 is"
+        }
+      }
+    },
+    "state": {
+      "candidate_evidence": {
+        "Person 1": "Kevin (strength 2.0) — addressed by this name, and answered in the turn that follows: \"Kevin, did the composite index get dropped?\""
+      },
+      "candidate_evidence_note": "Produced by a pattern matcher reading direct address, self-introduction, thanks and hand-offs, and resolved against the order the turns actually occurred in. Where a quote and the direction given for it fit that order, this is reliable — more so than re-reading a long transcript to work out who answered whom. It misses people who are never addressed by name, and it errs in four ways worth rejecting: a product, model or company name read as a person; a voice from a recording, video or television playing in the room; a name said in negation or doubt (\"I'm not sure if this is X\"); and a common word the transcriber capitalised. Judge the candidate on whether it names a participant in this meeting, not on whether the matcher could in principle be wrong.",
+      "date": "2026-01-01 09:00",
+      "host": "The speaker labelled \"You\" is Imran Yousuf, who made the recording. No other speaker is Imran Yousuf.",
+      "known_colleagues": "Imran Yousuf, Kevin Mitchell, Mona Patel, Priya Shah, Saki Tanaka",
+      "meeting": "Retention sync",
+      "names_mentioned": "Kevin",
+      "transcript": "[00:00] You: Morning. Shall we start with the retention job?\n[00:10] Person 1: I looked at it yesterday, the query does a full scan.\n[00:20] You: Right. Kevin, did the composite index get dropped?\n[00:30] Person 1: It did. I can put a migration up today.\n[00:40] Person 2: Before we move on, I want to flag the alerting gap.\n[00:50] You: Go ahead, Mona.\n[01:00] Person 2: We only hear about it when a customer tells us.\n[01:10] Person 7: Are you familiar with this chili? The scorpion pepper. It has a fruity heat that builds at the back of the throat. Now this next sauce is the one that people fear the most.\n"
+    }
+  }
+]

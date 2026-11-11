@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // linkAPICalls matches NodeDependency nodes with kind=api_call to

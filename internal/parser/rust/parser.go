@@ -9,8 +9,8 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/rust"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/parser"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // RustParser extracts knowledge graph nodes and edges from Rust source files.

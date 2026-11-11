@@ -1,0 +1,117 @@
+[
+  {
+    "rank": 1,
+    "id": "c5e7bd05e38dc6e9cf5cd21a",
+    "score": 0.570967,
+    "relevance": 57,
+    "type": "Struct",
+    "name": "Store",
+    "file_path": "kitgolden/src/store.go",
+    "line": 10,
+    "package": "store",
+    "language": "go",
+    "chunk_text": "Store\nPackage: store\nFile: kitgolden/src/store.go\nQualified: store.Store\nRole: repository\nPattern: repository\nLayer: data_access\nStore holds string values by key.\n",
+    "edges": [
+      {
+        "direction": "in",
+        "edge_type": "Contains",
+        "node_name": "store",
+        "node_type": "Package"
+      }
+    ]
+  },
+  {
+    "rank": 2,
+    "id": "b93bb12163dfcdcef154889c",
+    "score": 0.538930,
+    "relevance": 54,
+    "type": "Method",
+    "name": "Put",
+    "file_path": "kitgolden/src/store.go",
+    "line": 31,
+    "package": "store",
+    "language": "go",
+    "signature": "func (Store) Put(key, value string, now time.Time)",
+    "chunk_text": "Put\nPackage: store\nFile: kitgolden/src/store.go\nQualified: Store.Put\nPut stores value under key, evicting entries older than MaxAge first.\n\nfunc (Store) Put(key, value string, now time.Time)",
+    "edges": [
+      {
+        "direction": "in",
+        "edge_type": "Contains",
+        "node_name": "store",
+        "node_type": "Package"
+      }
+    ]
+  },
+  {
+    "rank": 3,
+    "id": "714a421afec96c9bfd8bf8db",
+    "score": 0.538397,
+    "relevance": 54,
+    "type": "Function",
+    "name": "NewStore",
+    "file_path": "kitgolden/src/store.go",
+    "line": 20,
+    "package": "store",
+    "language": "go",
+    "signature": "func NewStore() *Store",
+    "chunk_text": "NewStore\nPackage: store\nFile: kitgolden/src/store.go\nQualified: store.NewStore\nPattern: factory\nNewStore returns an empty store.\n\nfunc NewStore() *Store",
+    "edges": [
+      {
+        "direction": "in",
+        "edge_type": "Contains",
+        "node_name": "store",
+        "node_type": "Package"
+      },
+      {
+        "direction": "in",
+        "edge_type": "Calls",
+        "node_name": "TestGetReturnsWhatPutStored",
+        "node_type": "TestFunction"
+      }
+    ]
+  },
+  {
+    "rank": 4,
+    "id": "a1a920af1a70442f04bf1a78",
+    "score": 0.468821,
+    "relevance": 47,
+    "type": "Method",
+    "name": "evict",
+    "file_path": "kitgolden/src/store.go",
+    "line": 36,
+    "package": "store",
+    "language": "go",
+    "signature": "func (Store) evict(now time.Time)",
+    "chunk_text": "evict\nPackage: store\nFile: kitgolden/src/store.go\nQualified: Store.evict\nfunc (Store) evict(now time.Time)",
+    "edges": [
+      {
+        "direction": "in",
+        "edge_type": "Contains",
+        "node_name": "store",
+        "node_type": "Package"
+      }
+    ]
+  },
+  {
+    "rank": 5,
+    "id": "10145ffed697a81aa70a3417",
+    "score": 0.412673,
+    "relevance": 41,
+    "type": "Method",
+    "name": "Get",
+    "file_path": "kitgolden/src/store.go",
+    "line": 25,
+    "package": "store",
+    "language": "go",
+    "signature": "func (Store) Get(key string) (string, bool)",
+    "chunk_text": "Get\nPackage: store\nFile: kitgolden/src/store.go\nQualified: Store.Get\nGet returns the value for key and whether it was present.\n\nfunc (Store) Get(key string) (string, bool)",
+    "edges": [
+      {
+        "direction": "in",
+        "edge_type": "Contains",
+        "node_name": "store",
+        "node_type": "Package"
+      }
+    ]
+  }
+]

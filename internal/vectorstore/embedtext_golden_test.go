@@ -3,7 +3,7 @@ package vectorstore
 import (
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // TestEmbeddableTextIsPinned fixes the embedded text of node types that were

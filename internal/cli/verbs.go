@@ -18,12 +18,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/indexer"
 	"github.com/imyousuf/CodeEagle/internal/relations"
 	"github.com/imyousuf/CodeEagle/internal/search"
 	"github.com/imyousuf/CodeEagle/internal/vectorstore"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // verbs serves find, brief and show, for the commands and for MCP.

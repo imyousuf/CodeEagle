@@ -1,0 +1,7 @@
+kitgolden/docs/design.md § Retry Design > Backoff (lines 8–12)
+
+## Backoff
+
+Each attempt waits twice as long as the one before, starting at half a second
+and never longer than thirty seconds. The calculation lives in
+[backoff.py](../scripts/backoff.py).

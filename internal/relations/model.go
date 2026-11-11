@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // Property keys of a Relation node.

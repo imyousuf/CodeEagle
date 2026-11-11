@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/decide"
 	"github.com/imyousuf/CodeEagle/pkg/jev"
+	"github.com/imyousuf/CodeEagle/pkg/kit/decide"
 )
 
 // unresolvedOption is the answer that means "the transcript does not say".

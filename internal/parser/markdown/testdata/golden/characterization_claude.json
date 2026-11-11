@@ -1,0 +1,412 @@
+{
+  "file_path": "svc/CLAUDE.md",
+  "language": "markdown",
+  "nodes": [
+    {
+      "id": "03d0415786902d541b6cde4c",
+      "type": "Dependency",
+      "name": "overview.md",
+      "qualified_name": "",
+      "file_path": "svc/CLAUDE.md",
+      "line": 12,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "cross-reference",
+        "link_text": "the overview"
+      },
+      "metrics": null
+    },
+    {
+      "id": "12559ed9dc84fa4d526c16c0",
+      "type": "Document",
+      "name": "Setup",
+      "qualified_name": "Overview \u003e Setup",
+      "file_path": "svc/CLAUDE.md",
+      "line": 40,
+      "end_line": 45,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "The second setup section.\n\nTODO: document refunds\nFIXME   tighten retries",
+      "properties": {
+        "heading_path": "Overview \u003e Setup",
+        "kind": "section",
+        "level": "##",
+        "ordinal": "2",
+        "section_hash": "sha256:0619a3e99acac93ad533bdbc0f00a7507318540df1234970ba96acec8f0337a1"
+      },
+      "metrics": null
+    },
+    {
+      "id": "4729c2b4559bf8d16aa6957b",
+      "type": "Document",
+      "name": "Setup",
+      "qualified_name": "Overview \u003e Setup",
+      "file_path": "svc/CLAUDE.md",
+      "line": 22,
+      "end_line": 38,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "Run the [installer](../scripts/install.sh) and read [the API docs](https://example.com/api).\n\n```go\n// TODO: inside a fence, not an item\nfunc main() {}\n```\n\n```\n# Not a heading, and a fence with no language\n```",
+      "properties": {
+        "heading_path": "Overview \u003e Setup",
+        "kind": "section",
+        "level": "##",
+        "ordinal": "1",
+        "section_hash": "sha256:9e75a15749936ffc2c1cb1b3368e4bf5e5f77ccc0408a2b89d8523c8109cbd87"
+      },
+      "metrics": null
+    },
+    {
+      "id": "594734358ffae78fe5553235",
+      "type": "Document",
+      "name": "FIXME: tighten retries",
+      "qualified_name": "",
+      "file_path": "svc/CLAUDE.md",
+      "line": 45,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "todo",
+        "todo_type": "FIXME"
+      },
+      "metrics": null
+    },
+    {
+      "id": "6ae9abd5da01c8f46e6bac39",
+      "type": "Document",
+      "name": "TODO: document refunds",
+      "qualified_name": "",
+      "file_path": "svc/CLAUDE.md",
+      "line": 44,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "todo",
+        "todo_type": "TODO"
+      },
+      "metrics": null
+    },
+    {
+      "id": "7c5982f994b5266e47ed6781",
+      "type": "Document",
+      "name": "Deep heading",
+      "qualified_name": "Overview \u003e Empty \u003e Deep heading",
+      "file_path": "svc/CLAUDE.md",
+      "line": 53,
+      "end_line": 54,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "Text right under a deep heading.",
+      "properties": {
+        "heading_path": "Overview \u003e Empty \u003e Deep heading",
+        "kind": "section",
+        "level": "####",
+        "ordinal": "1",
+        "section_hash": "sha256:93d04976c612153277f12f05ca90eb55912a25eec6bb3a519aa436e4b057d950"
+      },
+      "metrics": null
+    },
+    {
+      "id": "7d2d29e28717e90fc830f5d5",
+      "type": "Document",
+      "name": "Configuration",
+      "qualified_name": "Overview \u003e Setup \u003e Configuration",
+      "file_path": "svc/CLAUDE.md",
+      "line": 35,
+      "end_line": 38,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "Set [config](./config.yaml) and [config again](./config.yaml).\nMail [us](mailto:team@example.com) or jump to [setup](#setup).",
+      "properties": {
+        "heading_path": "Overview \u003e Setup \u003e Configuration",
+        "kind": "section",
+        "level": "###",
+        "ordinal": "1",
+        "section_hash": "sha256:36e2c3595a1db631087becdce476e267d305605962d243f47b9215b94abab9d8"
+      },
+      "metrics": null
+    },
+    {
+      "id": "8993ec89eceeb3b64f607fd9",
+      "type": "Document",
+      "name": "Overview",
+      "qualified_name": "Overview",
+      "file_path": "svc/CLAUDE.md",
+      "line": 14,
+      "end_line": 45,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "The service owns capture and refund.\n\n- capture\n- refund\n- reconcile",
+      "properties": {
+        "heading_path": "Overview",
+        "kind": "section",
+        "level": "#",
+        "ordinal": "1",
+        "section_hash": "sha256:dbdec5fa4248cfe3eb3dfa681226972169f15558ad8c235206f796bf0c8b5827"
+      },
+      "metrics": null
+    },
+    {
+      "id": "92938f932d00fe36b4e48240",
+      "type": "Dependency",
+      "name": "./config.yaml",
+      "qualified_name": "",
+      "file_path": "svc/CLAUDE.md",
+      "line": 37,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "cross-reference",
+        "link_text": "config"
+      },
+      "metrics": null
+    },
+    {
+      "id": "92938f932d00fe36b4e48240",
+      "type": "Dependency",
+      "name": "./config.yaml",
+      "qualified_name": "",
+      "file_path": "svc/CLAUDE.md",
+      "line": 37,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "cross-reference",
+        "link_text": "config again"
+      },
+      "metrics": null
+    },
+    {
+      "id": "94bde6337bd53e9a22c7352e",
+      "type": "AIGuideline",
+      "name": "svc/CLAUDE.md",
+      "qualified_name": "",
+      "file_path": "svc/CLAUDE.md",
+      "line": 0,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "Payments service\n\nHow payments are captured\n\nPayments are captured asynchronously.\nSee [the overview](overview.md) first.",
+      "properties": {
+        "frontmatter:description": "'How payments are captured'",
+        "frontmatter:owner": "payments-team",
+        "frontmatter:title": "\"Payments service\""
+      },
+      "metrics": null
+    },
+    {
+      "id": "ca69a8c5945d8df97826bc78",
+      "type": "Document",
+      "name": "code:go",
+      "qualified_name": "",
+      "file_path": "svc/CLAUDE.md",
+      "line": 26,
+      "end_line": 29,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "code_language": "go",
+        "kind": "code-block"
+      },
+      "metrics": null
+    },
+    {
+      "id": "cceda88bf5d1ebbf2ff1dca8",
+      "type": "Dependency",
+      "name": "../scripts/install.sh",
+      "qualified_name": "",
+      "file_path": "svc/CLAUDE.md",
+      "line": 24,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "cross-reference",
+        "link_text": "installer"
+      },
+      "metrics": null
+    },
+    {
+      "id": "e75662cfe8e5080e8d3abbbf",
+      "type": "Document",
+      "name": "Overview",
+      "qualified_name": "Overview",
+      "file_path": "svc/CLAUDE.md",
+      "line": 47,
+      "end_line": 54,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "Closing words.",
+      "properties": {
+        "heading_path": "Overview",
+        "kind": "section",
+        "level": "#",
+        "ordinal": "2",
+        "section_hash": "sha256:552031ce054088e5a064a51ac4781be0dc41d6b5dec6bcee99427d689a386118"
+      },
+      "metrics": null
+    },
+    {
+      "id": "ea417b4915a377902ba2e114",
+      "type": "Document",
+      "name": "Empty",
+      "qualified_name": "Overview \u003e Empty",
+      "file_path": "svc/CLAUDE.md",
+      "line": 51,
+      "end_line": 54,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "heading_path": "Overview \u003e Empty",
+        "kind": "section",
+        "level": "##",
+        "ordinal": "1"
+      },
+      "metrics": null
+    }
+  ],
+  "edges": [
+    {
+      "id": "046ce24669e0e0307027ba77",
+      "type": "Contains",
+      "source_id": "94bde6337bd53e9a22c7352e",
+      "target_id": "7d2d29e28717e90fc830f5d5",
+      "properties": null
+    },
+    {
+      "id": "2bddbb84abdf49d371b77fd6",
+      "type": "Documents",
+      "source_id": "94bde6337bd53e9a22c7352e",
+      "target_id": "92938f932d00fe36b4e48240",
+      "properties": null
+    },
+    {
+      "id": "2bddbb84abdf49d371b77fd6",
+      "type": "Documents",
+      "source_id": "94bde6337bd53e9a22c7352e",
+      "target_id": "92938f932d00fe36b4e48240",
+      "properties": null
+    },
+    {
+      "id": "3e84bc5dd9474eee8227b073",
+      "type": "Contains",
+      "source_id": "94bde6337bd53e9a22c7352e",
+      "target_id": "8993ec89eceeb3b64f607fd9",
+      "properties": null
+    },
+    {
+      "id": "4cc548a7cff9548a309f7a78",
+      "type": "Contains",
+      "source_id": "94bde6337bd53e9a22c7352e",
+      "target_id": "594734358ffae78fe5553235",
+      "properties": null
+    },
+    {
+      "id": "6286e1d604ede269baea7e7b",
+      "type": "Contains",
+      "source_id": "94bde6337bd53e9a22c7352e",
+      "target_id": "7c5982f994b5266e47ed6781",
+      "properties": null
+    },
+    {
+      "id": "82620d33e365a4790fc29e24",
+      "type": "Documents",
+      "source_id": "94bde6337bd53e9a22c7352e",
+      "target_id": "03d0415786902d541b6cde4c",
+      "properties": null
+    },
+    {
+      "id": "97362758aebcb71764557c7c",
+      "type": "Contains",
+      "source_id": "94bde6337bd53e9a22c7352e",
+      "target_id": "4729c2b4559bf8d16aa6957b",
+      "properties": null
+    },
+    {
+      "id": "a424de40381230b3f94ad4c8",
+      "type": "Contains",
+      "source_id": "94bde6337bd53e9a22c7352e",
+      "target_id": "12559ed9dc84fa4d526c16c0",
+      "properties": null
+    },
+    {
+      "id": "aba147661dabfb5be54755c7",
+      "type": "Contains",
+      "source_id": "94bde6337bd53e9a22c7352e",
+      "target_id": "6ae9abd5da01c8f46e6bac39",
+      "properties": null
+    },
+    {
+      "id": "b5a46f295bc73f4b95d00dbd",
+      "type": "Contains",
+      "source_id": "94bde6337bd53e9a22c7352e",
+      "target_id": "ea417b4915a377902ba2e114",
+      "properties": null
+    },
+    {
+      "id": "d55811f232b9d6fb34868aaa",
+      "type": "Documents",
+      "source_id": "94bde6337bd53e9a22c7352e",
+      "target_id": "cceda88bf5d1ebbf2ff1dca8",
+      "properties": null
+    },
+    {
+      "id": "e9624d3bce7794f9158fcd24",
+      "type": "Contains",
+      "source_id": "94bde6337bd53e9a22c7352e",
+      "target_id": "e75662cfe8e5080e8d3abbbf",
+      "properties": null
+    },
+    {
+      "id": "ffac31c1d96f9b75b4dd0c76",
+      "type": "Contains",
+      "source_id": "94bde6337bd53e9a22c7352e",
+      "target_id": "ca69a8c5945d8df97826bc78",
+      "properties": null
+    }
+  ]
+}

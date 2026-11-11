@@ -3,7 +3,7 @@ package linker
 import (
 	"context"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // linkSymlinks resolves symlink_target properties on file nodes and creates

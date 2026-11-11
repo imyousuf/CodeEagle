@@ -7,7 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/topics"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 
@@ -36,15 +37,15 @@ import (
 const (
 	// PropTopicLevel names a topic's layer: a subject a meeting produced, or a
 	// concept induced over others.
-	PropTopicLevel = "topic_level"
+	PropTopicLevel = topics.PropTopicLevel
 	// LevelSubject is a topic as a meeting phrased it.
-	LevelSubject = "subject"
+	LevelSubject = topics.LevelSubject
 	// LevelTheme is an induced grouping.
-	LevelTheme = "theme"
+	LevelTheme = topics.LevelTheme
 
 	// PropTopicDepth is how far above the leaves a topic sits: 0 for a subject
 	// a meeting named, 1 for a concept grouping subjects, and so on.
-	PropTopicDepth = "topic_depth"
+	PropTopicDepth = topics.PropTopicDepth
 	// PropTopicReach is how many leaf subjects sit beneath a topic, which is
 	// what makes a theme's weight comparable to a subject's usage count.
 	PropTopicReach = "topic_reach"

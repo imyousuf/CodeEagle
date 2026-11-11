@@ -8,14 +8,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
+
+	"github.com/imyousuf/CodeEagle/pkg/kit/topics"
 )
 
 const (
 	defaultOllamaBaseURL   = "http://localhost:11434"
 	defaultOllamaDocsModel = "qwen3.5:9b"
-	maxExtractRetries      = 4
 	// ollamaRequestTimeout is the maximum time for a single Ollama API call.
 	// Large documents at 120K context can take 60-90s; allow headroom for
 	// cold model reloads and GPU scheduling delays.
@@ -116,7 +116,7 @@ func (o *ollamaProvider) DescribeImage(ctx context.Context, imageData []byte, mi
 
 func (o *ollamaProvider) extractWithRetry(ctx context.Context, messages []ollamaChatMessage) (*ExtractionResult, error) {
 	var lastErr error
-	for range maxExtractRetries {
+	for range topics.MaxExtractRetries {
 		// Bail if the parent context (worker pool) is cancelled.
 		if ctx.Err() != nil {
 			if lastErr != nil {
@@ -131,7 +131,7 @@ func (o *ollamaProvider) extractWithRetry(ctx context.Context, messages []ollama
 			continue // retry on all errors (timeouts, network, HTTP errors)
 		}
 		// Validate: must have >2 topics and non-placeholder summary.
-		if len(result.Topics) > 2 && !strings.Contains(result.Summary, "...") && len(result.Summary) > 20 {
+		if topics.Usable(result) {
 			return result, nil
 		}
 		// Garbage output — retry.

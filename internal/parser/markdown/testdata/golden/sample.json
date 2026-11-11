@@ -1,0 +1,410 @@
+{
+  "file_path": "testdata/sample.md",
+  "language": "markdown",
+  "nodes": [
+    {
+      "id": "05ed803f5262d70b639d6947",
+      "type": "Document",
+      "name": "Architecture Overview",
+      "qualified_name": "Architecture Overview",
+      "file_path": "testdata/sample.md",
+      "line": 10,
+      "end_line": 52,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "This document describes the system architecture.",
+      "properties": {
+        "heading_path": "Architecture Overview",
+        "kind": "section",
+        "level": "#",
+        "ordinal": "1",
+        "section_hash": "sha256:c3d627831c489a2a804f3d8767500b5be36c10292df4913757462f8c760dc603"
+      },
+      "metrics": null
+    },
+    {
+      "id": "06ea0e2f9538450663082f92",
+      "type": "Document",
+      "name": "Services",
+      "qualified_name": "Architecture Overview \u003e Services",
+      "file_path": "testdata/sample.md",
+      "line": 14,
+      "end_line": 38,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "The system consists of multiple services communicating via gRPC.\n\nSee [main.go](../cmd/main.go) for the entry point.",
+      "properties": {
+        "heading_path": "Architecture Overview \u003e Services",
+        "kind": "section",
+        "level": "##",
+        "ordinal": "1",
+        "section_hash": "sha256:c890991df526793f607e82c8c20bc83ce7d8716169a4d029228a009ce02b4f9d"
+      },
+      "metrics": null
+    },
+    {
+      "id": "1872d22e8cb8000cd091494c",
+      "type": "Document",
+      "name": "code:python",
+      "qualified_name": "",
+      "file_path": "testdata/sample.md",
+      "line": 34,
+      "end_line": 38,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "code_language": "python",
+        "kind": "code-block"
+      },
+      "metrics": null
+    },
+    {
+      "id": "2ef3153b89d7c85e41306396",
+      "type": "Document",
+      "name": "Data Model",
+      "qualified_name": "Architecture Overview \u003e Data Model",
+      "file_path": "testdata/sample.md",
+      "line": 40,
+      "end_line": 44,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "The data model is defined in [schema.sql](../migrations/schema.sql).\n\nTODO: Add diagram for entity relationships",
+      "properties": {
+        "heading_path": "Architecture Overview \u003e Data Model",
+        "kind": "section",
+        "level": "##",
+        "ordinal": "1",
+        "section_hash": "sha256:9a44d71381128ebbf612367ba9fb9e4e84c0f05ac2d08405f459927ae4920740"
+      },
+      "metrics": null
+    },
+    {
+      "id": "3de92b6ac15a15d21b20939e",
+      "type": "Document",
+      "name": "TODO: Add diagram for entity relationships",
+      "qualified_name": "",
+      "file_path": "testdata/sample.md",
+      "line": 44,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "todo",
+        "todo_type": "TODO"
+      },
+      "metrics": null
+    },
+    {
+      "id": "57f07fc54f34807da99f07e3",
+      "type": "Document",
+      "name": "Dependencies",
+      "qualified_name": "Architecture Overview \u003e Dependencies",
+      "file_path": "testdata/sample.md",
+      "line": 46,
+      "end_line": 52,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "- Go 1.24+\n- PostgreSQL 15\n- Redis 7\n\nFor more details, see the [README](../README.md).",
+      "properties": {
+        "heading_path": "Architecture Overview \u003e Dependencies",
+        "kind": "section",
+        "level": "##",
+        "ordinal": "1",
+        "section_hash": "sha256:991ee93576850b5b42dfb86ea5f7f986a0258e685083047ff7dbf0a390201eeb"
+      },
+      "metrics": null
+    },
+    {
+      "id": "5954e6e159cc556653b860fc",
+      "type": "Document",
+      "name": "code:go",
+      "qualified_name": "",
+      "file_path": "testdata/sample.md",
+      "line": 24,
+      "end_line": 28,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "code_language": "go",
+        "kind": "code-block"
+      },
+      "metrics": null
+    },
+    {
+      "id": "76cc45b53995ca1d1a55ab80",
+      "type": "Dependency",
+      "name": "../migrations/schema.sql",
+      "qualified_name": "",
+      "file_path": "testdata/sample.md",
+      "line": 42,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "cross-reference",
+        "link_text": "schema.sql"
+      },
+      "metrics": null
+    },
+    {
+      "id": "88de3b7860eaf9728e70c957",
+      "type": "Document",
+      "name": "testdata/sample.md",
+      "qualified_name": "",
+      "file_path": "testdata/sample.md",
+      "line": 0,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "Architecture Overview",
+      "properties": {
+        "frontmatter:author": "Jane Doe",
+        "frontmatter:date": "2024-01-15",
+        "frontmatter:title": "Architecture Overview"
+      },
+      "metrics": null
+    },
+    {
+      "id": "958ea35f91980b7e894e9c72",
+      "type": "Dependency",
+      "name": "../README.md",
+      "qualified_name": "",
+      "file_path": "testdata/sample.md",
+      "line": 52,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "cross-reference",
+        "link_text": "README"
+      },
+      "metrics": null
+    },
+    {
+      "id": "ac079587fe23c84227d283da",
+      "type": "Document",
+      "name": "Auth Service",
+      "qualified_name": "Architecture Overview \u003e Services \u003e Auth Service",
+      "file_path": "testdata/sample.md",
+      "line": 20,
+      "end_line": 28,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "Handles authentication and authorization. See [auth handler](../internal/auth/handler.go) for details.\n\n```go\nfunc Authenticate(ctx context.Context, token string) (*User, error) {\n    // validate token\n}\n```",
+      "properties": {
+        "heading_path": "Architecture Overview \u003e Services \u003e Auth Service",
+        "kind": "section",
+        "level": "###",
+        "ordinal": "1",
+        "section_hash": "sha256:3a8980b843f27ba91b33785a9d1c6d27d6a13f08e1600420c5b57de73201336b"
+      },
+      "metrics": null
+    },
+    {
+      "id": "b2c0d1998ce115a8577d8c79",
+      "type": "Document",
+      "name": "API Gateway",
+      "qualified_name": "Architecture Overview \u003e Services \u003e API Gateway",
+      "file_path": "testdata/sample.md",
+      "line": 30,
+      "end_line": 38,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "Routes requests to backend services. Configuration in [config.yaml](../configs/config.yaml).\n\n```python\ndef create_app():\n    app = Flask(__name__)\n    return app\n```",
+      "properties": {
+        "heading_path": "Architecture Overview \u003e Services \u003e API Gateway",
+        "kind": "section",
+        "level": "###",
+        "ordinal": "1",
+        "section_hash": "sha256:f353eafaeb72cbef9ae00a998bcecd753536232c9582721a0fcc0aa56b86e8d7"
+      },
+      "metrics": null
+    },
+    {
+      "id": "b5f46e23dc8eb303510bddfd",
+      "type": "Dependency",
+      "name": "../configs/config.yaml",
+      "qualified_name": "",
+      "file_path": "testdata/sample.md",
+      "line": 32,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "cross-reference",
+        "link_text": "config.yaml"
+      },
+      "metrics": null
+    },
+    {
+      "id": "dfcc6438c18783653cd821a6",
+      "type": "Dependency",
+      "name": "../internal/auth/handler.go",
+      "qualified_name": "",
+      "file_path": "testdata/sample.md",
+      "line": 22,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "cross-reference",
+        "link_text": "auth handler"
+      },
+      "metrics": null
+    },
+    {
+      "id": "ed2d3b077f78c7e23b0ef177",
+      "type": "Dependency",
+      "name": "../cmd/main.go",
+      "qualified_name": "",
+      "file_path": "testdata/sample.md",
+      "line": 18,
+      "end_line": 0,
+      "package": "",
+      "language": "markdown",
+      "exported": false,
+      "signature": "",
+      "doc_comment": "",
+      "properties": {
+        "kind": "cross-reference",
+        "link_text": "main.go"
+      },
+      "metrics": null
+    }
+  ],
+  "edges": [
+    {
+      "id": "078f95ac881c128ce8ef247b",
+      "type": "Contains",
+      "source_id": "88de3b7860eaf9728e70c957",
+      "target_id": "ac079587fe23c84227d283da",
+      "properties": null
+    },
+    {
+      "id": "1fd6c34a65f09fc84afd3ad9",
+      "type": "Contains",
+      "source_id": "88de3b7860eaf9728e70c957",
+      "target_id": "b2c0d1998ce115a8577d8c79",
+      "properties": null
+    },
+    {
+      "id": "27c067ba4ea609c17ca92e82",
+      "type": "Contains",
+      "source_id": "88de3b7860eaf9728e70c957",
+      "target_id": "3de92b6ac15a15d21b20939e",
+      "properties": null
+    },
+    {
+      "id": "340dc5d8da5a4b9369a72ee1",
+      "type": "Contains",
+      "source_id": "88de3b7860eaf9728e70c957",
+      "target_id": "5954e6e159cc556653b860fc",
+      "properties": null
+    },
+    {
+      "id": "4e9431928f130cb62e9d4d62",
+      "type": "Documents",
+      "source_id": "88de3b7860eaf9728e70c957",
+      "target_id": "76cc45b53995ca1d1a55ab80",
+      "properties": null
+    },
+    {
+      "id": "57be78412674754f4aeb9b87",
+      "type": "Contains",
+      "source_id": "88de3b7860eaf9728e70c957",
+      "target_id": "1872d22e8cb8000cd091494c",
+      "properties": null
+    },
+    {
+      "id": "6ea12bf6035d568d28d10210",
+      "type": "Documents",
+      "source_id": "88de3b7860eaf9728e70c957",
+      "target_id": "b5f46e23dc8eb303510bddfd",
+      "properties": null
+    },
+    {
+      "id": "917aa3f4244a40417c24919e",
+      "type": "Contains",
+      "source_id": "88de3b7860eaf9728e70c957",
+      "target_id": "05ed803f5262d70b639d6947",
+      "properties": null
+    },
+    {
+      "id": "996e5dea92148004d1f2df89",
+      "type": "Documents",
+      "source_id": "88de3b7860eaf9728e70c957",
+      "target_id": "ed2d3b077f78c7e23b0ef177",
+      "properties": null
+    },
+    {
+      "id": "a83f711166f2bb847c5b45a2",
+      "type": "Contains",
+      "source_id": "88de3b7860eaf9728e70c957",
+      "target_id": "57f07fc54f34807da99f07e3",
+      "properties": null
+    },
+    {
+      "id": "b79df58c9560920dc87dcc14",
+      "type": "Contains",
+      "source_id": "88de3b7860eaf9728e70c957",
+      "target_id": "2ef3153b89d7c85e41306396",
+      "properties": null
+    },
+    {
+      "id": "c41e3686f999f0ccc27bc4fc",
+      "type": "Documents",
+      "source_id": "88de3b7860eaf9728e70c957",
+      "target_id": "958ea35f91980b7e894e9c72",
+      "properties": null
+    },
+    {
+      "id": "c43bcd56716c9d51f360ca16",
+      "type": "Documents",
+      "source_id": "88de3b7860eaf9728e70c957",
+      "target_id": "dfcc6438c18783653cd821a6",
+      "properties": null
+    },
+    {
+      "id": "fdbd216914f19dae37bd0568",
+      "type": "Contains",
+      "source_id": "88de3b7860eaf9728e70c957",
+      "target_id": "06ea0e2f9538450663082f92",
+      "properties": null
+    }
+  ]
+}

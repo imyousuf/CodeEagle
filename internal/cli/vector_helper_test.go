@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/internal/config"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/vectorstore"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // letterEmbedder embeds text as normalised letter counts: enough to tell one

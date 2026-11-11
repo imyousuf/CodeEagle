@@ -17,6 +17,7 @@ import (
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/internal/vectorstore"
 	"github.com/imyousuf/CodeEagle/pkg/jev"
+	"github.com/imyousuf/CodeEagle/pkg/kit/topics"
 )
 
 // These tests measure, against the real corpus, whether topic relatedness can
@@ -100,12 +101,12 @@ func TestTopicMeasureCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pairs := profiles.Candidates(DefaultNearestK)
+	pairs := profiles.Candidates(topics.DefaultGenerators(DefaultNearestK)...)
 	bySource := make(map[string]int)
 	var nearestCos []float64
 	singleUse := 0
 	for _, p := range profiles.All() {
-		if len(p.Meetings) == 1 {
+		if len(p.Uses) == 1 {
 			singleUse++
 		}
 	}
@@ -168,7 +169,7 @@ func TestTopicMeasureCandidates(t *testing.T) {
 	var agiPairs []*TopicPair
 	for i := range agiTopics {
 		for j := i + 1; j < len(agiTopics); j++ {
-			agiPairs = append(agiPairs, profiles.pair(agiTopics[i], agiTopics[j]))
+			agiPairs = append(agiPairs, profiles.Pair(agiTopics[i], agiTopics[j]))
 		}
 	}
 	take("agi", agiPairs, 12)
@@ -185,7 +186,7 @@ func TestTopicMeasureCandidates(t *testing.T) {
 		if a == b {
 			continue
 		}
-		random = append(random, profiles.pair(a, b))
+		random = append(random, profiles.Pair(a, b))
 	}
 	take("random", random, 15)
 
@@ -210,9 +211,9 @@ func TestTopicMeasureCandidates(t *testing.T) {
 		id := fmt.Sprintf("P%02d", n+1)
 		rows = append(rows, samplePair{
 			ID: id, A: p.A.ID(), B: p.B.ID(), Stratum: strata[p.Key()],
-			Sources: p.Sources.String(), Cosine: p.Cosine, Rank: p.NearestRank, Shared: p.SharedMeetings,
+			Sources: p.Sources.String(), Cosine: p.Cosine, Rank: p.NearestRank, Shared: p.Shared,
 		})
-		fmt.Fprintf(w, "=== %s   (meetings filed under both: %d)\n", id, p.SharedMeetings)
+		fmt.Fprintf(w, "=== %s   (meetings filed under both: %d)\n", id, p.Shared)
 		writeTopic(w, "A", p.A)
 		writeTopic(w, "B", p.B)
 		fmt.Fprintf(w, "%s label: \n\n", id)
@@ -232,7 +233,7 @@ func writeTopic(w *bufio.Writer, side string, p *TopicProfile) {
 	if al := aliasesOf(p.Node); len(al) > 0 {
 		fmt.Fprintf(w, "   also worded: %s\n", strings.Join(al, " | "))
 	}
-	fmt.Fprintf(w, "   meetings: %d\n", len(p.Meetings))
+	fmt.Fprintf(w, "   meetings: %d\n", len(p.Uses))
 	for i, s := range p.Summaries {
 		if i >= 2 {
 			break
@@ -270,7 +271,7 @@ func TestTopicMeasureJudge(t *testing.T) {
 		if a == nil || b == nil {
 			t.Fatalf("%s: topic missing", r.ID)
 		}
-		pairs = append(pairs, profiles.pair(a, b))
+		pairs = append(pairs, profiles.Pair(a, b))
 		truth = append(truth, want)
 		kept = append(kept, r)
 	}

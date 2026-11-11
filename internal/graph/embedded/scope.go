@@ -13,7 +13,7 @@ import (
 	"github.com/dgraph-io/badger/v4"
 	"github.com/imyousuf/CodeEagle/internal/config"
 	"github.com/imyousuf/CodeEagle/internal/gitutil"
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // MeetingScope is the key scope meeting data is stored under.

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // TestResolveNodeRefRefusesToGuess covers the "AI strategy" failure: a topic

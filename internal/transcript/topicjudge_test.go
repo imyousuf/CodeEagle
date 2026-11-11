@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/pkg/jev"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // scriptedTopicAsker answers the two questions about each pair from a table
@@ -70,11 +70,11 @@ func (s *scriptedTopicAsker) Ask(_ context.Context, state any, questions jev.Que
 // profileNamed builds a bare profile for a label.
 func profileNamed(name string, meetings int) *TopicProfile {
 	p := &TopicProfile{
-		Node:     &graph.Node{ID: graph.NewNodeID(string(graph.NodeTopic), "", name), Type: graph.NodeTopic, Name: name},
-		Meetings: make(map[string]bool),
+		Node: &graph.Node{ID: graph.NewNodeID(string(graph.NodeTopic), "", name), Type: graph.NodeTopic, Name: name},
+		Uses: make(map[string]bool),
 	}
 	for i := range meetings {
-		p.Meetings[fmt.Sprintf("m%d", i)] = true
+		p.Uses[fmt.Sprintf("m%d", i)] = true
 	}
 	return p
 }
@@ -145,7 +145,7 @@ func TestTopicJudgeStateNamesFactsOnly(t *testing.T) {
 	a.Node.Properties = map[string]string{graph.PropAliases: "database migration"}
 	b := profileNamed("client rollout", 1)
 	p := pairOf(a, b)
-	p.SharedMeetings, p.Adjacent = 2, 1
+	p.Shared, p.Adjacent = 2, 1
 
 	state, questions := buildRelateState([]*TopicPair{p})
 	raw, _ := json.Marshal(state)
@@ -178,9 +178,9 @@ func TestTopicJudgeStateNamesFactsOnly(t *testing.T) {
 	if got := strings.Join(names, ","); got != "related_p0,same_p0" {
 		t.Errorf("questions = %s", got)
 	}
-	for _, q := range questions {
-		if q.Type != jev.TypeNoul {
-			t.Errorf("question is a %s, want a noul", q.Type)
+	for name, q := range questions {
+		if !q.IsYesNo() {
+			t.Errorf("question %s is a choice, want a yes/no question", name)
 		}
 	}
 }

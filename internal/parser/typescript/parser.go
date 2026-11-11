@@ -9,8 +9,8 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 	tsgrammar "github.com/smacker/go-tree-sitter/typescript/typescript"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/parser"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // TypeScriptParser extracts knowledge graph nodes and edges from TypeScript source files.

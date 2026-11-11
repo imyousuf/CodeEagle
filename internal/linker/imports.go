@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // linkImports connects import NodeDependency nodes to their corresponding

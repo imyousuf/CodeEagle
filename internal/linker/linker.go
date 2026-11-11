@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 

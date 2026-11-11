@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
 	"github.com/imyousuf/CodeEagle/pkg/jev"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // scriptedAsker answers each pair from a table keyed by the topic of the first

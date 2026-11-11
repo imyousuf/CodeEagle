@@ -2,9 +2,8 @@ package generic
 
 import (
 	"path/filepath"
-	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // EnsureDirectoryHierarchy creates NodeDirectory nodes and EdgeContains edges
@@ -94,13 +93,4 @@ func EnsureDirectoryHierarchy(filePath string, seen map[string]bool) ([]*graph.N
 	}
 
 	return nodes, edges
-}
-
-// NormalizeTopic normalizes a topic name for deduplication.
-// Lowercase, trim whitespace, collapse multiple spaces.
-func NormalizeTopic(topic string) string {
-	topic = strings.ToLower(strings.TrimSpace(topic))
-	// Collapse multiple spaces.
-	parts := strings.Fields(topic)
-	return strings.Join(parts, " ")
 }

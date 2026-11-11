@@ -1,0 +1,10 @@
+Syncing (incremental) on branch "default"...
+[queue] Enqueuing 1 jobs (1 doc-extract)
+[queue] Processing 1 jobs (max 2 workers, target CPU 70%)
+[queue] Enrichment complete: 1 done, 0 failed, 0 skipped
+[vector] Embedding provider: kit-golden-bow/bow-64 (64-dim)
+[vector] Building vector index from graph...
+[vector] Indexed 23 vectors
+Sync complete: 7 files indexed, 51 nodes, 63 edges
+--- stderr ---
+Warning: branch cleanup failed: list local branches: list local branches: git branch --format=%(refname:short): exit status 128

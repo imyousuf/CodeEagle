@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/decide"
+	"github.com/imyousuf/CodeEagle/pkg/kit/decide"
 )
 
 // Answers to the question of whether a voice was in the meeting at all.

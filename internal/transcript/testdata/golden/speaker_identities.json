@@ -1,0 +1,30 @@
+[
+  {
+    "Confidence": 1,
+    "Evidence": "microphone audio is the recording owner",
+    "Label": "You",
+    "Method": "owner_anchor",
+    "Name": "Imran Yousuf"
+  },
+  {
+    "Confidence": 0.93,
+    "Evidence": "Are you familiar with this chili? The scorpion pepper.",
+    "Label": "Person 7",
+    "Method": "background_media",
+    "Name": ""
+  },
+  {
+    "Confidence": 0.97,
+    "Evidence": "Kevin, did the composite index get dropped?",
+    "Label": "Person 1",
+    "Method": "judge",
+    "Name": "Kevin Mitchell"
+  },
+  {
+    "Confidence": 0,
+    "Evidence": "",
+    "Label": "Person 2",
+    "Method": "judge",
+    "Name": ""
+  }
+]

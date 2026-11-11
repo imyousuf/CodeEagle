@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // TestLeasedFreesTheLockBetweenUses covers a long-lived reader such as an MCP

@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // Indexer enriches a directory of recordings and projects them into the graph.

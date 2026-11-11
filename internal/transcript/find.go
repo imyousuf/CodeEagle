@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/search"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/topics"
 )
 
 // A question about meetings is nearly always "what was said about X, by
@@ -47,75 +48,37 @@ type Query struct {
 }
 
 // Breadth is how far a search follows the adjacency graph out from the
-// topics whose labels matched.
-//
-// The topics meetings produce are specific and rarely shared, so the words
-// of a question match one label and the meetings filed under it, while the
-// same conversation under a differently worded label stays invisible. The
-// adjacency graph records, per pair of labels, a decision model's
-// probability that they are about one thing; breadth is the probability a
-// search insists on before it follows such an edge, and how many it will
-// follow in a row.
-//
-// Measured against 91 hand-labelled pairs: at 0.6 every pair admitted was
-// related; at 0.5 six in seven were; no unrelated pair scored above 0.56.
-// A second hop is what reaches a label that no signal proposed against the
-// seed — the real corpus has one: two labels from different meetings under
-// different parents, related through a third.
-type Breadth string
+// topics whose labels matched: how probable an edge must be to be followed,
+// and how many in a row. See topics.Breadth for the bands and how they were
+// measured.
+type Breadth = topics.Breadth
 
 const (
 	// BreadthNone follows no edges: only the labels the words matched.
-	BreadthNone Breadth = "none"
+	BreadthNone = topics.BreadthNone
 	// BreadthNarrow follows one edge, at 0.8 or above.
-	BreadthNarrow Breadth = "narrow"
+	BreadthNarrow = topics.BreadthNarrow
 	// BreadthDefault follows one edge, at 0.6 or above.
-	BreadthDefault Breadth = "default"
+	BreadthDefault = topics.BreadthDefault
 	// BreadthWide follows two edges, each at 0.5 or above.
-	BreadthWide Breadth = "wide"
+	BreadthWide = topics.BreadthWide
 )
 
 // Breadths lists the settings a search accepts.
-var Breadths = []Breadth{BreadthNone, BreadthNarrow, BreadthDefault, BreadthWide}
+var Breadths = topics.Breadths
 
-// The edge probability each breadth insists on. Three bands rather than one
-// tuned cut, because the model's probabilities move by up to a tenth
-// between identical requests.
+// The edge probability each breadth insists on.
 const (
-	NarrowRelatedGate  = 0.8
-	DefaultRelatedGate = 0.6
-	WideRelatedGate    = 0.5
+	NarrowRelatedGate  = topics.NarrowRelatedGate
+	DefaultRelatedGate = topics.DefaultRelatedGate
+	WideRelatedGate    = topics.WideRelatedGate
 )
-
-// minProbability is the edge probability a breadth insists on.
-func (b Breadth) minProbability() float64 {
-	switch b {
-	case BreadthNarrow:
-		return NarrowRelatedGate
-	case BreadthWide:
-		return WideRelatedGate
-	default:
-		return DefaultRelatedGate
-	}
-}
-
-// hops is how many edges a breadth follows in a row.
-func (b Breadth) hops() int {
-	switch b {
-	case BreadthNone:
-		return 0
-	case BreadthWide:
-		return 2
-	default:
-		return 1
-	}
-}
 
 // relatedHopDecay scales the credit a meeting earns for each edge between
 // its label and the one the words matched, on top of the edge's own
-// probability. The label the words matched earns full credit, so a meeting
-// reached through a neighbour can never outrank one filed under the seed.
-const relatedHopDecay = 0.5
+// probability, so a meeting reached through a neighbour can never outrank
+// one filed under the seed.
+const relatedHopDecay = topics.HopDecay
 
 // MatchKind says where inside a meeting a query matched.
 type MatchKind string
@@ -251,7 +214,7 @@ func FindMeetings(ctx context.Context, store graph.Store, q Query) (*Found, erro
 	if q.Breadth == "" {
 		q.Breadth = BreadthDefault
 	}
-	if !validBreadth(q.Breadth) {
+	if !q.Breadth.Valid() {
 		return nil, fmt.Errorf("unknown breadth %q; one of %s", q.Breadth, joinBreadths())
 	}
 	m := newMatcher(q.Text, terms)
@@ -408,7 +371,7 @@ func FindMeetings(ctx context.Context, store graph.Store, q Query) (*Found, erro
 // self improvement and model regression", whose label contains none of the
 // words.
 func matchTopics(ctx context.Context, store graph.Store, m *matcher, byID, byRecording map[string]*Hit, breadth Breadth) error {
-	topics, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeTopic})
+	all, err := store.QueryNodes(ctx, graph.NodeFilter{Type: graph.NodeTopic})
 	if err != nil {
 		return err
 	}
@@ -452,8 +415,8 @@ func matchTopics(ctx context.Context, store graph.Store, m *matcher, byID, byRec
 	// Crediting before the visited check instead would credit a topic once
 	// per path that reaches it, so the evidence is swapped rather than the
 	// guard moved.
-	own := make(map[string]*Match, len(topics))
-	for _, t := range topics {
+	own := make(map[string]*Match, len(all))
+	for _, t := range all {
 		text := t.Name
 		if aliases := t.Properties[graph.PropAliases]; aliases != "" {
 			text += "\n" + aliases
@@ -484,18 +447,15 @@ func matchTopics(ctx context.Context, store graph.Store, m *matcher, byID, byRec
 		}
 	}
 
-	// The frontier holds the seeds to expand from: only topics whose label
-	// covered the whole query. A label that matched one word of "sticky
-	// board" — "HITL vs sticky notes" — carries evidence for that word
-	// alone, and following its neighbours would spread a half-match over
-	// every meeting about HITL. Measured on the real corpus that one seed
-	// pulled in nineteen meetings.
-	type seed struct {
-		topic *graph.Node
-		ev    Match
-	}
-	var frontier []seed
-	for _, t := range topics {
+	// Expansion starts only from topics whose label covered the whole
+	// query. A label that matched one word of "sticky board" — "HITL vs
+	// sticky notes" — carries evidence for that word alone, and following
+	// its neighbours would spread a half-match over every meeting about
+	// HITL. Measured on the real corpus that one seed pulled in nineteen
+	// meetings.
+	var seeds []topics.Seed
+	var seedEvidence []Match
+	for _, t := range all {
 		ev, ok := own[t.ID]
 		if !ok {
 			continue
@@ -504,50 +464,28 @@ func matchTopics(ctx context.Context, store graph.Store, m *matcher, byID, byRec
 		if !m.covers(ev) {
 			continue
 		}
-		ev.Via, ev.Probability, ev.Weight = t.Name, 1, 1
-		frontier = append(frontier, seed{t, *ev})
+		seed := *ev
+		seed.Via, seed.Probability, seed.Weight = t.Name, 1, 1
+		seeds = append(seeds, topics.Seed{Topic: t, Whole: true})
+		seedEvidence = append(seedEvidence, seed)
 	}
 
 	// A path is followed while the product of its edge probabilities stays
 	// above the gate, not merely each edge. Two edges at 0.6 compound to a
 	// relation the judge would have put at 0.36, and a second hop through a
 	// broad topic — "AGI feasibility debate ~ AI strategy ~ AI model
-	// training" — otherwise reaches every meeting under it.
-	minP, hops := breadth.minProbability(), breadth.hops()
-	best := make(map[string]float64)
-	for hop := 1; hop <= hops && len(frontier) > 0; hop++ {
-		var next []seed
-		for _, s := range frontier {
-			neighbours, err := RelatedTopics(ctx, store, s.topic.ID, minP)
-			if err != nil {
-				return err
-			}
-			for _, n := range neighbours {
-				if visited[n.Topic.ID] {
-					// The words matched it, or a theme the words matched
-					// contains it: it has full credit already.
-					continue
-				}
-				ev := s.ev
-				ev.Probability *= n.Probability
-				if ev.Probability < minP {
-					continue
-				}
-				ev.Weight *= n.Probability * relatedHopDecay
-				if ev.Weight <= best[n.Topic.ID] {
-					continue
-				}
-				best[n.Topic.ID] = ev.Weight
-				ev.Label = n.Topic.Name
-				ev.Via = s.ev.Via + " ~ " + n.Topic.Name
-				ev.Phrase = false
-				creditTopic(n.Topic, ev)
-				next = append(next, seed{n.Topic, ev})
-			}
-		}
-		frontier = next
-	}
-	return nil
+	// training" — otherwise reaches every meeting under it. A topic the
+	// words matched, or a theme they matched contains, has full credit
+	// already and is never reached.
+	credited := func(id string) bool { return visited[id] }
+	return topics.Expand(ctx, store, seeds, breadth, credited, func(r topics.Reach) {
+		ev := seedEvidence[r.Seed]
+		ev.Probability, ev.Weight = r.Probability, r.Weight
+		ev.Label = r.Topic.Name
+		ev.Via = r.Via()
+		ev.Phrase = false
+		creditTopic(r.Topic, ev)
+	})
 }
 
 // score ranks hits by how much of the query each covers. Each term weighs
@@ -716,15 +654,6 @@ func recordingKey(path, session string) string { return path + "\x00" + session 
 func validKind(k MatchKind) bool {
 	for _, kind := range MatchKinds {
 		if kind == k {
-			return true
-		}
-	}
-	return false
-}
-
-func validBreadth(b Breadth) bool {
-	for _, known := range Breadths {
-		if known == b {
 			return true
 		}
 	}

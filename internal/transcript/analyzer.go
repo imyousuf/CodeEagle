@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/decide"
 	"github.com/imyousuf/CodeEagle/internal/llmjson"
+	"github.com/imyousuf/CodeEagle/pkg/kit/decide"
 	"github.com/imyousuf/CodeEagle/pkg/llm"
 )
 

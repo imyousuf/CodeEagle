@@ -9,8 +9,8 @@ import (
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/csharp"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/parser"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // CSharpParser extracts knowledge graph nodes and edges from C# source files.

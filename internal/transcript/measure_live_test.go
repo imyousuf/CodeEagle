@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/decide"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/graph/embedded"
+	"github.com/imyousuf/CodeEagle/pkg/jev"
+	"github.com/imyousuf/CodeEagle/pkg/kit/decide"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // TestMeasureJevAgainstCorpus compares what a decision model concludes about
@@ -38,10 +39,11 @@ func TestMeasureJevAgainstCorpus(t *testing.T) {
 	sampleSize, _ := strconv.Atoi(envOr("JEV_MEASURE_N", "12"))
 	owner := envOr("JEV_MEASURE_OWNER", "Imran Yousuf")
 
-	judge, err := decide.NewJevJudge(jevKey(t), "")
+	client, err := jev.New(jevKey(t))
 	if err != nil {
 		t.Fatalf("judge: %v", err)
 	}
+	judge := decide.NewJevJudge(client)
 
 	store, err := embedded.NewReadOnlyBranchStore(dbPath, "measure",
 		[]string{"measure", embedded.MeetingScope})

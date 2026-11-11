@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // minSubjectText is the least text a document must hold to be a subject.

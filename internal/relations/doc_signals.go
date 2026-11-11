@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/imyousuf/CodeEagle/internal/search"
+	"github.com/imyousuf/CodeEagle/pkg/kit/relate"
 )
 
 // Signals that propose a pair of documents.
@@ -400,27 +401,36 @@ func docScore(c *DocCandidate) float64 {
 // first. Like meeting pairs, only the per-run cap defers; the per-document
 // cap keeps a document's best few.
 func (p *DocProposer) SelectDocs(cands []*DocCandidate, judged func(*DocCandidate) bool) (selected, deferred []*DocCandidate) {
-	perDoc := make(map[string]int)
-	for _, c := range cands {
-		if judged != nil && judged(c) {
-			c.Status = StatusJudged
-			continue
-		}
-		if p.opts.MaxPerDocument > 0 && (perDoc[c.A.Path] >= p.opts.MaxPerDocument || perDoc[c.B.Path] >= p.opts.MaxPerDocument) {
-			c.Status = StatusCut
-			continue
-		}
-		perDoc[c.A.Path]++
-		perDoc[c.B.Path]++
-		if p.opts.MaxPairs > 0 && len(selected) >= p.opts.MaxPairs {
-			c.Status = StatusDeferred
-			deferred = append(deferred, c)
-			continue
-		}
-		c.Status = StatusSelected
-		selected = append(selected, c)
+	// The kit selects; it needs only which documents each pair joins.
+	pairs := make([]*relate.Candidate, len(cands))
+	orig := make(map[*relate.Candidate]*DocCandidate, len(cands))
+	for i, c := range cands {
+		pairs[i] = &relate.Candidate{A: relate.Doc{ID: c.A.Path}, B: relate.Doc{ID: c.B.Path}}
+		orig[pairs[i]] = c
+	}
+	var isJudged func(*relate.Candidate) bool
+	if judged != nil {
+		isJudged = func(k *relate.Candidate) bool { return judged(orig[k]) }
+	}
+	sel, def := relate.Select(pairs, isJudged, p.opts.MaxPerDocument, p.opts.MaxPairs)
+	for k, c := range orig {
+		c.Status = docStatus[k.Status]
+	}
+	for _, k := range sel {
+		selected = append(selected, orig[k])
+	}
+	for _, k := range def {
+		deferred = append(deferred, orig[k])
 	}
 	return selected, deferred
+}
+
+// docStatus is what each of the kit's selection outcomes is called here.
+var docStatus = map[string]string{
+	relate.StatusSelected: StatusSelected,
+	relate.StatusJudged:   StatusJudged,
+	relate.StatusCut:      StatusCut,
+	relate.StatusDeferred: StatusDeferred,
 }
 
 // wordsInOrder reports whether every word of want appears in seq in order,

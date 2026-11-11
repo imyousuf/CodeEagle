@@ -3,6 +3,8 @@ package transcript
 import (
 	"strings"
 	"unicode"
+
+	"github.com/imyousuf/CodeEagle/pkg/kit/topics"
 )
 
 // This file decides what counts as a person's name and when two spellings
@@ -196,23 +198,7 @@ func uninvertName(s string) string {
 
 // NormalizeName reduces a name to a comparison key: lowercase, no punctuation,
 // single-spaced.
-func NormalizeName(s string) string {
-	var b strings.Builder
-	prevSpace := true
-	for _, r := range strings.TrimSpace(s) {
-		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
-			b.WriteRune(unicode.ToLower(r))
-			prevSpace = false
-		case r == ' ' || r == '-' || r == '_':
-			if !prevSpace {
-				b.WriteRune(' ')
-				prevSpace = true
-			}
-		}
-	}
-	return strings.TrimSpace(b.String())
-}
+func NormalizeName(s string) string { return topics.NormalizeName(s) }
 
 // FirstName returns the leading token of a normalized name.
 func FirstName(s string) string {
@@ -279,65 +265,7 @@ func sameNickname(a, b string) bool {
 // jaroWinkler returns the Jaro-Winkler similarity of two strings in [0,1].
 // It rewards a shared prefix, which suits transcription variants: they almost
 // always begin correctly and drift in the middle ("imran" vs "imron").
-func jaroWinkler(a, b string) float64 {
-	if a == b {
-		return 1
-	}
-	if a == "" || b == "" {
-		return 0
-	}
-	ra, rb := []rune(a), []rune(b)
-	la, lb := len(ra), len(rb)
-
-	window := max(la, lb)/2 - 1
-	if window < 0 {
-		window = 0
-	}
-
-	matchedA := make([]bool, la)
-	matchedB := make([]bool, lb)
-	matches := 0
-	for i := 0; i < la; i++ {
-		lo := max(0, i-window)
-		hi := min(lb-1, i+window)
-		for j := lo; j <= hi; j++ {
-			if matchedB[j] || ra[i] != rb[j] {
-				continue
-			}
-			matchedA[i], matchedB[j] = true, true
-			matches++
-			break
-		}
-	}
-	if matches == 0 {
-		return 0
-	}
-
-	transpositions := 0
-	k := 0
-	for i := 0; i < la; i++ {
-		if !matchedA[i] {
-			continue
-		}
-		for !matchedB[k] {
-			k++
-		}
-		if ra[i] != rb[k] {
-			transpositions++
-		}
-		k++
-	}
-	t := float64(transpositions) / 2
-	m := float64(matches)
-	jaro := (m/float64(la) + m/float64(lb) + (m-t)/m) / 3
-
-	// Winkler prefix bonus, capped at 4 characters.
-	prefix := 0
-	for prefix < 4 && prefix < la && prefix < lb && ra[prefix] == rb[prefix] {
-		prefix++
-	}
-	return jaro + float64(prefix)*0.1*(1-jaro)
-}
+func jaroWinkler(a, b string) float64 { return topics.JaroWinkler(a, b) }
 
 // asrVariantThreshold is the Jaro-Winkler score above which two first names are
 // treated as the same name misheard. It is set high: merging two distinct

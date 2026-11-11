@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/imyousuf/CodeEagle/internal/docs"
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	genericparser "github.com/imyousuf/CodeEagle/internal/parser/generic"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // DocExtractHandler handles document text extraction and topic analysis.

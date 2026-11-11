@@ -8,8 +8,8 @@ import (
 
 	toml "github.com/pelletier/go-toml/v2"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
 	"github.com/imyousuf/CodeEagle/internal/parser"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // ManifestParser extracts knowledge graph nodes and edges from project manifest

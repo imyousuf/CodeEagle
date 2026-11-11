@@ -3,7 +3,7 @@ package indexer
 import (
 	"context"
 
-	"github.com/imyousuf/CodeEagle/internal/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
 // contentHashNodeTypes lists the file-type nodes that should have content_hash.
