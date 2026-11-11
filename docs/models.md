@@ -20,10 +20,10 @@ Last reviewed: 2026-09-20.
 | Relation briefs | `transcripts.provider`, or `relations.provider` | as `transcripts.model`, or `relations.model` | `internal/cli/relations.go` |
 | Speaker adjudication, topic relating, search re-ranking, document relations, conflict checks | Jev | `jev-1.13.0` | `pkg/jev/client.go` |
 | Document and image description | `ollama` | `qwen3.5:9b` | `internal/docs/ollama.go` |
-| Document and image description, hosted | `baseten` | `zai-org/GLM-5.3-Flash` | `internal/docs/baseten.go` |
+| Document and image description, hosted | `baseten` | `zai-org/GLM-5.3-Flash` | `pkg/kit/topics/baseten/baseten.go` |
 | Document and image description, on GCP | `vertex-ai` | `gemini-3.8-flash` | `internal/docs/vertex.go` |
-| Embeddings (semantic search) | `ollama` | `nomic-embed-text-v2-moe` | `internal/embedding/ollama.go` |
-| Embeddings, on GCP | `vertex-ai` | `gemini-embedding-001` | `internal/embedding/vertex.go` |
+| Embeddings (semantic search) | `ollama` | `nomic-embed-text-v2-moe` | `pkg/kit/embedding/ollama/ollama.go` |
+| Embeddings, on GCP | `vertex-ai` | `gemini-embedding-001` | `pkg/kit/embedding/vertex/vertex.go` |
 
 Nothing here is required. With no model configured at all, indexing, `query`,
 `meetings search` and the graph work; what you lose is summarisation,
@@ -235,7 +235,7 @@ about eight minutes against a local Ollama, and free.
 2. `grep -rn "<old-identifier>" --include=*.go --include=*.md .` — tests pin
    defaults, and a stale assertion is how a bump gets reverted by accident.
 3. If an **embedding** model changed, bump `EmbeddableTextVersion` in
-   `internal/vectorstore/chunk.go` so existing indexes rebuild instead of
+   `internal/vectorstore/policy.go` so existing indexes rebuild instead of
    mixing.
 4. If the **Jev** version changed, re-record the corpus with `make jev-record`
    before shipping, or `TestCorpusProvenance` fails — correctly, because the

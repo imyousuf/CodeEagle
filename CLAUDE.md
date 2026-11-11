@@ -349,7 +349,7 @@ Design constraints that came out of measuring the real corpus:
 - **Judgment and writing are different jobs.** Choosing which of a few known
   people a voice belongs to is a bounded decision whose confidence is gated on;
   writing a summary is generation. Setting `transcripts.jev_api_key` routes only
-  the first to a decision model (`internal/decide`, `pkg/jev`), which answers
+  the first to a decision model (`pkg/kit/decide`, `pkg/jev`), which answers
   with a calibrated probability rather than a self-reported one. Titles,
   summaries, decisions and follow-ups stay with the language model. Measured
   over 70 real meetings the decision model is markedly more conservative, and
@@ -505,6 +505,41 @@ design and its measurements are in `docs/artifact-relations.md`.
   a graph that has had deletions is rebuilt before it is saved, because the
   HNSW library's Delete leaves links that load back as nil.
 
+### 4e. The Reusable Core (pkg/kit)
+
+The graph, vector search, hybrid ranking, judging, Markdown and document
+extraction, topics and document relations live in `pkg/kit`, a module of its
+own that another program can build on through interfaces it implements: its
+own graph store, embedder, judge, topic provider or vector persistence.
+
+- **CodeEagle configures the kit; it does not fork it.** Each moved package
+  keeps a thin wrapper under `internal/` (embedding, vectorstore, search,
+  parser/markdown, docs, generic, transcript, relations) that aliases the
+  kit's types and passes CodeEagle's policy: which node types are embedded
+  and how, the code-type boost, the Badger persistence, the Jev judge, the
+  exact question wording and cards. The CLI did not change.
+- **Proven unchanged, not argued unchanged.** Before anything moved, the
+  behaviour was pinned by characterization tests: a conformance suite for
+  `graph.Store` that the Badger store and the kit's in-memory store both
+  pass, byte-level goldens of `vec.db` and `vec.idx`, of every Markdown node,
+  of exact search scores, of the Jev requests each judge sends, of every
+  search-breadth band, of extraction per format, and a black-box run of
+  sync, rag, find, brief, show and status. The refactor passed them with
+  only wiring changed.
+- **The kit builds the way a consumer builds it.** `make modules-check` builds,
+  vets and tests every nested module with `GOWORK=off CGO_ENABLED=0`, and
+  fails on an import of application code or a cgo module; poppler stays in
+  CodeEagle behind its tag, reached through a per-call hook.
+- **Pinned without tags.** The application requires `pkg/kit` and `pkg/llm` at
+  pseudo-versions of pushed commits, never through `replace` (which `go
+  install …@latest` refuses); `scripts/check-module-pins.sh` fails when a pin
+  is not in the history or the module changed since it, and the repository
+  merges only with merge commits so pinned commits stay reachable. The
+  procedure is in `pkg/kit/RELEASING.md`.
+- **A judge is optional.** Every kit constructor accepts a nil judge: ranking
+  keeps its hybrid order, and nothing that needs a judgment (a topic or
+  document relation) is asserted without one.
+
 ### 5. Multi-Language Support
 
 Language parsing and graph extraction:
@@ -653,10 +688,9 @@ codeeagle/
 │   ├── cli/                # Cobra command definitions (sync, watch, query, backpop, etc.)
 │   ├── config/             # Configuration loading and validation (viper)
 │   ├── gitutil/            # Git operations (branch detection, diffs)
-│   ├── graph/              # Knowledge graph interface + embedded store (BadgerDB)
+│   ├── graph/embedded/     # The graph store: BadgerDB with secondary indexes, branch scopes, fallback reads
 │   ├── indexer/            # Orchestrates parsing -> graph updates + LLM summarization
-│   ├── decide/             # Bounded decisions with calibrated confidence (Jev-backed); speaker adjudication
-│   ├── docs/               # Document content extraction providers (Ollama, Vertex AI, Baseten) with topic extraction + caching
+│   ├── docs/               # Topic extraction providers (Ollama, Vertex AI; Baseten from the kit), registry, Badger cache
 │   ├── linker/             # Cross-service linker (14 phases: services, endpoints, API calls, deps, imports, implements, tests, calls, documents, meeting mentions, attendance, series, duplicates, symlinks)
 │   ├── llm/                # LLM provider implementations (Anthropic, Vertex AI, Claude CLI)
 │   ├── mcp/                # MCP server (JSON-RPC over stdio)
@@ -672,27 +706,40 @@ codeeagle/
 │   │   ├── csharp/         # C# parser (tree-sitter, ASP.NET support)
 │   │   ├── ruby/           # Ruby parser (tree-sitter, Rails support)
 │   │   ├── html/           # HTML parser (golang.org/x/net/html)
-│   │   ├── markdown/       # Markdown parser (line-based)
+│   │   ├── markdown/       # Markdown parser: pkg/kit/markdown behind the parser interface
 │   │   ├── makefile/       # Makefile parser (line-based, FilenameParser)
 │   │   ├── shell/          # Shell parser (tree-sitter bash)
 │   │   ├── terraform/      # Terraform parser (tree-sitter HCL)
 │   │   ├── yaml/           # YAML parser (GHA, Ansible, generic)
-│   │   ├── generic/        # Generic fallback parser for non-code files (text, images, directories, document formats); prose sections
-│   │   ├── chatlog/        # Chat log detection (JSONL histories, ChatGPT, Slack, Teams, pasted) and day sections
+│   │   ├── generic/        # Generic fallback parser for non-code files: summaries, topics, images, directories,
+│   │   │                   #   section nodes over pkg/kit/extract; the poppler PDF reader (-tags poppler)
 │   │   └── manifest/       # Manifest parser (go.mod, package.json, pyproject.toml, requirements.txt)
 │   ├── faces/              # Face detection & recognition (OpenCV DNN, Caffe SSD + ONNX SFace, agglomerative clustering, KNN classification)
 │   ├── relations/          # Discovered document <-> meeting and document <-> document relations:
 │   │                       #   proposal signals, Jev judging, per-type cited briefs, decision ledger,
 │   │                       #   freshness, and the library find/brief/show read
-│   ├── search/             # Hybrid ranking (vectors, keywords, centrality) shared by rag and find
+│   ├── search/             # pkg/kit/search with CodeEagle's ranking (embeddable policy, code-type boost)
 │   ├── queue/              # Async job queue with worker pool (face detection, clustering, document enrichment)
+│   ├── vectorstore/        # pkg/kit/vectorstore with CodeEagle's embed policy and its Badger persistence (vec.db, vec.idx)
+│   ├── embedding/          # Registers the kit's embedding providers; detects which one a project uses
 │   ├── transcript/         # Meeting transcripts: loading, speaker identification, enrichment, graph projection
 │   ├── watcher/            # Filesystem watcher (fsnotify + gitignore)
 │   ├── service/            # Installs the worker at login (systemd user unit, launchd LaunchAgent)
 │   └── worker/             # Cross-project supervisor: discovers registered projects, attributes a
 │                           #   change to the most specific one, and runs its sync in the right place
-├── pkg/jev/                # TypeSafe Jev client (decision model: noul/choice/score)
-├── pkg/llm/                # Public LLM client interface + provider registry
+├── pkg/jev/                # TypeSafe Jev client (decision model: noul/choice/score); its own module
+├── pkg/llm/                # Public LLM client interface + provider registry; its own module
+├── pkg/kit/                # The reusable core, its own module (CGO_ENABLED=0, requires no application code;
+│   │                       #   see pkg/kit/RELEASING.md for how the application pins it without tags)
+│   ├── graph/              # Node, Edge, Store, schema, Matches; graphtest (conformance suite); memstore
+│   ├── decide/             # Bounded judgments: choice and yes/no questions; JevJudge (calibrated), LLMJudge (stated)
+│   ├── embedding/          # Provider interface and registry; WithInstructions; ollama/, vertex/ providers
+│   ├── markdown/           # Markdown into section nodes (and, optionally, list-item nodes)
+│   ├── vectorstore/        # HNSW and exact vector search over a Persistence seam
+│   ├── search/             # Hybrid ranking (vectors, keywords, centrality) with ranking options
+│   ├── topics/             # Topic extraction plug-in, registry, relating through a judge, search breadth; baseten/
+│   ├── relate/             # Document <-> document judging, direction rules, gates, hash-keyed ledger
+│   └── extract/            # Text and sections from office/ODF/PDF/text files; chatlog/ formats
 ├── testdata/               # Test fixtures
 ├── go.mod
 ├── go.sum

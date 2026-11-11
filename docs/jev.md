@@ -65,7 +65,7 @@ conservative and better at refusing: it correctly rejected a speaker named
 taken from a television playing in the room. A wrong name corrupts the graph
 silently; an unidentified speaker is a correct outcome.
 
-### 2. Topic relating (`internal/transcript/topicrelate.go`)
+### 2. Topic relating (`pkg/kit/topics`, configured in `internal/transcript/topicrelate.go`)
 
 1,716 of 2,007 topic labels are used by exactly one meeting, so the topic layer
 indexes almost nothing. Four cheap generators propose topic pairs — nearest
@@ -215,6 +215,27 @@ Every recorded state is fictional, deliberately. **Never record real customer
 or meeting content into a committed fixture** — those files are public.
 
 ---
+
+## Judging through pkg/kit/decide
+
+CodeEagle's judges reach Jev through `pkg/kit/decide`, which another program
+can use with a judge of its own:
+
+- `decide.Judge` answers a batch: one shared state and one question per
+  item. A question is a choice (`Options`) or yes/no (`decide.YesNo(ask,
+  whenTrue, whenFalse)`); a yes/no verdict carries `P`, the probability of
+  yes.
+- `decide.NewJevJudge(asker)` asks any `jev.Asker`, so a caller can wrap the
+  client with quota checks or usage records. A choice becomes `jev.Choice`
+  and a yes/no question `jev.NoulWithCriteria` (or `jev.Noul` without
+  criteria), byte for byte what a direct call sends; the asker's errors come
+  back unwrapped, so `errors.Is(err, decide.ErrTooLarge)` still says trim.
+  `decide.Optional(nil)` gives no judge at all, so a caller's fallback runs.
+- `decide.NewLLMJudge(client)` answers yes/no questions with a language model
+  that states a probability per item through structured output, splitting
+  batches and averaging shuffled passes to steady it. Its numbers are the
+  model's own estimates, not calibrated: set thresholds on labelled examples,
+  and expect the four lessons above to apply only in part.
 
 ## What it cannot do
 

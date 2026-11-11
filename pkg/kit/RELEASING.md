@@ -47,7 +47,8 @@ they ship; that is their decision, not a release here.
 Generic pieces another program can reuse through interfaces it implements:
 the graph types and a conformance suite for stores, vector search over a
 persistence seam, hybrid search, bounded judgments, Markdown sections and list
-items, topics and relations. CodeEagle's own policy stays in the application:
+items, text and sections from documents and chat logs, topics, and relations
+between documents. CodeEagle's own policy stays in the application:
 which node types are embedded and how, its Badger stores, its prompts, its
 meeting-specific profiles.
 
