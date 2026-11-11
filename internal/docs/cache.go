@@ -7,6 +7,7 @@ import (
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/imyousuf/CodeEagle/internal/badgerutil"
+	"github.com/imyousuf/CodeEagle/pkg/kit/topics"
 )
 
 const (
@@ -22,6 +23,8 @@ const (
 type Cache struct {
 	db *badger.DB
 }
+
+var _ topics.Cache = (*Cache)(nil)
 
 // OpenCache opens (or creates) the docs cache at the given directory path.
 func OpenCache(dbPath string) (*Cache, error) {

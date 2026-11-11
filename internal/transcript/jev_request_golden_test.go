@@ -350,9 +350,9 @@ func goldenTopicPairs() []*TopicPair {
 		"The sticky board gets swimlanes.")
 	hitl := goldenTopicProfile("HITL vs sticky notes", "", 1, "", "Whether human review replaces sticky notes.")
 	return []*TopicPair{
-		{A: agi, B: alignment, SharedMeetings: 1, Adjacent: 2},
+		{A: agi, B: alignment, Shared: 1, Adjacent: 2},
 		{A: agi, B: rsi},
-		{A: sticky, B: hitl, SharedMeetings: 2, Adjacent: 1},
+		{A: sticky, B: hitl, Shared: 2, Adjacent: 1},
 	}
 }
 

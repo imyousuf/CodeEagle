@@ -1,49 +1,33 @@
-// Package docs provides an interface and registry for document content extraction providers.
-// It follows the same provider-registry pattern as internal/embedding/provider.go.
+// Package docs is CodeEagle's use of pkg/kit/topics for document content
+// extraction: a registry of providers under the names configuration uses
+// (Ollama, Vertex AI, and the kit's Baseten provider), detection of which one
+// a project has, and the Badger cache of results.
+//
+// The kit's types are re-exported as aliases, so the rest of CodeEagle keeps
+// one import for the interface, the registry and the cache.
 package docs
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/imyousuf/CodeEagle/pkg/kit/topics"
 )
 
-const (
-	// DefaultContextWindow is the default Ollama num_ctx value (120K tokens).
-	// qwen3.5:9b supports up to 256K; 120K covers documents up to ~336KB
-	// (estimate: 80% × 3.5 chars/token) including large PDFs.
-	DefaultContextWindow = 120000
-)
+// DefaultContextWindow is the default Ollama num_ctx value (120K tokens).
+// qwen3.5:9b supports up to 256K; 120K covers documents up to ~336KB
+// (estimate: 80% × 3.5 chars/token) including large PDFs.
+const DefaultContextWindow = topics.DefaultContextWindow
 
 // ErrExtractionSkipped is returned when topic extraction fails after max retries.
 // The file should still be indexed with raw text as fallback.
-var ErrExtractionSkipped = errors.New("extraction skipped after max retries")
+var ErrExtractionSkipped = topics.ErrExtractionSkipped
 
 // ExtractionResult holds the structured output from LLM topic extraction.
-type ExtractionResult struct {
-	// Summary is a 2-3 sentence description of the content.
-	Summary string `json:"summary"`
-	// Topics is a list of extracted topic strings (e.g., "authentication", "database schema").
-	Topics []string `json:"topics"`
-	// Entities is a list of specific names (functions, classes, packages) mentioned.
-	Entities []string `json:"entities"`
-}
+type ExtractionResult = topics.ExtractionResult
 
 // Provider extracts topics and descriptions from document content.
-type Provider interface {
-	// ExtractTopics processes text content and returns structured extraction.
-	ExtractTopics(ctx context.Context, text string) (*ExtractionResult, error)
-
-	// DescribeImage processes an image and returns structured extraction.
-	DescribeImage(ctx context.Context, imageData []byte, mimeType string) (*ExtractionResult, error)
-
-	// Name returns the provider name (e.g., "ollama", "vertex-ai").
-	Name() string
-
-	// ModelName returns the model identifier.
-	ModelName() string
-}
+type Provider = topics.Provider
 
 // Config holds configuration for creating a docs provider.
 type Config struct {

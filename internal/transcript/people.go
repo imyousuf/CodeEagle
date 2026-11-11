@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/topics"
 )
 
 // PersonRegistry resolves a name spoken in one meeting to a durable person in
@@ -89,22 +90,7 @@ func (r *PersonRegistry) index(n *graph.Node) {
 }
 
 // aliasesOf returns the alternate spellings recorded for a person.
-func aliasesOf(n *graph.Node) []string {
-	if n.Properties == nil {
-		return nil
-	}
-	raw := n.Properties[graph.PropAliases]
-	if raw == "" {
-		return nil
-	}
-	var out []string
-	for _, a := range strings.Split(raw, ",") {
-		if a = strings.TrimSpace(a); a != "" {
-			out = append(out, a)
-		}
-	}
-	return out
-}
+func aliasesOf(n *graph.Node) []string { return topics.Aliases(n) }
 
 // Created reports how many new people this registry added.
 func (r *PersonRegistry) Created() int {

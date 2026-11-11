@@ -2,12 +2,12 @@ package transcript
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/imyousuf/CodeEagle/pkg/jev"
+	"github.com/imyousuf/CodeEagle/pkg/kit/decide"
+	"github.com/imyousuf/CodeEagle/pkg/kit/topics"
 )
 
 // A pair of topics is judged with two yes/no questions rather than a choice
@@ -24,47 +24,63 @@ import (
 // Direction — which of two topics is the narrower — agreed with the labels on
 // four pairs of seven and was refused for most siblings, so it is not asked.
 
-// TopicVerdict is one judged pair.
-type TopicVerdict struct {
-	Pair *TopicPair
-	// Related is the probability that a meeting filed under either topic is
-	// worth showing to someone asking about the other: the two name one
-	// subject, one is part of the other, or both are parts of one broader
-	// subject.
-	Related float64
-	// Same is the probability that the two labels are two wordings of one
-	// subject. Faint on the real corpus — the registry already merges
-	// rewordings before a pair reaches here, so the survivors are the
-	// arguable ones — and recorded rather than gated on.
-	Same float64
-}
+// A pair of topics is judged by pkg/kit/topics, with two yes/no questions
+// put to the decision model. What is meeting-specific is here: what the model
+// is shown of a topic, and the questions' wording.
 
-// TopicJudging reports what a round of judging cost.
-type TopicJudging struct {
-	Requests    int
-	InputTokens int
-	Latency     time.Duration
-	Model       string
-}
+type (
+	// TopicVerdict is one judged pair.
+	TopicVerdict = topics.Verdict
+	// TopicJudging reports what a round of judging cost.
+	TopicJudging = topics.Judging
+	// TopicJudge decides how pairs of topics relate with a decision model.
+	TopicJudge = topics.PairJudge
+)
 
-// Add accumulates another round.
-func (j *TopicJudging) Add(o TopicJudging) {
-	j.Requests += o.Requests
-	j.InputTokens += o.InputTokens
-	j.Latency += o.Latency
-	if o.Model != "" {
-		j.Model = o.Model
-	}
-}
-
-// TopicJudge decides how pairs of topics relate with a decision model.
-type TopicJudge struct {
-	asker jev.Asker
-}
-
-// NewTopicJudge builds a judge over a decision model.
+// NewTopicJudge builds a judge over a decision model. A nil asker gives a
+// judge that answers nothing.
 func NewTopicJudge(asker jev.Asker) *TopicJudge {
-	return &TopicJudge{asker: asker}
+	return topics.NewPairJudge(topicDecider(asker), meetingJudgeOptions()...)
+}
+
+// topicDecider asks asker through decide.JevJudge, or gives no judge at all
+// for no asker -- nil, or a nil *jev.Client -- so relating asserts nothing.
+func topicDecider(asker jev.Asker) decide.Judge {
+	if c, ok := asker.(*jev.Client); asker == nil || (ok && c == nil) {
+		return nil
+	}
+	return decide.NewJevJudge(meteredAsker{asker})
+}
+
+// meteredAsker reports each reply's input tokens and model to the judge call
+// it answers. A decide.Judge returns verdicts alone, while the relater's
+// report and the judge recorded on every edge come from the reply.
+type meteredAsker struct{ jev.Asker }
+
+func (m meteredAsker) Ask(ctx context.Context, state any, questions jev.Questions) (*jev.Response, error) {
+	resp, err := m.Asker.Ask(ctx, state, questions)
+	if err == nil && resp != nil {
+		topics.MeterFrom(ctx).Record(resp.Usage.InputTokens, resp.Model)
+	}
+	return resp, err
+}
+
+// Model names the asker's pinned model, for decide.JevJudge's Name.
+func (m meteredAsker) Model() string {
+	if named, ok := m.Asker.(interface{ Model() string }); ok {
+		return named.Model()
+	}
+	return ""
+}
+
+// meetingJudgeOptions shape the kit's judge to what has always been asked:
+// meeting cards, the meeting wording, ten pairs to a request.
+func meetingJudgeOptions() []topics.Option {
+	return []topics.Option{
+		topics.WithCard(func(pairs []*topics.Pair) any { return relateCard(pairs) }),
+		topics.WithQuestions(meetingQuestions),
+		topics.WithBatchSize(maxPairsPerRequest),
+	}
 }
 
 // Bounds on one request. Ten pairs share one state, so a request carries at
@@ -113,77 +129,20 @@ type relateState struct {
 	Pairs  []pairCard  `json:"pairs"`
 }
 
-// Judge decides how each pair relates, in batches, and returns one verdict
-// per pair in the order given.
-func (j *TopicJudge) Judge(ctx context.Context, pairs []*TopicPair) ([]*TopicVerdict, TopicJudging, error) {
-	var report TopicJudging
-	if j == nil || j.asker == nil || len(pairs) == 0 {
-		return nil, report, nil
-	}
-	out := make([]*TopicVerdict, 0, len(pairs))
-	for start := 0; start < len(pairs); start += maxPairsPerRequest {
-		end := min(start+maxPairsPerRequest, len(pairs))
-		verdicts, err := j.judgeBatch(ctx, pairs[start:end], &report)
-		if err != nil {
-			return out, report, err
-		}
-		out = append(out, verdicts...)
-	}
-	return out, report, nil
-}
-
-func (j *TopicJudge) judgeBatch(ctx context.Context, pairs []*TopicPair, report *TopicJudging) ([]*TopicVerdict, error) {
-	state, questions := buildRelateState(pairs)
-	started := time.Now()
-	resp, err := j.asker.Ask(ctx, state, questions)
-	report.Latency += time.Since(started)
-	if err != nil {
-		// The size ceiling is the service's, and refusing is the only way
-		// it reports it; halving is the remedy that does not guess at
-		// tokens.
-		if errors.Is(err, jev.ErrTooLarge) && len(pairs) > 1 {
-			half := len(pairs) / 2
-			first, err := j.judgeBatch(ctx, pairs[:half], report)
-			if err != nil {
-				return nil, err
-			}
-			second, err := j.judgeBatch(ctx, pairs[half:], report)
-			if err != nil {
-				return nil, err
-			}
-			return append(first, second...), nil
-		}
-		return nil, fmt.Errorf("relate topics: %w", err)
-	}
-	report.Requests++
-	report.InputTokens += resp.Usage.InputTokens
-	report.Model = resp.Model
-
-	out := make([]*TopicVerdict, 0, len(pairs))
-	for i, p := range pairs {
-		name := pairName(i)
-		related, err := resp.Answers.Noul(relatedQuestion + name)
-		if err != nil {
-			return nil, fmt.Errorf("relate topics: %w", err)
-		}
-		same, err := resp.Answers.Noul(sameQuestion + name)
-		if err != nil {
-			return nil, fmt.Errorf("relate topics: %w", err)
-		}
-		out = append(out, &TopicVerdict{Pair: p, Related: related, Same: same})
-	}
-	return out, nil
-}
-
+// The questions asked about pair p0 are related_p0 and same_p0.
 const (
-	relatedQuestion = "related_"
-	sameQuestion    = "same_"
+	relatedQuestion = topics.RelatedQuestion
+	sameQuestion    = topics.SameQuestion
 )
 
-func pairName(i int) string { return fmt.Sprintf("p%d", i) }
-
 // buildRelateState renders a batch as one state and two questions per pair.
-func buildRelateState(pairs []*TopicPair) (*relateState, jev.Questions) {
+func buildRelateState(pairs []*TopicPair) (*relateState, map[string]decide.Question) {
+	return relateCard(pairs), meetingQuestions.For(len(pairs))
+}
+
+// relateCard renders a batch as one state: each topic once, then each pair
+// by name with what is known about it.
+func relateCard(pairs []*TopicPair) *relateState {
 	st := &relateState{}
 	seen := make(map[string]bool)
 	add := func(p *TopicProfile) {
@@ -195,7 +154,7 @@ func buildRelateState(pairs []*TopicPair) (*relateState, jev.Questions) {
 			ID:                 p.ID(),
 			Label:              p.Node.Name,
 			OtherWordings:      aliasesOf(p.Node),
-			MeetingsFiledUnder: len(p.Meetings),
+			MeetingsFiledUnder: len(p.Uses),
 		}
 		for _, s := range p.Summaries {
 			card.WhatWasSaid = append(card.WhatWasSaid, clipRunes(strings.Join(strings.Fields(s), " "), maxSummaryChars))
@@ -205,31 +164,37 @@ func buildRelateState(pairs []*TopicPair) (*relateState, jev.Questions) {
 		}
 		st.Topics = append(st.Topics, card)
 	}
-	questions := make(jev.Questions, 2*len(pairs))
 	for i, p := range pairs {
 		add(p.A)
 		add(p.B)
-		name := pairName(i)
 		st.Pairs = append(st.Pairs, pairCard{
-			Pair:                   name,
+			Pair:                   topics.PairName(i),
 			A:                      p.A.ID(),
 			B:                      p.B.ID(),
-			MeetingsFiledUnderBoth: p.SharedMeetings,
+			MeetingsFiledUnderBoth: p.Shared,
 			ConsecutiveSegments:    p.Adjacent,
 		})
-		// Both answers are spelled out as situations: against the live
-		// service, naming the two cases moves a borderline judgment
-		// measurably, and the false case is what lets the model decline.
-		questions[relatedQuestion+name] = jev.NoulWithCriteria(
+	}
+	return st
+}
+
+// meetingQuestions are the two questions asked about each pair. Both answers
+// are spelled out as situations: against the live service, naming the two
+// cases moves a borderline judgment measurably, and the false case is what
+// lets the model decline.
+var meetingQuestions = topics.Questions{
+	Related: func(name string) decide.Question {
+		return decide.YesNo(
 			fmt.Sprintf("In the pair whose id is %q, is what was said under topic a about the same thing as what was said under topic b, or about a part of it, or is a part of it?", name),
 			"a and b name one subject, or one is a part of the other, or both are parts of one broader subject; a person asking about either would want to see meetings filed under the other",
 			"a and b are about different things; a person asking about one would not want meetings filed under the other, even if a meeting happened to discuss both",
 		)
-		questions[sameQuestion+name] = jev.NoulWithCriteria(
+	},
+	Same: func(name string) decide.Question {
+		return decide.YesNo(
 			fmt.Sprintf("In the pair whose id is %q, do the labels of topic a and topic b name one subject in different words?", name),
 			"the two labels are two wordings of one subject; any meeting filed under one belongs under the other",
 			"the two labels name different subjects, however closely related",
 		)
-	}
-	return st, questions
+	},
 }

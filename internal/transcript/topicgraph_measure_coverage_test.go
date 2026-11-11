@@ -68,7 +68,7 @@ func TestTopicMeasureCoverage(t *testing.T) {
 
 	// 1. Families the shared-parent generator skipped: are their children
 	// reached by the other generators?
-	families := profiles.families()
+	families := profiles.Families()
 	var bigChildren, bigJudged, bigRelated, smallChildren, smallJudged, smallRelated int
 	var bigPairs, bigPairsJudged, bigPairsRelated int
 	for _, members := range families {
@@ -76,7 +76,7 @@ func TestTopicMeasureCoverage(t *testing.T) {
 		for i, m := range members {
 			hasJudged, hasRelated := false, false
 			for key := range judged {
-				if key.a == m.ID() || key.b == m.ID() {
+				if key.A == m.ID() || key.B == m.ID() {
 					hasJudged = true
 					break
 				}
@@ -153,10 +153,10 @@ func TestTopicMeasureCoverage(t *testing.T) {
 		keys = append(keys, k)
 	}
 	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].a != keys[j].a {
-			return keys[i].a < keys[j].a
+		if keys[i].A != keys[j].A {
+			return keys[i].A < keys[j].A
 		}
-		return keys[i].b < keys[j].b
+		return keys[i].B < keys[j].B
 	})
 	rng := rand.New(rand.NewSource(20260920))
 	rng.Shuffle(len(keys), func(i, j int) { keys[i], keys[j] = keys[j], keys[i] })
@@ -166,11 +166,11 @@ func TestTopicMeasureCoverage(t *testing.T) {
 	}
 	var pairs []*TopicPair
 	for _, k := range keys {
-		a, b := profiles.Get(k.a), profiles.Get(k.b)
+		a, b := profiles.Get(k.A), profiles.Get(k.B)
 		if a == nil || b == nil {
 			continue
 		}
-		pairs = append(pairs, profiles.pair(a, b))
+		pairs = append(pairs, profiles.Pair(a, b))
 	}
 	verdicts, report, err := NewTopicJudge(client).Judge(ctx, pairs)
 	if err != nil {
