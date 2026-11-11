@@ -1,0 +1,4 @@
+github.com/imyousuf/CodeEagle/pkg/jev v0.1.0 h1:o4A8KgDeWtGRRDQ8BYwNWN2DIpml1HwpYCTJjoyy+l8=
+github.com/imyousuf/CodeEagle/pkg/jev v0.1.0/go.mod h1:FQ9IsZFBAubHWw/ndXMTCDAICQVc4ON1lobXKQosXsM=
+github.com/imyousuf/CodeEagle/pkg/llm v0.0.0-20261111224124-7e58ed03d72d h1:YPdMzImu45barSV6583RLk922qE4FGfQqlzPmoFPvxk=
+github.com/imyousuf/CodeEagle/pkg/llm v0.0.0-20261111224124-7e58ed03d72d/go.mod h1:KC2Fh1NulWeF5yFiKO5cr6CJE8gpldNhplPi1VFn4sA=
