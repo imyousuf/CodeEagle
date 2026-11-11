@@ -25,6 +25,7 @@ import (
 
 	"github.com/imyousuf/CodeEagle/pkg/kit/embedding"
 	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/search"
 )
 
 const (
@@ -43,13 +44,11 @@ type ChunkEntry struct {
 	ChunkText  string `json:"chunk_text"`
 }
 
-// SearchResult represents a single vector search result.
-type SearchResult struct {
-	Node       *graph.Node
-	Score      float64
-	ChunkText  string
-	ChunkIndex int
-}
+// SearchResult represents a single vector search result. It is search.Hit,
+// so a Store is a search.VectorSearcher as it stands.
+type SearchResult = search.Hit
+
+var _ search.VectorSearcher = (*Store)(nil)
 
 // Store provides vector search over a graph using HNSW. It keeps vectors in
 // an index and chunk text and metadata in its Persistence.

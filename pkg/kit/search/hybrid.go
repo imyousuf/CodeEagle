@@ -4,13 +4,14 @@ import (
 	"context"
 	"strings"
 
-	"github.com/imyousuf/CodeEagle/internal/vectorstore"
 	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
 )
 
-// VectorSearcher is the part of the vector store a hybrid search needs.
+// VectorSearcher is the part of a vector index a hybrid search needs.
+// pkg/kit/vectorstore's Store is one; a caller with vectors of its own
+// implements it over them.
 type VectorSearcher interface {
-	Search(ctx context.Context, query string, topK int) ([]vectorstore.SearchResult, error)
+	Search(ctx context.Context, query string, topK int) ([]Hit, error)
 	StaleInLastSearch() int
 }
 
@@ -28,6 +29,19 @@ type HybridOptions struct {
 	Language string
 	// MinScore drops results scoring below it after reranking.
 	MinScore float64
+	// Keep, when set, keeps only the nodes it accepts, from vector and
+	// keyword matches alike, before ranking; for scoping a search to part of
+	// the graph, such as one folder.
+	Keep func(*graph.Node) bool
+	// Embeddable says which node types keyword search may return; nil means
+	// every type. It decides which nodes count towards a term's rarity, so it
+	// moves every score: give it the vector index's own policy.
+	Embeddable func(graph.NodeType) bool
+	// Weights replaces DefaultWeights.
+	Weights *Weights
+	// Boost lists the node types that earn Weights.CodeType; nil boosts
+	// none. CodeEagle boosts CodeNodeTypes.
+	Boost map[graph.NodeType]bool
 }
 
 // HybridResult is a ranked search.
@@ -36,7 +50,7 @@ type HybridResult struct {
 	// matched.
 	VectorErr error
 	// Results are the ranked results, at most Limit of them.
-	Results []vectorstore.SearchResult
+	Results []Hit
 	// Ranked is how many results there were before the limit, so a caller
 	// can say the list is not complete.
 	Ranked int
@@ -93,12 +107,19 @@ func Hybrid(ctx context.Context, store graph.Store, vs VectorSearcher, query str
 		if opts.Language != "" && !strings.EqualFold(n.Language, opts.Language) {
 			return false
 		}
-		return true
+		return opts.Keep == nil || opts.Keep(n)
 	})
 
-	keywords := KeywordSearch(ctx, store, query)
+	keywords := KeywordSearch(ctx, store, query, opts.Embeddable)
 	results, shares := InjectKeywordResults(results, keywords, opts.Types, opts.NoDocs, opts.Package, opts.Language)
-	results = RerankResults(ctx, store, results, shares)
+	if opts.Keep != nil {
+		results = filterResults(results, opts.Keep)
+	}
+	weights := DefaultWeights
+	if opts.Weights != nil {
+		weights = *opts.Weights
+	}
+	results = Rerank(ctx, store, results, shares, weights, opts.Boost)
 
 	if opts.MinScore > 0 {
 		kept := results[:0]
@@ -120,7 +141,7 @@ func Hybrid(ctx context.Context, store graph.Store, vs VectorSearcher, query str
 
 // filterResults keeps results whose node passes keep, dropping those with no
 // node at all.
-func filterResults(results []vectorstore.SearchResult, keep func(*graph.Node) bool) []vectorstore.SearchResult {
+func filterResults(results []Hit, keep func(*graph.Node) bool) []Hit {
 	out := results[:0]
 	for _, r := range results {
 		if r.Node != nil && keep(r.Node) {
