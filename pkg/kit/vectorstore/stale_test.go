@@ -6,10 +6,10 @@ import (
 	"hash/fnv"
 	"math"
 	"math/rand"
-	"path/filepath"
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph/memstore"
 )
 
 // TestSearchWidensPastStaleVectors: a vector whose node has left the graph
@@ -119,14 +119,9 @@ func (r *randomEmbedder) ModelName() string { return "random-embed" }
 // junk. The widened walk reaches at least as far as the default one, and
 // the setting is put back afterwards.
 func TestSearchAsksForMoreThanEf(t *testing.T) {
-	dir := t.TempDir()
-	graphStore := newMockGraphStore()
+	graphStore := memstore.New()
 	embedder := &randomEmbedder{dims: 32}
-	vs, err := New(graphStore, embedder, "test", filepath.Join(dir, "vec.idx"), filepath.Join(dir, "vec.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { vs.Close() })
+	vs := newTestStore(t, graphStore, embedder)
 	ctx := context.Background()
 
 	const n = hnswEf * 3

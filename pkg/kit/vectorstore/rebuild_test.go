@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/dgraph-io/badger/v4"
-
 	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
+	"github.com/imyousuf/CodeEagle/pkg/kit/graph/memstore"
 )
 
 // spreadEmbedder gives each text its own direction, so the graph has real
@@ -63,17 +61,15 @@ func spreadNodes(from, to int, version string) []*graph.Node {
 // the nodes it removed; saved and loaded, they came back nil, and the next
 // Add beside one crashed the process.
 func TestReembeddingSurvivesASaveAndLoad(t *testing.T) {
-	dir := t.TempDir()
 	ctx := context.Background()
-	store := newMockGraphStore()
+	store := memstore.New()
 	for _, n := range spreadNodes(0, 400, "v1") {
 		_ = store.AddNode(ctx, n)
 	}
-	open := func() *VectorStore {
-		vs, err := New(store, spreadEmbedder{}, "test", filepath.Join(dir, "vec.idx"), filepath.Join(dir, "vec.db"))
-		if err != nil {
-			t.Fatal(err)
-		}
+	// One persistence for every reopening, as one directory on disk would be.
+	p := NewMemoryPersistence()
+	open := func() *Store {
+		vs := New(store, spreadEmbedder{}, p, WithEmbeddable(graph.NodeDocument), WithEmbedText(testText, testTextVersion))
 		if _, err := vs.Load(); err != nil {
 			t.Fatal(err)
 		}
@@ -110,18 +106,13 @@ func TestReembeddingSurvivesASaveAndLoad(t *testing.T) {
 // was embedded, as a relation's does when its brief is rewritten: reconcile
 // embeds it again, and leaves unchanged nodes alone.
 func TestReconcileReembedsChangedText(t *testing.T) {
-	dir := t.TempDir()
 	ctx := context.Background()
-	store := newMockGraphStore()
+	store := memstore.New()
 	rel := &graph.Node{ID: "r1", Type: graph.NodeRelation, Name: "relation", DocComment: "first brief: the cap is three"}
 	doc := &graph.Node{ID: "d1", Type: graph.NodeDocument, Name: "doc", DocComment: "retry policy"}
 	_ = store.AddNode(ctx, rel)
 	_ = store.AddNode(ctx, doc)
-	vs, err := New(store, spreadEmbedder{}, "test", filepath.Join(dir, "vec.idx"), filepath.Join(dir, "vec.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer vs.Close()
+	vs := newTestStore(t, store, spreadEmbedder{})
 	if added, _, err := vs.Reconcile(ctx, 0); err != nil || added != 2 {
 		t.Fatalf("first reconcile added %d, %v", added, err)
 	}
@@ -129,6 +120,10 @@ func TestReconcileReembedsChangedText(t *testing.T) {
 		t.Errorf("an unchanged index re-embedded %d nodes", added)
 	}
 	rel.DocComment = "rewritten brief: the cap is five"
+	// The graph keeps copies, so the rewrite is written back as a brief is.
+	if err := store.UpdateNode(ctx, rel); err != nil {
+		t.Fatal(err)
+	}
 	if added, _, _ := vs.Reconcile(ctx, 0); added != 1 {
 		t.Errorf("after a rewrite, reconcile embedded %d nodes, want the relation", added)
 	}
@@ -139,7 +134,7 @@ func TestReconcileReembedsChangedText(t *testing.T) {
 	// Indexed before hashes were kept: a relation is embedded again once,
 	// anything else is left as it is.
 	for _, id := range []string{"r1", "d1"} {
-		_ = vs.vecDB.Update(func(txn *badger.Txn) error { return txn.Delete([]byte(prefixText + id)) })
+		dropTextHash(vs, id)
 	}
 	if added, _, _ := vs.Reconcile(ctx, 0); added != 1 {
 		t.Errorf("legacy index: reconcile embedded %d nodes, want only the relation", added)

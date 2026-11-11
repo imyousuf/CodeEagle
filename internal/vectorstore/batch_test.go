@@ -105,35 +105,6 @@ func TestIndexNodesBatches(t *testing.T) {
 	}
 }
 
-// TestIndexNodesReportsProgress covers being able to tell slow from stuck.
-func TestIndexNodesReportsProgress(t *testing.T) {
-	embedder := &countingEmbedder{}
-	vs := newTestStore(t, embedder)
-
-	var lastDone, lastTotal int
-	var calls int
-	vs.WithProgress(func(done, total int) {
-		calls++
-		lastDone, lastTotal = done, total
-	})
-
-	nodes := []*graph.Node{
-		{ID: "a", Type: graph.NodeDocument, Name: "a.md", DocComment: "first"},
-		{ID: "b", Type: graph.NodeDocument, Name: "b.md", DocComment: "second"},
-		{ID: "c", Type: graph.NodeDocument, Name: "c.md", DocComment: "third"},
-	}
-	if err := vs.indexNodes(context.Background(), nodes, vs.progress); err != nil {
-		t.Fatalf("indexNodes: %v", err)
-	}
-
-	if calls != len(nodes) {
-		t.Errorf("progress reported %d times for %d nodes", calls, len(nodes))
-	}
-	if lastDone != len(nodes) || lastTotal != len(nodes) {
-		t.Errorf("finished at %d/%d, want %d/%d", lastDone, lastTotal, len(nodes), len(nodes))
-	}
-}
-
 // TestIndexNodesHonoursCancellation covers giving up when the caller does,
 // which matters for a rebuild long enough that somebody will interrupt it.
 func TestIndexNodesHonoursCancellation(t *testing.T) {

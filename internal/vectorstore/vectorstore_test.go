@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/imyousuf/CodeEagle/pkg/kit/graph"
@@ -287,45 +286,6 @@ func TestVectorStoreRebuild(t *testing.T) {
 	}
 }
 
-func TestVectorStoreNeedsReindex(t *testing.T) {
-	vs, _, _ := setupTestVectorStore(t)
-
-	// No meta → needs reindex.
-	if !vs.NeedsReindex() {
-		t.Error("NeedsReindex should be true when no meta")
-	}
-
-	// Set meta matching current embedder and text.
-	vs.meta = &VectorIndexMeta{
-		Provider:    "mock",
-		Model:       "mock-embed",
-		TextVersion: EmbeddableTextVersion,
-	}
-	if vs.NeedsReindex() {
-		t.Error("NeedsReindex should be false when provider/model match")
-	}
-
-	// A version other than the current one is a text change; an index that
-	// recorded none cannot say what text it was built from, and is treated
-	// the same way.
-	for _, v := range []int{EmbeddableTextVersion - 1, 0} {
-		vs.meta.TextVersion = v
-		if !vs.NeedsReindex() {
-			t.Errorf("NeedsReindex should be true at text version %d", v)
-		}
-		if r := vs.ReindexReason(); !strings.Contains(r, "text version") {
-			t.Errorf("ReindexReason at %d = %q, want it to name the text version", v, r)
-		}
-	}
-	vs.meta.TextVersion = EmbeddableTextVersion
-
-	// Change provider in meta.
-	vs.meta.Provider = "other"
-	if !vs.NeedsReindex() {
-		t.Error("NeedsReindex should be true when provider differs")
-	}
-}
-
 func TestVectorStoreNotAvailable(t *testing.T) {
 	var vs *VectorStore
 	if vs.Available() {
@@ -364,24 +324,6 @@ func TestVectorStoreChunkedDocument(t *testing.T) {
 	}
 	if results[0].ChunkText == "" {
 		t.Error("expected non-empty chunk text in results")
-	}
-}
-
-func TestParseChunkKey(t *testing.T) {
-	tests := []struct {
-		key     string
-		wantID  string
-		wantIdx int
-	}{
-		{"abc123:0", "abc123", 0},
-		{"abc123:5", "abc123", 5},
-		{"abc123", "abc123", 0},
-	}
-	for _, tc := range tests {
-		id, idx := parseChunkKey(tc.key)
-		if id != tc.wantID || idx != tc.wantIdx {
-			t.Errorf("parseChunkKey(%q) = (%q, %d), want (%q, %d)", tc.key, id, idx, tc.wantID, tc.wantIdx)
-		}
 	}
 }
 
