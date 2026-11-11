@@ -1,11 +1,13 @@
-package embedding
+package vertex
 
 import (
 	"testing"
+
+	"github.com/imyousuf/CodeEagle/pkg/kit/embedding"
 )
 
 func TestVertexProviderRequiresProject(t *testing.T) {
-	_, err := newVertexProvider(Config{
+	_, err := New(embedding.Config{
 		Provider: "vertex-ai",
 		Location: "us-central1",
 	})
@@ -15,7 +17,7 @@ func TestVertexProviderRequiresProject(t *testing.T) {
 }
 
 func TestVertexProviderRequiresLocation(t *testing.T) {
-	_, err := newVertexProvider(Config{
+	_, err := New(embedding.Config{
 		Provider: "vertex-ai",
 		Project:  "my-project",
 	})
@@ -25,10 +27,10 @@ func TestVertexProviderRequiresLocation(t *testing.T) {
 }
 
 func TestVertexProviderDefaults(t *testing.T) {
-	if defaultVertexModel != "gemini-embedding-001" {
-		t.Errorf("default vertex model = %q, want gemini-embedding-001", defaultVertexModel)
+	if DefaultModel != "gemini-embedding-001" {
+		t.Errorf("default vertex model = %q, want gemini-embedding-001", DefaultModel)
 	}
-	if defaultVertexDims != 768 {
-		t.Errorf("default vertex dims = %d, want 768", defaultVertexDims)
+	if DefaultDimensions != 768 {
+		t.Errorf("default vertex dims = %d, want 768", DefaultDimensions)
 	}
 }

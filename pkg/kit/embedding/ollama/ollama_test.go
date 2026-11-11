@@ -1,4 +1,4 @@
-package embedding
+package ollama
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/imyousuf/CodeEagle/pkg/kit/embedding"
 )
 
 func TestOllamaEmbed(t *testing.T) {
@@ -18,7 +20,7 @@ func TestOllamaEmbed(t *testing.T) {
 			return
 		}
 
-		var req ollamaEmbedRequest
+		var req embedRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Errorf("decode request: %v", err)
 			http.Error(w, "bad request", http.StatusBadRequest)
@@ -39,13 +41,13 @@ func TestOllamaEmbed(t *testing.T) {
 			embeddings[i][0] = float32(i + 1) // distinguish each
 		}
 
-		resp := ollamaEmbedResponse{Embeddings: embeddings}
+		resp := embedResponse{Embeddings: embeddings}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
-	provider, err := newOllamaProvider(Config{
+	provider, err := New(embedding.Config{
 		OllamaBaseURL: server.URL,
 		Model:         "test-model",
 		Dimensions:    768,
@@ -85,7 +87,7 @@ func TestOllamaEmbed(t *testing.T) {
 	t.Run("EmbedQuery", func(t *testing.T) {
 		// Create a server that checks for search_query: prefix.
 		queryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var req ollamaEmbedRequest
+			var req embedRequest
 			json.NewDecoder(r.Body).Decode(&req)
 
 			if len(req.Input) != 1 {
@@ -95,12 +97,12 @@ func TestOllamaEmbed(t *testing.T) {
 				t.Errorf("expected search_query: prefix, got %q", req.Input[0])
 			}
 
-			resp := ollamaEmbedResponse{Embeddings: [][]float32{make([]float32, 768)}}
+			resp := embedResponse{Embeddings: [][]float32{make([]float32, 768)}}
 			json.NewEncoder(w).Encode(resp)
 		}))
 		defer queryServer.Close()
 
-		qProvider, _ := newOllamaProvider(Config{
+		qProvider, _ := New(embedding.Config{
 			OllamaBaseURL: queryServer.URL,
 			Model:         "test-model",
 		})
@@ -132,9 +134,42 @@ func TestOllamaEmbedError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider, _ := newOllamaProvider(Config{OllamaBaseURL: server.URL})
+	provider, _ := New(embedding.Config{OllamaBaseURL: server.URL})
 	_, err := provider.Embed(context.Background(), []string{"test"})
 	if err == nil {
 		t.Error("expected error for 404 response")
+	}
+}
+
+// TestOllamaPrefixesCanBeReplaced covers serving a model other than
+// nomic-embed-text, whose task prefixes would otherwise be added to every
+// text: WithPrefixes("", "") sends texts as given, so a caller can add the
+// model's own with embedding.WithInstructions.
+func TestOllamaPrefixesCanBeReplaced(t *testing.T) {
+	var inputs []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req embedRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		inputs = append(inputs, req.Input...)
+		_ = json.NewEncoder(w).Encode(embedResponse{Embeddings: make([][]float32, len(req.Input))})
+	}))
+	defer server.Close()
+
+	p, err := New(embedding.Config{OllamaBaseURL: server.URL, Model: "embeddinggemma"}, WithPrefixes("", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped := embedding.WithInstructions(p, "title: none | text: ", "task: search result | query: ")
+	if _, err := wrapped.Embed(context.Background(), []string{"Retry budget"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wrapped.EmbedQuery(context.Background(), "retries"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"title: none | text: Retry budget", "task: search result | query: retries"}
+	if strings.Join(inputs, "|") != strings.Join(want, "|") {
+		t.Errorf("sent %q, want %q", inputs, want)
 	}
 }

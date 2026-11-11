@@ -1,4 +1,6 @@
-package embedding
+// Package vertex embeds text with a Vertex AI embedding model through the
+// genai SDK.
+package vertex
 
 import (
 	"context"
@@ -6,12 +8,19 @@ import (
 	"os"
 
 	"google.golang.org/genai"
+
+	"github.com/imyousuf/CodeEagle/pkg/kit/embedding"
 )
 
 const (
-	defaultVertexModel = "gemini-embedding-001"
-	defaultVertexDims  = 768
+	// DefaultModel is the embedding model used when none is configured.
+	DefaultModel = "gemini-embedding-001"
+	// DefaultDimensions is the vector size requested when none is configured.
+	DefaultDimensions = 768
 )
+
+// Name is the provider's name, as Provider.Name reports it.
+const Name = "vertex-ai"
 
 type vertexProvider struct {
 	client *genai.Client
@@ -19,11 +28,13 @@ type vertexProvider struct {
 	dims   int
 }
 
-func init() {
-	RegisterProvider("vertex-ai", newVertexProvider)
-}
-
-func newVertexProvider(cfg Config) (Provider, error) {
+// New builds a Vertex AI provider from cfg's Project and Location (both
+// required), Model, Dimensions and CredentialsFile.
+//
+// A CredentialsFile is installed as GOOGLE_APPLICATION_CREDENTIALS for the
+// whole process, as CodeEagle's Vertex LLM client does; leave it empty to use
+// the environment's application default credentials untouched.
+func New(cfg embedding.Config) (embedding.Provider, error) {
 	if cfg.Project == "" {
 		return nil, fmt.Errorf("vertex-ai embedding requires project")
 	}
@@ -52,11 +63,11 @@ func newVertexProvider(cfg Config) (Provider, error) {
 
 	model := cfg.Model
 	if model == "" {
-		model = defaultVertexModel
+		model = DefaultModel
 	}
 	dims := cfg.Dimensions
 	if dims == 0 {
-		dims = defaultVertexDims
+		dims = DefaultDimensions
 	}
 
 	return &vertexProvider{
@@ -106,5 +117,5 @@ func (v *vertexProvider) EmbedQuery(ctx context.Context, text string) ([]float32
 }
 
 func (v *vertexProvider) Dimensions() int   { return v.dims }
-func (v *vertexProvider) Name() string      { return "vertex-ai" }
+func (v *vertexProvider) Name() string      { return Name }
 func (v *vertexProvider) ModelName() string { return v.model }

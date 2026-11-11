@@ -8,6 +8,7 @@ import (
 	"time"
 
 	appconfig "github.com/imyousuf/CodeEagle/internal/config"
+	"github.com/imyousuf/CodeEagle/pkg/kit/embedding/ollama"
 )
 
 // ollamaTagsResponse is the response from Ollama /api/tags endpoint.
@@ -57,11 +58,11 @@ func DetectProvider(cfg *appconfig.Config) (Provider, error) {
 func tryOllama(cfg Config) (Provider, error) {
 	baseURL := cfg.OllamaBaseURL
 	if baseURL == "" {
-		baseURL = defaultOllamaBaseURL
+		baseURL = ollama.DefaultBaseURL
 	}
 	model := cfg.Model
 	if model == "" {
-		model = defaultOllamaModel
+		model = ollama.DefaultModel
 	}
 
 	client := &http.Client{Timeout: 2 * time.Second}

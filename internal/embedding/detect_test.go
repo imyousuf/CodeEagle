@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	appconfig "github.com/imyousuf/CodeEagle/internal/config"
+	"github.com/imyousuf/CodeEagle/pkg/kit/embedding/ollama"
 )
 
 func TestDetectProviderOllama(t *testing.T) {
@@ -29,7 +30,7 @@ func TestDetectProviderOllama(t *testing.T) {
 	defer server.Close()
 
 	// Override default base URL to use test server.
-	origDefault := defaultOllamaBaseURL
+	origDefault := ollama.DefaultBaseURL
 	defer func() {
 		// Can't really override a const, but we test via config.
 		_ = origDefault

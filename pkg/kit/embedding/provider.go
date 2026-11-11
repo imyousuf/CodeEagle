@@ -1,5 +1,10 @@
-// Package embedding provides an interface and registry for text embedding providers.
-// It follows the same provider-registry pattern as pkg/llm/client.go.
+// Package embedding provides an interface and registry for text embedding
+// providers. It follows the same provider-registry pattern as pkg/llm.
+//
+// Providers live in subpackages (ollama, vertex) and do not register
+// themselves: a program registers the ones it wants, or constructs one
+// directly, so importing a provider never changes global state behind the
+// caller's back.
 package embedding
 
 import (
@@ -54,8 +59,8 @@ var (
 	registryMu sync.RWMutex
 )
 
-// RegisterProvider registers an embedding provider factory.
-// This should be called in init() functions of provider implementations.
+// RegisterProvider registers an embedding provider factory under a name, for
+// NewProvider.
 func RegisterProvider(name string, factory ProviderFactory) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
